@@ -16,7 +16,6 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 - **CMake** 3.20 or higher
 - **GCC 15.2.0** or **LLVM/Clang 20.1.8** (or both for multi-compiler support)
 - **POSIX-compliant system** (Linux)
-- **pthread** library
 - **C++26 standard support**
 
 ## Installation
@@ -227,7 +226,7 @@ kill -HUP <pid>
 ps aux | grep zwaved
 ```
 
-- **Name**: "ZWaveComm" (set via `pthread_setname_np()`)
+- **Name**: "ZWaveComm" (set via `prctl(PR_SET_NAME, ...)`)
 - **Type**: `std::thread` stored in global scope
 - **Synchronization**: Uses `std::atomic<bool>` for thread-safe stop signaling
 - **Port**: `/dev/ttyACM0` (when Z-Wave USB controller is connected)
@@ -462,8 +461,8 @@ If the hook reports clang-tidy errors, inspect the reported files and fix the is
 If certain clang-tidy warnings should not be auto-fixed, you can suppress them:
 
 ```cpp
-// NOLINT(cppcoreguidelines-pro-type-vararg)
-pthread_setname_np(t.native_handle(), "ZWaveComm");
+// NOLINT(misc-include-cleaner)
+prctl(PR_SET_NAME, "ZWaveComm", 0, 0, 0);
 ```
 
 Or disable specific checks in `.clang-tidy`:

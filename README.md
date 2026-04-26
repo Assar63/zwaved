@@ -405,22 +405,41 @@ clang-tidy --fix main.cpp -- -I.
 
 #### Pre-commit Hook
 
-To automatically fix code before committing (if using Git), create `.git/hooks/pre-commit`:
+The project includes a Git pre-commit hook script at: 
+```bash gitscripts/pre-commit``` 
 
-```bash
-#!/bin/bash
-# .git/hooks/pre-commit
-clang-format -i *.cpp
-clang-tidy --fix *.cpp -- -I.
-git add *.cpp
-exit 0
-```
+The hook checks staged new and modified C/C++ files before commit using:
 
-Make it executable:
+- `clang-format`
+- `clang-tidy`
 
-```bash
-chmod +x .git/hooks/pre-commit
-```
+It blocks the commit if formatting or static analysis errors are found.
+
+##### Enable the Pre-commit Hook
+
+From the project root, make the script executable: 
+```bash chmod +x gitscripts/pre-commit```
+
+Then link it into Git's hooks directory: 
+```bash ln -sf ../../gitscripts/pre-commit .git/hooks/pre-commit``` 
+
+##### Run the Hook Manually
+
+You can also run the hook manually before committing:
+```bash ./gitscripts/pre-commit```
+
+##### Fix Formatting Issues
+
+If the hook reports formatting errors, run:
+```bash clang-format -i src//*.cpp src//.hpp src/**/.h``` 
+
+Then stage the fixed files again:
+```bash git add <fixed-files>```
+
+##### Fix clang-tidy Issues
+
+If the hook reports clang-tidy errors, inspect the reported files and fix the issues manually, or run clang-tidy with automatic fixes where appropriate:
+```bash clang-tidy --fix path/to/file.cpp ```
 
 #### Suppressing Specific Issues
 

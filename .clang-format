@@ -1,6 +1,6 @@
 ---
 Language: Cpp
-Standard: c++26
+Standard: Latest
 IndentWidth: 4
 UseTab: Never
 ColumnLimit: 120

@@ -1,8 +1,8 @@
 #ifndef ZWAVED_ZWAVE_ACC_FRAME_HPP
 #define ZWAVED_ZWAVE_ACC_FRAME_HPP
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 /**
  * Z-Wave Acknowledgement (ACK) Frame
@@ -11,12 +11,16 @@
  */
 class ZwaveACCFrame
 {
-public:
+  public:
     // ACK frame byte
     static constexpr uint8_t ACK = 0x06;
 
-    ZwaveACCFrame() = default;
-    ~ZwaveACCFrame() = default;
+    ZwaveACCFrame()                                            = default;
+    ~ZwaveACCFrame()                                           = default;
+    ZwaveACCFrame(const ZwaveACCFrame&)                        = default;
+    auto operator=(const ZwaveACCFrame&) -> ZwaveACCFrame&     = default;
+    ZwaveACCFrame(ZwaveACCFrame&&) noexcept                    = default;
+    auto operator=(ZwaveACCFrame&&) noexcept -> ZwaveACCFrame& = default;
 
     /**
      * Parse an ACK frame from a buffer
@@ -24,24 +28,22 @@ public:
      * @param length Length of buffer (must be at least 1)
      * @return true if valid ACK frame was parsed, false otherwise
      */
-    [[nodiscard]] bool parseFromBuffer(const uint8_t* buffer, size_t length);
+    [[nodiscard]] auto parseFromBuffer(const uint8_t* buffer, size_t length) -> bool;
 
     /**
      * Get the ACK byte
      * @return ACK byte (0x06)
      */
-    [[nodiscard]] static uint8_t toByte();
+    [[nodiscard]] static auto toByte() -> uint8_t;
 
     /**
      * Check if frame is valid
      * @return true if frame is valid
      */
-    [[nodiscard]] bool isValid() const;
+    [[nodiscard]] auto isValid() const -> bool;
 
-private:
+  private:
     bool valid = false;
 };
 
-#endif // ZWAVED_ZWAVE_ACC_FRAME_HPP
-
-
+#endif  // ZWAVED_ZWAVE_ACC_FRAME_HPP

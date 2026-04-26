@@ -1,8 +1,8 @@
 #ifndef ZWAVED_ZWAVE_CAN_FRAME_HPP
 #define ZWAVED_ZWAVE_CAN_FRAME_HPP
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 /**
  * Z-Wave CAN (Cancel) Frame
@@ -11,12 +11,16 @@
  */
 class ZwaveCANFrame
 {
-public:
+  public:
     // CAN frame byte
     static constexpr uint8_t CAN = 0x18;
 
-    ZwaveCANFrame() = default;
-    ~ZwaveCANFrame() = default;
+    ZwaveCANFrame()                                            = default;
+    ~ZwaveCANFrame()                                           = default;
+    ZwaveCANFrame(const ZwaveCANFrame&)                        = default;
+    auto operator=(const ZwaveCANFrame&) -> ZwaveCANFrame&     = default;
+    ZwaveCANFrame(ZwaveCANFrame&&) noexcept                    = default;
+    auto operator=(ZwaveCANFrame&&) noexcept -> ZwaveCANFrame& = default;
 
     /**
      * Parse a CAN frame from a buffer
@@ -24,24 +28,22 @@ public:
      * @param length Length of buffer (must be at least 1)
      * @return true if valid CAN frame was parsed, false otherwise
      */
-    [[nodiscard]] bool parseFromBuffer(const uint8_t* buffer, size_t length);
+    [[nodiscard]] auto parseFromBuffer(const uint8_t* buffer, size_t length) -> bool;
 
     /**
      * Get the CAN byte
      * @return CAN byte (0x18)
      */
-    [[nodiscard]] static uint8_t toByte();
+    [[nodiscard]] static auto toByte() -> uint8_t;
 
     /**
      * Check if frame is valid
      * @return true if frame is valid
      */
-    [[nodiscard]] bool isValid() const;
+    [[nodiscard]] auto isValid() const -> bool;
 
-private:
+  private:
     bool valid = false;
 };
 
-#endif // ZWAVED_ZWAVE_CAN_FRAME_HPP
-
-
+#endif  // ZWAVED_ZWAVE_CAN_FRAME_HPP

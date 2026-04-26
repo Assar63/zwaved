@@ -1,7 +1,8 @@
 #include "ZwaveACCFrame.hpp"
+#include <cstddef>
 #include <cstdint>
 
-bool ZwaveACCFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
+auto ZwaveACCFrame::parseFromBuffer(const uint8_t* buffer, const size_t length) -> bool
 {
     if (buffer == nullptr || length < 1)
     {
@@ -19,14 +20,12 @@ bool ZwaveACCFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
     return true;
 }
 
-uint8_t ZwaveACCFrame::toByte()
+auto ZwaveACCFrame::toByte() -> uint8_t
 {
     return ACK;
 }
 
-bool ZwaveACCFrame::isValid() const
+auto ZwaveACCFrame::isValid() const -> bool
 {
     return valid;
 }
-
-

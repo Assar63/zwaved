@@ -1,8 +1,8 @@
 #ifndef ZWAVED_ZWAVE_NAK_FRAME_HPP
 #define ZWAVED_ZWAVE_NAK_FRAME_HPP
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
 /**
  * Z-Wave Negative Acknowledgement (NAK) Frame
@@ -11,12 +11,16 @@
  */
 class ZwaveNAKFrame
 {
-public:
+  public:
     // NAK frame byte
     static constexpr uint8_t NAK = 0x15;
 
-    ZwaveNAKFrame() = default;
-    ~ZwaveNAKFrame() = default;
+    ZwaveNAKFrame()                                            = default;
+    ~ZwaveNAKFrame()                                           = default;
+    ZwaveNAKFrame(const ZwaveNAKFrame&)                        = default;
+    auto operator=(const ZwaveNAKFrame&) -> ZwaveNAKFrame&     = default;
+    ZwaveNAKFrame(ZwaveNAKFrame&&) noexcept                    = default;
+    auto operator=(ZwaveNAKFrame&&) noexcept -> ZwaveNAKFrame& = default;
 
     /**
      * Parse a NAK frame from a buffer
@@ -24,24 +28,22 @@ public:
      * @param length Length of buffer (must be at least 1)
      * @return true if valid NAK frame was parsed, false otherwise
      */
-    [[nodiscard]] bool parseFromBuffer(const uint8_t* buffer, size_t length);
+    [[nodiscard]] auto parseFromBuffer(const uint8_t* buffer, size_t length) -> bool;
 
     /**
      * Get the NAK byte
      * @return NAK byte (0x15)
      */
-    [[nodiscard]] static uint8_t toByte();
+    [[nodiscard]] static auto toByte() -> uint8_t;
 
     /**
      * Check if frame is valid
      * @return true if frame is valid
      */
-    [[nodiscard]] bool isValid() const;
+    [[nodiscard]] auto isValid() const -> bool;
 
-private:
+  private:
     bool valid = false;
 };
 
-#endif // ZWAVED_ZWAVE_NAK_FRAME_HPP
-
-
+#endif  // ZWAVED_ZWAVE_NAK_FRAME_HPP

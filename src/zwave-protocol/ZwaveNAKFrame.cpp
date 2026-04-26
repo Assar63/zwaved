@@ -1,7 +1,8 @@
 #include "ZwaveNAKFrame.hpp"
+#include <cstddef>
 #include <cstdint>
 
-bool ZwaveNAKFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
+auto ZwaveNAKFrame::parseFromBuffer(const uint8_t* buffer, const size_t length) -> bool
 {
     if (buffer == nullptr || length < 1)
     {
@@ -19,14 +20,12 @@ bool ZwaveNAKFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
     return true;
 }
 
-uint8_t ZwaveNAKFrame::toByte()
+auto ZwaveNAKFrame::toByte() -> uint8_t
 {
     return NAK;
 }
 
-bool ZwaveNAKFrame::isValid() const
+auto ZwaveNAKFrame::isValid() const -> bool
 {
     return valid;
 }
-
-

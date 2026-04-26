@@ -58,6 +58,20 @@ cmake --preset llvm
 cmake --build cmake-build-llvm
 ```
 
+#### With clang-tidy integrated (analysis during build)
+
+Two additional presets run clang-tidy automatically on every source file as part of compilation. Tidy errors fail the build, just like compiler errors. Only changed files are re-checked on incremental builds.
+
+```bash
+# GCC 15 + clang-tidy
+cmake --preset gnu-tidy
+cmake --build cmake-build-gnu-tidy
+
+# LLVM/Clang 20 + clang-tidy
+cmake --preset llvm-tidy
+cmake --build cmake-build-llvm-tidy
+```
+
 ### Manual Configuration
 
 #### With GCC 15
@@ -348,6 +362,8 @@ cmake --build . --target check
 ```
 
 These targets work with both build systems (also available for `cmake-build-llvm`).
+
+Alternatively, use the `gnu-tidy` or `llvm-tidy` presets to run clang-tidy automatically on every file during the build, with incremental re-checking on subsequent builds (see [With clang-tidy integrated](#with-clang-tidy-integrated-analysis-during-build)).
 
 #### Manual Command Line Approach
 

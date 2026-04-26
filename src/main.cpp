@@ -1,20 +1,13 @@
+#include "SignalHandler.hpp"
+#include <chrono>
 #include <iostream>
 #include <thread>
-#include <chrono>
-#include <atomic>
-#include "SignalHandler.hpp"
 
-int main()
+auto main() -> int
 {
     const auto* const lang = "C++";
     std::cout << "Hello and welcome to " << lang << "!\n";
-
-    for (int i = 1; i <= 5; i++)
-    {
-        std::cout << "i = " << i << '\n';
-    }
-
-    while (applicationRunning)
+    while (isApplicationRunning())
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }

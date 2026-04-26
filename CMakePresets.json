@@ -20,7 +20,27 @@
       "binaryDir": "cmake-build-gnu",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+      }
+    },
+    {
+      "name": "llvm-tidy",
+      "displayName": "LLVM Clang 20 + clang-tidy",
+      "description": "Configure with LLVM Clang 20.1.8 and clang-tidy analysis during build",
+      "inherits": "llvm",
+      "binaryDir": "cmake-build-llvm-tidy",
+      "cacheVariables": {
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy"
+      }
+    },
+    {
+      "name": "gnu-tidy",
+      "displayName": "GNU GCC 15 + clang-tidy",
+      "description": "Configure with GNU GCC 15.2.0 and clang-tidy analysis during build",
+      "inherits": "gnu",
+      "binaryDir": "cmake-build-gnu-tidy",
+      "cacheVariables": {
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy"
       }
     }
   ]

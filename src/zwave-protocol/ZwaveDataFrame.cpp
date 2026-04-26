@@ -1,6 +1,9 @@
 #include "ZwaveDataFrame.hpp"
+#include <cstddef>
+#include <cstdint>
+#include <vector>
 
-bool ZwaveDataFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
+auto ZwaveDataFrame::parseFromBuffer(const uint8_t* buffer, const size_t length) -> bool
 {
     // Check minimum size
     if (buffer == nullptr || length < MIN_FRAME_SIZE)
@@ -20,14 +23,14 @@ bool ZwaveDataFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
     const uint8_t frameLength = buffer[1];
 
     // Validate frame length
-    if (frameLength < 3 || frameLength > MAX_PAYLOAD_SIZE + 2) // Min: Type(1) + Cmd(1) + Checksum(1)
+    if (frameLength < 3 || frameLength > MAX_PAYLOAD_SIZE + 2)  // Min: Type(1) + Cmd(1) + Checksum(1)
     {
         valid = false;
         return false;
     }
 
     // Check that buffer contains complete frame
-    if (length < static_cast<size_t>(frameLength + 3)) // SOF + Length + frameLength + Checksum
+    if (length < static_cast<size_t>(frameLength + 3))  // SOF + Length + frameLength + Checksum
     {
         valid = false;
         return false;
@@ -46,7 +49,7 @@ bool ZwaveDataFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
     commandId = buffer[3];
 
     // Extract payload
-    const size_t payloadSize = frameLength - 2; // frameLength - Type - Cmd - Checksum (checksum is separate)
+    const size_t payloadSize = frameLength - 2;  // frameLength - Type - Cmd - Checksum (checksum is separate)
     payload.clear();
     if (payloadSize > 0)
     {
@@ -65,12 +68,12 @@ bool ZwaveDataFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
     return true;
 }
 
-std::vector<uint8_t> ZwaveDataFrame::toBuffer() const
+auto ZwaveDataFrame::toBuffer() const -> std::vector<uint8_t>
 {
     std::vector<uint8_t> buffer;
 
     // Frame length = Type + Cmd + Payload + Checksum
-    const uint8_t frameLength = static_cast<uint8_t>(2 + payload.size() + 1);
+    const auto frameLength = static_cast<uint8_t>(2 + payload.size() + 1);
 
     // Add SOF
     buffer.push_back(SOF);
@@ -93,14 +96,14 @@ std::vector<uint8_t> ZwaveDataFrame::toBuffer() const
     return buffer;
 }
 
-void ZwaveDataFrame::setHeader(const FrameType type, const uint8_t cmd)
+auto ZwaveDataFrame::setHeader(const FrameType type, const uint8_t cmd) -> void
 {
     frameType = type;
     commandId = cmd;
-    valid = true;
+    valid     = true;
 }
 
-bool ZwaveDataFrame::setPayload(const uint8_t* data, const size_t size)
+auto ZwaveDataFrame::setPayload(const uint8_t* data, const size_t size) -> bool
 {
     if (size > MAX_PAYLOAD_SIZE)
     {
@@ -117,17 +120,17 @@ bool ZwaveDataFrame::setPayload(const uint8_t* data, const size_t size)
     return true;
 }
 
-ZwaveDataFrame::FrameType ZwaveDataFrame::getType() const
+auto ZwaveDataFrame::getType() const -> FrameType
 {
     return frameType;
 }
 
-uint8_t ZwaveDataFrame::getCommand() const
+auto ZwaveDataFrame::getCommand() const -> uint8_t
 {
     return commandId;
 }
 
-const uint8_t* ZwaveDataFrame::getPayload() const
+auto ZwaveDataFrame::getPayload() const -> const uint8_t*
 {
     if (payload.empty())
     {
@@ -136,22 +139,22 @@ const uint8_t* ZwaveDataFrame::getPayload() const
     return payload.data();
 }
 
-size_t ZwaveDataFrame::getPayloadSize() const
+auto ZwaveDataFrame::getPayloadSize() const -> size_t
 {
     return payload.size();
 }
 
-bool ZwaveDataFrame::isValid() const
+auto ZwaveDataFrame::isValid() const -> bool
 {
     return valid;
 }
 
-uint8_t ZwaveDataFrame::calculateChecksum() const
+auto ZwaveDataFrame::calculateChecksum() const -> uint8_t
 {
     uint8_t checksum = 0;
 
     // Start with frame length
-    const uint8_t frameLength = static_cast<uint8_t>(2 + payload.size() + 1);
+    const auto frameLength = static_cast<uint8_t>(2 + payload.size() + 1);
     checksum ^= frameLength;
 
     // XOR with frame type
@@ -169,8 +172,7 @@ uint8_t ZwaveDataFrame::calculateChecksum() const
     return checksum;
 }
 
-bool ZwaveDataFrame::validateChecksum(const uint8_t checksum) const
+auto ZwaveDataFrame::validateChecksum(const uint8_t checksum) const -> bool
 {
     return checksum == calculateChecksum();
 }
-

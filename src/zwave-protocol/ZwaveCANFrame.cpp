@@ -1,6 +1,8 @@
 #include "ZwaveCANFrame.hpp"
+#include <cstddef>
+#include <cstdint>
 
-bool ZwaveCANFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
+auto ZwaveCANFrame::parseFromBuffer(const uint8_t* buffer, const size_t length) -> bool
 {
     if (buffer == nullptr || length < 1)
     {
@@ -18,14 +20,12 @@ bool ZwaveCANFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
     return true;
 }
 
-uint8_t ZwaveCANFrame::toByte()
+auto ZwaveCANFrame::toByte() -> uint8_t
 {
     return CAN;
 }
 
-bool ZwaveCANFrame::isValid() const
+auto ZwaveCANFrame::isValid() const -> bool
 {
     return valid;
 }
-
-

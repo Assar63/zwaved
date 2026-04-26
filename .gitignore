@@ -1,0 +1,6 @@
+# CLion IDE
+.idea/
+*.iml
+*.iws
+cmake-*/
+build*/

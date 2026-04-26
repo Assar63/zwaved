@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "llvm",
+      "displayName": "LLVM Clang 20",
+      "description": "Configure with LLVM Clang 20.1.8",
+      "toolchainFile": ".cmake/llvm-toolchain.cmake",
+      "binaryDir": "cmake-build-llvm",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "gnu",
+      "displayName": "GNU GCC 15",
+      "description": "Configure with GNU GCC 15.2.0",
+      "toolchainFile": ".cmake/gnu-toolchain.cmake",
+      "binaryDir": "cmake-build-gnu",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    }
+  ]
+}

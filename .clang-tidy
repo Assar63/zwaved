@@ -1,0 +1,46 @@
+---
+Checks: >
+  -header-filter=.*,
+  -fuchsia-*,
+  -google-runtime-int,
+  bugprone-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  google-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-avoid-c-arrays,
+  -google-runtime-references,
+  -readability-magic-numbers
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*'
+FormatStyle: file
+
+CheckOptions:
+  - key: bugprone-exception-escape.FunctionsThatShouldNotThrow
+    value: 'pthread_setname_np,std::thread'
+  - key: cppcoreguidelines-init-variables.MathHeader
+    value: '<cmath>'
+  - key: readability-identifier-naming.ClassCase
+    value: 'UpperCamelCase'
+  - key: readability-identifier-naming.FunctionCase
+    value: 'camelBack'
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: 'UPPER_CASE'
+  - key: readability-identifier-naming.GlobalVariableCase
+    value: 'camelBack'
+  - key: readability-identifier-naming.LocalVariableCase
+    value: 'camelBack'
+  - key: readability-identifier-naming.ParameterCase
+    value: 'camelBack'
+  - key: readability-identifier-naming.VariableCase
+    value: 'camelBack'
+  - key: cppcoreguidelines-non-private-member-variables-in-classes.IgnorePublicMemberVariables
+    value: 'true'
+

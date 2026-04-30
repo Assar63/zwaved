@@ -421,6 +421,76 @@ auto handleSwitchBinary(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, bool
     logLine(stream.str());
 }
 
+/// Z-Wave Command Class human-readable names. Covers the most commonly
+/// seen CCs from the AWG specification; unknown values render as bare
+/// hex. Order isn't significant — the lookup is linear (~50 entries).
+struct CcName
+{
+    std::uint8_t id;
+    const char* name;
+};
+// NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers): Z-Wave CC IDs from the AWG spec
+constexpr auto CC_NAMES = std::to_array<CcName>({
+    {0x20, "Basic"},
+    {0x22, "ApplicationStatus"},
+    {0x25, "SwitchBinary"},
+    {0x26, "SwitchMultilevel"},
+    {0x27, "SwitchAll"},
+    {0x2B, "SceneActivation"},
+    {0x2C, "SceneActuatorConf"},
+    {0x2D, "SceneControllerConf"},
+    {0x30, "SensorBinary"},
+    {0x31, "SensorMultilevel"},
+    {0x32, "Meter"},
+    {0x33, "ColorSwitch"},
+    {0x40, "ThermostatMode"},
+    {0x42, "ThermostatOperatingState"},
+    {0x43, "ThermostatSetpoint"},
+    {0x44, "ThermostatFanMode"},
+    {0x45, "ThermostatFanState"},
+    {0x55, "TransportService"},
+    {0x56, "Crc16Encap"},
+    {0x59, "AssociationGrpInfo"},
+    {0x5A, "DeviceResetLocally"},
+    {0x5B, "CentralScene"},
+    {0x5E, "ZwavePlusInfo"},
+    {0x60, "MultiChannel"},
+    {0x62, "DoorLock"},
+    {0x63, "UserCode"},
+    {0x6C, "Supervision"},
+    {0x70, "Configuration"},
+    {0x71, "Notification"},
+    {0x72, "ManufacturerSpecific"},
+    {0x73, "Powerlevel"},
+    {0x75, "Protection"},
+    {0x77, "NodeNaming"},
+    {0x7A, "FirmwareUpdateMd"},
+    {0x80, "Battery"},
+    {0x81, "Clock"},
+    {0x82, "Hail"},
+    {0x84, "WakeUp"},
+    {0x85, "Association"},
+    {0x86, "Version"},
+    {0x87, "Indicator"},
+    {0x8E, "MultiChannelAssociation"},
+    {0x8F, "MultiCmd"},
+    {0x98, "Security"},
+    {0x9F, "Security2"},
+});
+// NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
+
+auto commandClassName(std::uint8_t commandClass) -> const char*
+{
+    for (const auto& entry : CC_NAMES)
+    {
+        if (entry.id == commandClass)
+        {
+            return entry.name;
+        }
+    }
+    return nullptr;
+}
+
 auto formatCcList(const std::vector<std::uint8_t>& ccs) -> std::string
 {
     std::ostringstream stream;
@@ -431,7 +501,12 @@ auto formatCcList(const std::vector<std::uint8_t>& ccs) -> std::string
         {
             stream << " ";
         }
-        stream << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(ccs.at(idx));
+        const auto byte = ccs.at(idx);
+        stream << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(byte) << std::dec;
+        if (const auto* name = commandClassName(byte); name != nullptr)
+        {
+            stream << "(" << name << ")";
+        }
     }
     stream << "]";
     return stream.str();

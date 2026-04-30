@@ -1,4 +1,5 @@
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
@@ -7,8 +8,10 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <ncurses.h>
@@ -41,6 +44,27 @@ constexpr std::uint8_t STATUS_COMPLETED      = 0x06;
 constexpr std::uint8_t STATUS_FAILED         = 0x07;
 constexpr std::uint8_t STATUS_NEIGHBORS_DONE = 0x0B;
 constexpr std::uint8_t STATUS_NOT_PRIMARY    = 0x23;
+
+// FUNC_ID_ZW_SEND_DATA callback transmit-status values (mirrors HostApi).
+constexpr std::uint8_t TX_STATUS_OK       = 0x00;
+constexpr std::uint8_t TX_STATUS_NO_ACK   = 0x01;
+constexpr std::uint8_t TX_STATUS_FAIL     = 0x02;
+constexpr std::uint8_t TX_STATUS_NOT_IDLE = 0x03;
+constexpr std::uint8_t TX_STATUS_NO_ROUTE = 0x04;
+constexpr std::uint8_t TX_STATUS_VERIFIED = 0x05;
+
+// SwitchBinaryReport state encoding (matches BinarySwitch::State).
+constexpr std::uint8_t SWITCH_STATE_OFF     = 0;
+constexpr std::uint8_t SWITCH_STATE_ON      = 1;
+constexpr std::uint8_t SWITCH_STATE_UNKNOWN = 2;
+
+// Valid Z-Wave 8-bit node IDs (excluding broadcast 0 and reserved >232).
+constexpr int NODE_ID_MIN = 1;
+constexpr int NODE_ID_MAX = 232;
+
+// Max characters of node-id input read from the bottom-row prompt
+// (3 digits + null terminator, with slack).
+constexpr std::size_t NODE_ID_INPUT_BUFFER = 8;
 
 struct ActivityState
 {
@@ -123,6 +147,85 @@ auto formatStatusEntry(const char* operation,
     return stream.str();
 }
 
+auto formatTxStatus(std::uint8_t status) -> const char*
+{
+    switch (status)
+    {
+    case TX_STATUS_OK:
+        return "OK";
+    case TX_STATUS_NO_ACK:
+        return "No ACK";
+    case TX_STATUS_FAIL:
+        return "Failed";
+    case TX_STATUS_NOT_IDLE:
+        return "Routing not idle";
+    case TX_STATUS_NO_ROUTE:
+        return "No route";
+    case TX_STATUS_VERIFIED:
+        return "Verified";
+    default:
+        return "?";
+    }
+}
+
+auto formatSwitchState(std::uint8_t state) -> const char*
+{
+    switch (state)
+    {
+    case SWITCH_STATE_OFF:
+        return "Off";
+    case SWITCH_STATE_ON:
+        return "On";
+    case SWITCH_STATE_UNKNOWN:
+        return "Unknown";
+    default:
+        return "?";
+    }
+}
+
+/// Prompt at the bottom row for a node ID. Switches ncurses to blocking
+/// echoing input, reads a line, parses it as a 1..232 integer, then
+/// restores the periodic-redraw input mode. Returns std::nullopt if the
+/// input is empty or out of range.
+auto promptNodeId(const char* label) -> std::optional<std::uint8_t>
+{
+    const int rows = getmaxy(stdscr);
+    move(rows - 1, 0);
+    clrtoeol();
+    mvprintw(rows - 1, 0, "%s ", label);
+    refresh();
+
+    echo();
+    curs_set(1);
+    timeout(-1);  // blocking
+
+    std::array<char, NODE_ID_INPUT_BUFFER> buffer{};
+    int const got = getnstr(buffer.data(), static_cast<int>(buffer.size()) - 1);
+
+    noecho();
+    curs_set(0);
+    timeout(UI_REFRESH_MS);
+
+    if (got != OK)
+    {
+        return std::nullopt;
+    }
+
+    const std::string text(buffer.data());
+    if (text.empty())
+    {
+        return std::nullopt;
+    }
+
+    int value                   = 0;
+    auto const [ptr, errorCode] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (errorCode != std::errc{} || value < NODE_ID_MIN || value > NODE_ID_MAX)
+    {
+        return std::nullopt;
+    }
+    return static_cast<std::uint8_t>(value);
+}
+
 auto draw(std::uint8_t lastSession) -> void
 {
     erase();
@@ -138,6 +241,8 @@ auto draw(std::uint8_t lastSession) -> void
 
     mvprintw(row++, 0, "  [1] Add zwave node");
     mvprintw(row++, 0, "  [2] Remove zwave node");
+    mvprintw(row++, 0, "  [3] Switch binary ON  (prompts for node id)");
+    mvprintw(row++, 0, "  [4] Switch binary OFF (prompts for node id)");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));
     mvprintw(row++, 0, "  [q] Quit");
     mvhline(row++, 0, '-', getmaxx(stdscr));
@@ -193,6 +298,45 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 setDongleStatus(connected, path);
                 logLine(connected ? "DongleStatus: connected " + path : "DongleStatus: disconnected");
             });
+
+    proxy.uponSignal("SendDataStatus")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t callbackId, std::uint8_t txStatus)
+            {
+                std::ostringstream stream;
+                stream << "SendDataStatus callback=" << static_cast<unsigned>(callbackId) << " status=0x" << std::hex
+                       << std::setw(2) << std::setfill('0') << static_cast<unsigned>(txStatus) << " ("
+                       << formatTxStatus(txStatus) << ")";
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("SwitchBinaryReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId, std::uint8_t state)
+            {
+                std::ostringstream stream;
+                stream << "SwitchBinaryReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " state=" << formatSwitchState(state);
+                logLine(stream.str());
+            });
+}
+
+auto handleSwitchBinary(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, bool turnOn) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("SetSwitchBinary: cancelled or invalid node id");
+        return;
+    }
+    ++sessionCounter;
+    proxy.callMethod("SetSwitchBinary").onInterface(IFACE_NAME).withArguments(*nodeId, turnOn, sessionCounter);
+    std::ostringstream stream;
+    stream << "SetSwitchBinary node=" << static_cast<unsigned>(*nodeId) << " " << (turnOn ? "ON" : "OFF")
+           << " callback=" << static_cast<unsigned>(sessionCounter);
+    logLine(stream.str());
 }
 }  // namespace
 
@@ -265,6 +409,10 @@ auto main() -> int
                 lastWasAdd  = false;
                 logLine("RemoveNode (classic, session " + std::to_string(static_cast<unsigned>(sessionCounter)) +
                         ") issued");
+            }
+            else if (key == '3' || key == '4')
+            {
+                handleSwitchBinary(*proxy, sessionCounter, key == '3');
             }
             else if (key == 's' || key == 'S')
             {

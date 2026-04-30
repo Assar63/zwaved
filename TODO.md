@@ -12,6 +12,7 @@ companion `zwave-terminal` client, and packaging.
 ### Network & node operations
 
 - [x] **Binary Switch (CC `0x25`)** — `SetSwitchBinary` over D-Bus, end-to-end including SendData and Report decode.
+- [x] **Association (CC `0x85`)** — `SetAssociation` / `RemoveAssociation` / `GetAssociation` / `GetAssociationGroupings`; `AssociationReport` and `AssociationGroupingsReport` signals on the unsolicited path.
 - [x] **Unsolicited event handling** — `FUNC_ID_APPLICATION_COMMAND_HANDLER` decoded and fanned out via `MessageBus`.
 - [x] **Node list** — `src/node-registry/` tracks included nodes; exposed as `GetNodes()` on D-Bus and via `[l]` in the terminal.
 - [x] **Dongle introspection on connect** — `GET_VERSION` + `MEMORY_GET_ID` synchronously after serial open; published as `DongleInfo` (retained on the bus, signalled on D-Bus, cached for `GetDongleInfo`). `[i]` in the terminal queries it.

@@ -38,11 +38,14 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list seven methods (`AddNode`, `StopAddNode`,
+The introspection should list eleven methods (`AddNode`, `StopAddNode`,
 `RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`, `GetNodes`,
-`GetDongleInfo`) and seven signals (`NodeInclusionStatus`,
-`NodeExclusionStatus`, `DongleStatus`, `DongleInfo`, `SendDataStatus`,
-`ApplicationCommand`, `SwitchBinaryReport`).
+`GetDongleInfo`, `SetAssociation`, `RemoveAssociation`,
+`GetAssociation`, `GetAssociationGroupings`) and nine signals
+(`NodeInclusionStatus`, `NodeExclusionStatus`, `DongleStatus`,
+`DongleInfo`, `SendDataStatus`, `ApplicationCommand`,
+`SwitchBinaryReport`, `AssociationReport`,
+`AssociationGroupingsReport`).
 
 ### Always monitor signals in another terminal
 
@@ -80,6 +83,10 @@ or wait for the next hot-plug to determine current state.
 | `SetSwitchBinary` | `y b y` (nodeId, on, callbackId) | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)` |
 | `GetNodes` | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes) | Return the in-memory list of currently-included nodes |
 | `GetDongleInfo` | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId) | Return the dongle introspection captured when the serial port opened |
+| `SetAssociation` | `y y ay y` (nodeId, groupId, members, callbackId) | Add `members` to `groupId` on `nodeId`'s association table (CC 0x85 cmd 0x01) |
+| `RemoveAssociation` | `y y ay y` (nodeId, groupId, members, callbackId) | Remove `members` from `groupId` (empty `members` means *all*) |
+| `GetAssociation` | `y y y` (nodeId, groupId, callbackId) | Query the current members of `groupId`; result arrives as `AssociationReport` |
+| `GetAssociationGroupings` | `y y` (nodeId, callbackId) | Query how many association groups `nodeId` exposes; result arrives as `AssociationGroupingsReport` |
 
 `y` = `BYTE` (uint8), `q` = `UINT16`, `ay` = array of bytes.
 
@@ -343,7 +350,46 @@ than being duplicated in the database. If the state directory can't
 be created or opened, the daemon logs a warning and falls back to
 in-memory only.
 
-## 14. Dongle introspection
+## 14. Managing associations (CC 0x85)
+
+Association groups let a node push unsolicited commands to other nodes
+without controller mediation. Group 1 is conventionally the lifeline
+group, owned by the primary controller — that's why a wall switch's
+manual toggle reaches the daemon as a `Basic Set` (see §12). The four
+methods cover query and configuration:
+
+```bash
+# How many groups does node 12 expose?
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetAssociationGroupings yy 12 1
+# → AssociationGroupingsReport y y 12 5
+
+# Who's currently in node 12's group 1?
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetAssociation yyy 12 1 2
+# → AssociationReport y y y y ay 12 1 5 0 1   (group 1, max 5, 0 to follow, member: node 1)
+
+# Add nodes 3 and 7 to node 12's group 2:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetAssociation yyayy 12 2 2 3 7 3
+
+# Remove all members from node 12's group 2:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 RemoveAssociation yyayy 12 2 0 4
+```
+
+`AssociationReport` carries `(sourceNodeId, groupId, maxSupported,
+reportsToFollow, members)`. When a group's member list spans multiple
+frames, `reportsToFollow` is non-zero on all but the last; clients
+should accumulate `members` across reports until they see zero.
+
+`AssociationGroupingsReport` carries `(sourceNodeId, supportedGroupings)`.
+
+`SendDataStatus` arrives separately for each Set/Remove/Get/Groupings
+call (echoing the `callbackId` you passed); a successful Get/Groupings
+will be followed shortly after by the matching Report signal.
+
+## 15. Dongle introspection
 
 When the protocol thread opens the serial port to a dongle, it sends
 two host-API requests synchronously and caches the answers:
@@ -368,7 +414,7 @@ daemon started), `GetDongleInfo` returns an empty struct (empty
 `libraryVersion`, all bytes zero); clients should treat that as
 "not available yet" and wait for the next `DongleInfo` signal.
 
-## 15. Future: ubus
+## 16. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's
 ubus is on the roadmap. The CMake cache option `ZWAVED_EXTERNAL_API`

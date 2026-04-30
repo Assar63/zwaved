@@ -2,6 +2,7 @@
 
 #include "../message-bus/MessageBus.hpp"
 #include "../node-registry/NodeRegistry.hpp"
+#include "../zwave-protocol/Association.hpp"
 #include "../zwave-protocol/BinarySwitch.hpp"
 #include "../zwave-protocol/HostApi.hpp"
 #include "../zwave-protocol/HostApiCallbackDispatcher.hpp"
@@ -32,13 +33,15 @@ constexpr const char* BUS_NAME    = "com.tiunda.ZWaved";
 constexpr const char* OBJECT_PATH = "/com/tiunda/ZWaved";
 constexpr const char* IFACE_NAME  = "com.tiunda.ZWaved1";
 
-constexpr const char* SIGNAL_INCLUSION_STATUS     = "NodeInclusionStatus";
-constexpr const char* SIGNAL_EXCLUSION_STATUS     = "NodeExclusionStatus";
-constexpr const char* SIGNAL_DONGLE_STATUS        = "DongleStatus";
-constexpr const char* SIGNAL_DONGLE_INFO          = "DongleInfo";
-constexpr const char* SIGNAL_SEND_DATA_STATUS     = "SendDataStatus";
-constexpr const char* SIGNAL_APPLICATION_COMMAND  = "ApplicationCommand";
-constexpr const char* SIGNAL_SWITCH_BINARY_REPORT = "SwitchBinaryReport";
+constexpr const char* SIGNAL_INCLUSION_STATUS             = "NodeInclusionStatus";
+constexpr const char* SIGNAL_EXCLUSION_STATUS             = "NodeExclusionStatus";
+constexpr const char* SIGNAL_DONGLE_STATUS                = "DongleStatus";
+constexpr const char* SIGNAL_DONGLE_INFO                  = "DongleInfo";
+constexpr const char* SIGNAL_SEND_DATA_STATUS             = "SendDataStatus";
+constexpr const char* SIGNAL_APPLICATION_COMMAND          = "ApplicationCommand";
+constexpr const char* SIGNAL_SWITCH_BINARY_REPORT         = "SwitchBinaryReport";
+constexpr const char* SIGNAL_ASSOCIATION_REPORT           = "AssociationReport";
+constexpr const char* SIGNAL_ASSOCIATION_GROUPINGS_REPORT = "AssociationGroupingsReport";
 
 constexpr int CALLBACK_POLL_MS = 200;
 
@@ -80,6 +83,38 @@ auto emitDongleInfo(sdbus::IObject& obj, const MessageBus::DongleInfo& info) -> 
     }
 }
 
+auto emitTypedSwitchBinary(sdbus::IObject& obj, std::uint8_t sourceNodeId, std::span<const std::uint8_t> ccData) -> void
+{
+    if (const auto report = BinarySwitch::decodeReport(ccData); report.has_value())
+    {
+        auto typed = obj.createSignal(IFACE_NAME, SIGNAL_SWITCH_BINARY_REPORT);
+        typed << sourceNodeId;
+        typed << static_cast<uint8_t>(report->state);
+        obj.emitSignal(typed);
+    }
+}
+
+auto emitTypedAssociation(sdbus::IObject& obj, std::uint8_t sourceNodeId, std::span<const std::uint8_t> ccData) -> void
+{
+    if (const auto report = Association::decodeReport(ccData); report.has_value())
+    {
+        auto typed = obj.createSignal(IFACE_NAME, SIGNAL_ASSOCIATION_REPORT);
+        typed << sourceNodeId;
+        typed << report->groupId;
+        typed << report->maxSupported;
+        typed << report->reportsToFollow;
+        typed << report->members;
+        obj.emitSignal(typed);
+    }
+    if (const auto report = Association::decodeGroupingsReport(ccData); report.has_value())
+    {
+        auto typed = obj.createSignal(IFACE_NAME, SIGNAL_ASSOCIATION_GROUPINGS_REPORT);
+        typed << sourceNodeId;
+        typed << report->supportedGroupings;
+        obj.emitSignal(typed);
+    }
+}
+
 auto emitApplicationCommand(sdbus::IObject& obj, const MessageBus::ApplicationCommand& event) -> void
 {
     try
@@ -90,13 +125,9 @@ auto emitApplicationCommand(sdbus::IObject& obj, const MessageBus::ApplicationCo
         raw << event.ccData;
         obj.emitSignal(raw);
 
-        if (const auto report = BinarySwitch::decodeReport(std::span<const uint8_t>(event.ccData)); report.has_value())
-        {
-            auto typed = obj.createSignal(IFACE_NAME, SIGNAL_SWITCH_BINARY_REPORT);
-            typed << event.sourceNodeId;
-            typed << static_cast<uint8_t>(report->state);
-            obj.emitSignal(typed);
-        }
+        const std::span<const std::uint8_t> ccData{event.ccData};
+        emitTypedSwitchBinary(obj, event.sourceNodeId, ccData);
+        emitTypedAssociation(obj, event.sourceNodeId, ccData);
     }
     catch (const sdbus::Error& err)
     {
@@ -221,6 +252,67 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                 HostApi::pushRequest(req);
             });
 
+    obj.registerMethod("SetAssociation")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [](const uint8_t& nodeId,
+               const uint8_t& groupId,
+               const std::vector<uint8_t>& members,
+               const uint8_t& callbackId)
+            {
+                HostApi::SendDataRequest req{};
+                req.nodeId     = nodeId;
+                req.data       = Association::encodeSet(groupId, std::span<const std::uint8_t>(members));
+                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+                req.callbackId = callbackId;
+                HostApi::pushRequest(req);
+            });
+
+    obj.registerMethod("RemoveAssociation")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [](const uint8_t& nodeId,
+               const uint8_t& groupId,
+               const std::vector<uint8_t>& members,
+               const uint8_t& callbackId)
+            {
+                HostApi::SendDataRequest req{};
+                req.nodeId     = nodeId;
+                req.data       = Association::encodeRemove(groupId, std::span<const std::uint8_t>(members));
+                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+                req.callbackId = callbackId;
+                HostApi::pushRequest(req);
+            });
+
+    obj.registerMethod("GetAssociation")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [](const uint8_t& nodeId, const uint8_t& groupId, const uint8_t& callbackId)
+            {
+                HostApi::SendDataRequest req{};
+                req.nodeId     = nodeId;
+                req.data       = Association::encodeGet(groupId);
+                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+                req.callbackId = callbackId;
+                HostApi::pushRequest(req);
+            });
+
+    obj.registerMethod("GetAssociationGroupings")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            [](const uint8_t& nodeId, const uint8_t& callbackId)
+            {
+                HostApi::SendDataRequest req{};
+                req.nodeId     = nodeId;
+                req.data       = Association::encodeGroupingsGet();
+                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+                req.callbackId = callbackId;
+                HostApi::pushRequest(req);
+            });
+
     using NodeTuple = sdbus::Struct<uint8_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>;
     obj.registerMethod("GetNodes")
         .onInterface(IFACE_NAME)
@@ -279,6 +371,15 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     obj.registerSignal(SIGNAL_SWITCH_BINARY_REPORT)
         .onInterface(IFACE_NAME)
         .withParameters<uint8_t, uint8_t>("sourceNodeId", "state");
+
+    obj.registerSignal(SIGNAL_ASSOCIATION_REPORT)
+        .onInterface(IFACE_NAME)
+        .withParameters<uint8_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>(
+            "sourceNodeId", "groupId", "maxSupported", "reportsToFollow", "members");
+
+    obj.registerSignal(SIGNAL_ASSOCIATION_GROUPINGS_REPORT)
+        .onInterface(IFACE_NAME)
+        .withParameters<uint8_t, uint8_t>("sourceNodeId", "supportedGroupings");
 
     obj.finishRegistration();
 

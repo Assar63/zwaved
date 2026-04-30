@@ -14,4 +14,5 @@ target_sources(zwaved PRIVATE
     HostApiRequestQueue.cpp
     HostApiCallbackDispatcher.cpp
     BinarySwitch.cpp
+    Association.cpp
 )

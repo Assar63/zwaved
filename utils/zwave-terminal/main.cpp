@@ -391,6 +391,45 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
+    proxy.uponSignal("AssociationReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t groupId,
+               std::uint8_t maxSupported,
+               std::uint8_t reportsToFollow,
+               const std::vector<std::uint8_t>& members)
+            {
+                std::ostringstream stream;
+                stream << "AssociationReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " group=" << static_cast<unsigned>(groupId) << " max=" << static_cast<unsigned>(maxSupported)
+                       << " toFollow=" << static_cast<unsigned>(reportsToFollow) << " members=[";
+                bool first = true;
+                for (const auto member : members)
+                {
+                    if (!first)
+                    {
+                        stream << " ";
+                    }
+                    first = false;
+                    stream << static_cast<unsigned>(member);
+                }
+                stream << "]";
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("AssociationGroupingsReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId, std::uint8_t supportedGroupings)
+            {
+                std::ostringstream stream;
+                stream << "AssociationGroupingsReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " groupings=" << static_cast<unsigned>(supportedGroupings);
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("DongleInfo")
         .onInterface(IFACE_NAME)
         .call(

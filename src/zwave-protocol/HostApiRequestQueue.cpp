@@ -26,7 +26,7 @@ auto state() -> State&
 auto HostApi::pushRequest(const Request& request) -> void
 {
     {
-        std::lock_guard<std::mutex> const lock(state().mutex);
+        std::scoped_lock const lock(state().mutex);
         state().queue.push_back(request);
     }
     state().cv.notify_one();
@@ -53,6 +53,6 @@ auto HostApi::wakeAll() -> void
 
 auto HostApi::clear() -> void
 {
-    std::lock_guard<std::mutex> const lock(state().mutex);
+    std::scoped_lock const lock(state().mutex);
     state().queue.clear();
 }

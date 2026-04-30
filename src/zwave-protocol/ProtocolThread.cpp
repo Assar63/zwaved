@@ -62,7 +62,7 @@ auto state() -> ZwaveProtocolState&
 auto onDongleStatus(const MessageBus::DongleStatus& status) -> void
 {
     {
-        std::lock_guard<std::mutex> const lock(state().pathMutex);
+        std::scoped_lock const lock(state().pathMutex);
         if (status.connected && !status.ttyPath.empty())
         {
             state().path = status.ttyPath;
@@ -88,7 +88,7 @@ auto awaitDevicePath() -> std::optional<std::string>
 
 auto isPathSet() -> bool
 {
-    std::lock_guard<std::mutex> const lock(state().pathMutex);
+    std::scoped_lock const lock(state().pathMutex);
     return state().path.has_value();
 }
 

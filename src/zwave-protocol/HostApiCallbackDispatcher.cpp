@@ -27,7 +27,7 @@ auto state() -> State&
 template <typename T> auto enqueue(const T& value) -> void
 {
     {
-        std::lock_guard<std::mutex> const lock(state().mutex);
+        std::scoped_lock const lock(state().mutex);
         state().queue.emplace_back(value);
     }
     state().cv.notify_one();
@@ -65,6 +65,6 @@ auto HostApi::wakeAllCallbacks() -> void
 
 auto HostApi::clearCallbacks() -> void
 {
-    std::lock_guard<std::mutex> const lock(state().mutex);
+    std::scoped_lock const lock(state().mutex);
     state().queue.clear();
 }

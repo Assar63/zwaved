@@ -242,7 +242,7 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
         .implementedAs(
             [this]() -> DongleInfoTuple
             {
-                std::lock_guard<std::mutex> const lock(impl->dongleInfoMutex);
+                std::scoped_lock const lock(impl->dongleInfoMutex);
                 return DongleInfoTuple{impl->lastDongleInfo.libraryVersion,
                                        impl->lastDongleInfo.libraryType,
                                        impl->lastDongleInfo.homeId,
@@ -316,7 +316,7 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
         [this](const MessageBus::DongleInfo& info)
         {
             {
-                std::lock_guard<std::mutex> const lock(impl->dongleInfoMutex);
+                std::scoped_lock const lock(impl->dongleInfoMutex);
                 impl->lastDongleInfo = info;
             }
             if (!impl || !impl->connected.load() || !impl->object)

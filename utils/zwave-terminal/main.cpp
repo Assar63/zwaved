@@ -103,7 +103,7 @@ auto formatTimestamp() -> std::string
 auto logLine(const std::string& message) -> void
 {
     const std::string entry = formatTimestamp() + "  " + message;
-    std::lock_guard<std::mutex> const lock(activity().mutex);
+    std::scoped_lock const lock(activity().mutex);
     activity().log.push_back(entry);
     while (activity().log.size() > MAX_LOG_LINES)
     {
@@ -113,7 +113,7 @@ auto logLine(const std::string& message) -> void
 
 auto setDongleStatus(bool connected, const std::string& path) -> void
 {
-    std::lock_guard<std::mutex> const lock(activity().mutex);
+    std::scoped_lock const lock(activity().mutex);
     activity().dongleConnected = connected;
     activity().donglePath      = path;
 }
@@ -242,7 +242,7 @@ auto draw(std::uint8_t lastSession) -> void
     int row = 0;
 
     {
-        std::lock_guard<std::mutex> const lock(activity().mutex);
+        std::scoped_lock const lock(activity().mutex);
         const std::string status =
             activity().dongleConnected ? "connected (" + activity().donglePath + ")" : "disconnected";
         mvprintw(row++, 0, " zwave-terminal  -  Dongle: %s", status.c_str());
@@ -260,7 +260,7 @@ auto draw(std::uint8_t lastSession) -> void
     mvhline(row++, 0, '-', getmaxx(stdscr));
 
     {
-        std::lock_guard<std::mutex> const lock(activity().mutex);
+        std::scoped_lock const lock(activity().mutex);
         const auto& log              = activity().log;
         const int available          = getmaxy(stdscr) - row;
         const std::size_t startIndex = (available > 0 && log.size() > static_cast<std::size_t>(available))

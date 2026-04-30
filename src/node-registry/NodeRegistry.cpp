@@ -22,19 +22,19 @@ auto state() -> State&
 
 auto NodeRegistry::add(const NodeInfo& info) -> void
 {
-    std::lock_guard<std::mutex> const lock(state().mutex);
+    std::scoped_lock const lock(state().mutex);
     state().nodes[info.nodeId] = info;
 }
 
 auto NodeRegistry::remove(std::uint8_t nodeId) -> void
 {
-    std::lock_guard<std::mutex> const lock(state().mutex);
+    std::scoped_lock const lock(state().mutex);
     state().nodes.erase(nodeId);
 }
 
 auto NodeRegistry::snapshot() -> std::vector<NodeInfo>
 {
-    std::lock_guard<std::mutex> const lock(state().mutex);
+    std::scoped_lock const lock(state().mutex);
     std::vector<NodeInfo> result;
     result.reserve(state().nodes.size());
     for (const auto& [_id, info] : state().nodes)

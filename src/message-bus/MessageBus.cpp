@@ -46,7 +46,7 @@ auto state() -> State&
 
 auto MessageBus::subscribe(const std::function<void(const DongleStatus&)>& handler) -> SubscriptionId
 {
-    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    std::scoped_lock const lock(state().stateMutex);
     const auto handle          = state().dongleStatus.append(handler);
     const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
     state().removers.emplace(newId, [handle]() { state().dongleStatus.remove(handle); });
@@ -61,7 +61,7 @@ auto MessageBus::unsubscribe(SubscriptionId subscriptionId) -> void
 {
     std::function<void()> remover;
     {
-        std::lock_guard<std::mutex> const lock(state().stateMutex);
+        std::scoped_lock const lock(state().stateMutex);
         const auto iter = state().removers.find(subscriptionId);
         if (iter == state().removers.end())
         {
@@ -75,14 +75,14 @@ auto MessageBus::unsubscribe(SubscriptionId subscriptionId) -> void
 
 auto MessageBus::publish(const DongleStatus& status) -> void
 {
-    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    std::scoped_lock const lock(state().stateMutex);
     state().lastDongleStatus = status;
     state().dongleStatus(status);
 }
 
 auto MessageBus::subscribe(const std::function<void(const DongleInfo&)>& handler) -> SubscriptionId
 {
-    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    std::scoped_lock const lock(state().stateMutex);
     const auto handle          = state().dongleInfo.append(handler);
     const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
     state().removers.emplace(newId, [handle]() { state().dongleInfo.remove(handle); });
@@ -95,14 +95,14 @@ auto MessageBus::subscribe(const std::function<void(const DongleInfo&)>& handler
 
 auto MessageBus::publish(const DongleInfo& info) -> void
 {
-    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    std::scoped_lock const lock(state().stateMutex);
     state().lastDongleInfo = info;
     state().dongleInfo(info);
 }
 
 auto MessageBus::subscribe(const std::function<void(const ApplicationCommand&)>& handler) -> SubscriptionId
 {
-    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    std::scoped_lock const lock(state().stateMutex);
     const auto handle          = state().applicationCommand.append(handler);
     const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
     state().removers.emplace(newId, [handle]() { state().applicationCommand.remove(handle); });
@@ -111,6 +111,6 @@ auto MessageBus::subscribe(const std::function<void(const ApplicationCommand&)>&
 
 auto MessageBus::publish(const ApplicationCommand& event) -> void
 {
-    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    std::scoped_lock const lock(state().stateMutex);
     state().applicationCommand(event);
 }

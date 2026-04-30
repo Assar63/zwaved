@@ -18,6 +18,7 @@ constexpr uint8_t FLAG_NWE_BIT      = 6;  // Remove Node
 
 constexpr std::size_t HOMEID_LEN         = 4;
 constexpr std::size_t VERSION_STRING_LEN = 12;
+constexpr std::size_t DEVICE_CLASS_BYTES = 3;  // basic + generic + specific
 constexpr unsigned NODE_ID_HIGH_SHIFT    = 8;
 
 auto makeFlagByte(const uint8_t mode,
@@ -263,15 +264,20 @@ auto HostApi::decodeNodeCallback(const ZwaveDataFrame& frame, bool nodeId16Bit) 
     {
         return out;
     }
-    std::size_t const ccLen = payload[offset];
+    // bLen counts the entire nodeInfo (basic + generic + specific + CCs),
+    // per the Z-Wave Serial API ZW_NODEINFO_FRAME structure. The actual
+    // command-class count is therefore bLen - 3 (subtracting the device
+    // class triple). bLen < 3 means no device-class info at all.
+    const std::size_t bLen  = payload[offset];
+    const std::size_t ccLen = bLen >= DEVICE_CLASS_BYTES ? bLen - DEVICE_CLASS_BYTES : 0;
     offset += 1;
 
-    if (total >= offset + 3)
+    if (bLen >= DEVICE_CLASS_BYTES && total >= offset + DEVICE_CLASS_BYTES)
     {
         out.basicDeviceType    = payload[offset];
         out.genericDeviceType  = payload[offset + 1];
         out.specificDeviceType = payload[offset + 2];
-        offset += 3;
+        offset += DEVICE_CLASS_BYTES;
     }
 
     if (ccLen > 0 && total >= offset + ccLen)

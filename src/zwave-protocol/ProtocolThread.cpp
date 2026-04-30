@@ -401,6 +401,9 @@ auto zwaveCommunicationThread() -> void
             std::cout << "[ProtocolThread] dongle " << info.libraryVersion << " (lib type "
                       << static_cast<int>(info.libraryType) << ", controller node "
                       << static_cast<int>(info.controllerNodeId) << ")\n";
+            // Bind the registry to this network *before* seeding from
+            // init-data, so seeded entries land in the right home_id.
+            NodeRegistry::setHomeId(info.homeId);
             MessageBus::publish(info);
 
             if (introspection.initData.has_value())

@@ -22,6 +22,15 @@ struct NodeInfo
     std::vector<std::uint8_t> commandClasses;
 };
 
+/// Bind the registry to a Z-Wave network identified by its 4-byte
+/// home ID (typically read from FUNC_ID_MEMORY_GET_ID). Subsequent
+/// add/remove/seed/snapshot calls operate against this network only.
+/// If the home ID changes (different dongle plugged in), the
+/// in-memory cache is reloaded from the DB for the new network;
+/// rows for the previous network remain in the database, just out
+/// of view. No-op if `homeIdBytes` matches the currently bound ID.
+auto setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -> void;
+
 auto add(const NodeInfo& info) -> void;
 auto remove(std::uint8_t nodeId) -> void;
 

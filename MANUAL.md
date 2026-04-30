@@ -347,9 +347,12 @@ so the list survives both USB reconnects and daemon restarts. The
 schema captures only the static info from inclusion (device-class
 triple + command classes); dynamic per-node state continues to flow
 through the CC-specific signals (`SwitchBinaryReport`, etc.) rather
-than being duplicated in the database. If the state directory can't
-be created or opened, the daemon logs a warning and falls back to
-in-memory only.
+than being duplicated in the database. Rows are keyed by
+`(home_id, node_id)` — swapping the dongle for one belonging to a
+different Z-Wave network loads only that network's nodes; entries
+for the previous network stay in the database, just out of view. If
+the state directory can't be created or opened, the daemon logs a
+warning and falls back to in-memory only.
 
 ## 14. Managing associations (CC 0x85)
 

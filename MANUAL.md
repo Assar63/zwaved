@@ -38,9 +38,9 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list five methods (`AddNode`, `StopAddNode`,
-`RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`) and six signals
-(`NodeInclusionStatus`, `NodeExclusionStatus`, `DongleStatus`,
+The introspection should list six methods (`AddNode`, `StopAddNode`,
+`RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`, `GetNodes`) and six
+signals (`NodeInclusionStatus`, `NodeExclusionStatus`, `DongleStatus`,
 `SendDataStatus`, `ApplicationCommand`, `SwitchBinaryReport`).
 
 ### Always monitor signals in another terminal
@@ -77,6 +77,7 @@ or wait for the next hot-plug to determine current state.
 | `RemoveNode` | `y y y` (mode, flags, sessionId) | Start an exclusion |
 | `StopRemoveNode` | `y` (sessionId) | Send Mode `0x05` to stop an in-progress exclusion |
 | `SetSwitchBinary` | `y b y` (nodeId, on, callbackId) | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)` |
+| `GetNodes` | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes) | Return the in-memory list of currently-included nodes |
 
 `y` = `BYTE` (uint8), `q` = `UINT16`, `ay` = array of bytes.
 
@@ -313,7 +314,28 @@ Both are visible in `busctl --system monitor com.tiunda.ZWaved`. Use
 the typed signal when you only care about Binary Switch state changes;
 use the raw signal when you need to handle arbitrary CCs.
 
-## 13. Future: ubus
+## 13. Listing nodes
+
+`GetNodes` returns the daemon's in-memory list of currently-included
+nodes. Each entry carries the device-class triple
+(`basic` / `generic` / `specific`) and the supported command-class list
+captured at inclusion time.
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetNodes
+```
+
+Sample output for one node:
+
+```
+a(yyyyay) 1 5 4 16 1 5 0x25 0x70 0x86 0x59 0x85
+```
+
+The registry is in-memory only — it survives USB reconnects but is
+discarded on daemon restart. Persistence is on the roadmap.
+
+## 14. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's
 ubus is on the roadmap. The CMake cache option `ZWAVED_EXTERNAL_API`

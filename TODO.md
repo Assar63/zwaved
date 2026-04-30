@@ -13,7 +13,7 @@ companion `zwave-terminal` client, and packaging.
 
 - [x] **Binary Switch (CC `0x25`)** — `SetSwitchBinary` over D-Bus, end-to-end including SendData and Report decode.
 - [x] **Unsolicited event handling** — `FUNC_ID_APPLICATION_COMMAND_HANDLER` decoded and fanned out via `MessageBus`.
-- [ ] **Node list** — track and expose currently-included nodes.
+- [x] **Node list** — `src/node-registry/` tracks included nodes; exposed as `GetNodes()` on D-Bus and via `[l]` in the terminal.
 - [ ] **Node info** — detailed per-node view (capabilities, status, recent activity).
 - [ ] **Network info** — aggregate view (node count, statuses, activity).
 - [ ] **Network status** — current health, ongoing operations, errors.
@@ -70,7 +70,8 @@ companion `zwave-terminal` client, and packaging.
 - [ ] **Help** window — available commands and descriptions.
 - [ ] **Logs** window — live daemon log stream.
 - [ ] **Settings** window — log level, connection, preferences.
-- [ ] **Node list** — live table of included nodes with status.
+- [x] **Node list** — `[l]` fetches `GetNodes` and renders each node into the activity pane.
+- [ ] **Node list (rich)** — dedicated window with live state column instead of a one-shot dump.
 - [ ] **Node info** — drill-down per node.
 - [ ] **Network info** — overview of the network.
 - [ ] **Network status** — health and error summary.

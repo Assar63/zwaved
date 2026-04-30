@@ -1,4 +1,5 @@
 #include "../message-bus/MessageBus.hpp"
+#include "../node-registry/NodeRegistry.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 #include "FrameTransport.hpp"
 #include "HostApi.hpp"
@@ -11,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -25,6 +27,11 @@ namespace
 {
 constexpr int IDLE_PUMP_TIMEOUT_MS    = 100;
 constexpr int REQUEST_WAIT_TIMEOUT_MS = 100;
+
+// Inclusion / exclusion progression — only the COMPLETED variant
+// updates the node registry; other terminal states (failure, not-primary)
+// just end the session.
+constexpr std::uint8_t STATUS_COMPLETED = 0x06;
 
 struct ZwaveProtocolState
 {
@@ -98,6 +105,21 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
         HostApi::publishCallback(*nodeCb);
         if (HostApi::isTerminalStatus(nodeCb->commandId, nodeCb->status))
         {
+            if (nodeCb->status == STATUS_COMPLETED)
+            {
+                if (nodeCb->commandId == HostApi::CMD_ADD_NODE_TO_NETWORK)
+                {
+                    NodeRegistry::add({.nodeId         = static_cast<std::uint8_t>(nodeCb->nodeId),
+                                       .basicType      = nodeCb->basicDeviceType,
+                                       .genericType    = nodeCb->genericDeviceType,
+                                       .specificType   = nodeCb->specificDeviceType,
+                                       .commandClasses = nodeCb->commandClasses});
+                }
+                else if (nodeCb->commandId == HostApi::CMD_REMOVE_NODE_FROM_NETWORK)
+                {
+                    NodeRegistry::remove(static_cast<std::uint8_t>(nodeCb->nodeId));
+                }
+            }
             tracker.end();
         }
     }

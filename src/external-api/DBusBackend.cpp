@@ -1,6 +1,7 @@
 #include "DBusBackend.hpp"
 
 #include "../message-bus/MessageBus.hpp"
+#include "../node-registry/NodeRegistry.hpp"
 #include "../zwave-protocol/BinarySwitch.hpp"
 #include "../zwave-protocol/HostApi.hpp"
 #include "../zwave-protocol/HostApiCallbackDispatcher.hpp"
@@ -21,6 +22,7 @@
 #include <sdbus-c++/Error.h>
 #include <sdbus-c++/IConnection.h>
 #include <sdbus-c++/IObject.h>
+#include <sdbus-c++/Types.h>
 #include <sdbus-c++/sdbus-c++.h>
 
 namespace
@@ -194,6 +196,21 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                 req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
                 req.callbackId = callbackId;
                 HostApi::pushRequest(req);
+            });
+
+    using NodeTuple = sdbus::Struct<uint8_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>;
+    obj.registerMethod("GetNodes")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            []() -> std::vector<NodeTuple>
+            {
+                std::vector<NodeTuple> result;
+                for (const auto& info : NodeRegistry::snapshot())
+                {
+                    result.emplace_back(
+                        info.nodeId, info.basicType, info.genericType, info.specificType, info.commandClasses);
+                }
+                return result;
             });
 
     obj.registerSignal(SIGNAL_INCLUSION_STATUS)

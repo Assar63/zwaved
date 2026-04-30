@@ -1,0 +1,32 @@
+#ifndef ZWAVED_NODE_REGISTRY_HPP
+#define ZWAVED_NODE_REGISTRY_HPP
+
+#include <cstdint>
+#include <vector>
+
+/// In-memory registry of currently-included Z-Wave nodes. Populated by the
+/// protocol thread when an inclusion completes (status 0x06) and trimmed
+/// when an exclusion completes. Static info only — device types and
+/// supported command classes captured at inclusion time. Dynamic state
+/// (e.g. last known on/off for a Binary Switch) is exposed as it happens
+/// via the existing CC-specific D-Bus signals; it is intentionally not
+/// duplicated here.
+namespace NodeRegistry
+{
+struct NodeInfo
+{
+    std::uint8_t nodeId       = 0;
+    std::uint8_t basicType    = 0;
+    std::uint8_t genericType  = 0;
+    std::uint8_t specificType = 0;
+    std::vector<std::uint8_t> commandClasses;
+};
+
+auto add(const NodeInfo& info) -> void;
+auto remove(std::uint8_t nodeId) -> void;
+
+/// Thread-safe copy of the current registry, sorted ascending by nodeId.
+[[nodiscard]] auto snapshot() -> std::vector<NodeInfo>;
+}  // namespace NodeRegistry
+
+#endif  // ZWAVED_NODE_REGISTRY_HPP

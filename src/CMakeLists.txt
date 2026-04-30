@@ -9,6 +9,7 @@ add_executable(zwaved
 
 # Add subdirectories for modular components
 add_subdirectory(message-bus)
+add_subdirectory(node-registry)
 add_subdirectory(zwave-dongle)
 add_subdirectory(zwave-protocol)
 add_subdirectory(external-api)

@@ -18,6 +18,7 @@
 #include <sdbus-c++/Error.h>
 #include <sdbus-c++/IConnection.h>
 #include <sdbus-c++/IProxy.h>
+#include <sdbus-c++/Types.h>
 #include <sdbus-c++/sdbus-c++.h>
 
 namespace
@@ -243,6 +244,7 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [2] Remove zwave node");
     mvprintw(row++, 0, "  [3] Switch binary ON  (prompts for node id)");
     mvprintw(row++, 0, "  [4] Switch binary OFF (prompts for node id)");
+    mvprintw(row++, 0, "  [l] List included nodes");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));
     mvprintw(row++, 0, "  [q] Quit");
     mvhline(row++, 0, '-', getmaxx(stdscr));
@@ -338,6 +340,60 @@ auto handleSwitchBinary(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, bool
            << " callback=" << static_cast<unsigned>(sessionCounter);
     logLine(stream.str());
 }
+
+auto formatCcList(const std::vector<std::uint8_t>& ccs) -> std::string
+{
+    std::ostringstream stream;
+    stream << "[";
+    for (std::size_t idx = 0; idx < ccs.size(); ++idx)
+    {
+        if (idx > 0)
+        {
+            stream << " ";
+        }
+        stream << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(ccs.at(idx));
+    }
+    stream << "]";
+    return stream.str();
+}
+
+auto handleListNodes(sdbus::IProxy& proxy) -> void
+{
+    using NodeTuple = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t, std::vector<std::uint8_t>>;
+    std::vector<NodeTuple> nodes;
+    try
+    {
+        proxy.callMethod("GetNodes").onInterface(IFACE_NAME).storeResultsTo(nodes);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetNodes failed: "} + err.what());
+        return;
+    }
+
+    if (nodes.empty())
+    {
+        logLine("Node list: (empty)");
+        return;
+    }
+
+    logLine("Node list (" + std::to_string(nodes.size()) + "):");
+    for (const auto& tup : nodes)
+    {
+        const auto nodeId   = std::get<0>(tup);
+        const auto basic    = std::get<1>(tup);
+        const auto generic  = std::get<2>(tup);
+        const auto specific = std::get<3>(tup);
+        const auto& ccs     = std::get<4>(tup);
+
+        std::ostringstream stream;
+        stream << "  node=" << static_cast<unsigned>(nodeId) << " basic=0x" << std::hex << std::setw(2)
+               << std::setfill('0') << static_cast<unsigned>(basic) << " generic=0x" << std::setw(2)
+               << static_cast<unsigned>(generic) << " specific=0x" << std::setw(2) << static_cast<unsigned>(specific)
+               << std::dec << " ccs=" << formatCcList(ccs);
+        logLine(stream.str());
+    }
+}
 }  // namespace
 
 auto main() -> int
@@ -413,6 +469,10 @@ auto main() -> int
             else if (key == '3' || key == '4')
             {
                 handleSwitchBinary(*proxy, sessionCounter, key == '3');
+            }
+            else if (key == 'l' || key == 'L')
+            {
+                handleListNodes(*proxy);
             }
             else if (key == 's' || key == 'S')
             {

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstddef>
@@ -67,6 +68,11 @@ constexpr std::uint8_t CMD_SET            = 0x01;
 constexpr std::uint8_t CMD_REPORT         = 0x03;
 constexpr std::uint8_t WIRE_VALUE_OFF     = 0x00;
 constexpr std::uint8_t WIRE_VALUE_UNKNOWN = 0xFE;
+
+// COMMAND_CLASS_MARK separates the CCs the node *supports* (i.e.
+// will respond to) from the ones it *controls* (i.e. emits to its
+// associated nodes — typically Basic SET on a wall switch toggle).
+constexpr std::uint8_t CC_MARK = 0xEF;
 
 // Valid Z-Wave 8-bit node IDs (excluding broadcast 0 and reserved >232).
 constexpr int NODE_ID_MIN = 1;
@@ -491,25 +497,41 @@ auto commandClassName(std::uint8_t commandClass) -> const char*
     return nullptr;
 }
 
-auto formatCcList(const std::vector<std::uint8_t>& ccs) -> std::string
+auto formatCcRange(std::vector<std::uint8_t>::const_iterator begin,
+                   std::vector<std::uint8_t>::const_iterator end) -> std::string
 {
     std::ostringstream stream;
     stream << "[";
-    for (std::size_t idx = 0; idx < ccs.size(); ++idx)
+    bool first = true;
+    for (auto iter = begin; iter != end; ++iter)
     {
-        if (idx > 0)
+        if (!first)
         {
             stream << " ";
         }
-        const auto byte = ccs.at(idx);
-        stream << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(byte) << std::dec;
-        if (const auto* name = commandClassName(byte); name != nullptr)
+        first = false;
+        stream << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(*iter) << std::dec;
+        if (const auto* name = commandClassName(*iter); name != nullptr)
         {
             stream << "(" << name << ")";
         }
     }
     stream << "]";
     return stream.str();
+}
+
+/// Render a node's CC list, splitting on COMMAND_CLASS_MARK (0xEF) into
+/// the supported CCs (responds to) and the controlled CCs (emits to
+/// associated nodes). The mark is omitted from either side. If the
+/// node advertises no controlled CCs, only "supports=…" is shown.
+auto formatCcList(const std::vector<std::uint8_t>& ccs) -> std::string
+{
+    const auto mark = std::find(ccs.begin(), ccs.end(), CC_MARK);
+    if (mark == ccs.end())
+    {
+        return "supports=" + formatCcRange(ccs.begin(), ccs.end());
+    }
+    return "supports=" + formatCcRange(ccs.begin(), mark) + " controls=" + formatCcRange(mark + 1, ccs.end());
 }
 
 auto handleDongleInfo(sdbus::IProxy& proxy) -> void
@@ -577,7 +599,7 @@ auto handleListNodes(sdbus::IProxy& proxy) -> void
         stream << "  node=" << static_cast<unsigned>(nodeId) << " basic=0x" << std::hex << std::setw(2)
                << std::setfill('0') << static_cast<unsigned>(basic) << " generic=0x" << std::setw(2)
                << static_cast<unsigned>(generic) << " specific=0x" << std::setw(2) << static_cast<unsigned>(specific)
-               << std::dec << " ccs=" << formatCcList(ccs);
+               << std::dec << " " << formatCcList(ccs);
         logLine(stream.str());
     }
 }

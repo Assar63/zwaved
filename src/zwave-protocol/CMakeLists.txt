@@ -13,6 +13,6 @@ target_sources(zwaved PRIVATE
     HostApiSession.cpp
     HostApiRequestQueue.cpp
     HostApiCallbackDispatcher.cpp
-    BinarySwitch.cpp
-    Association.cpp
 )
+
+add_subdirectory(application)

@@ -2,11 +2,11 @@
 
 #include "../message-bus/MessageBus.hpp"
 #include "../node-registry/NodeRegistry.hpp"
-#include "../zwave-protocol/Association.hpp"
-#include "../zwave-protocol/BinarySwitch.hpp"
 #include "../zwave-protocol/HostApi.hpp"
 #include "../zwave-protocol/HostApiCallbackDispatcher.hpp"
 #include "../zwave-protocol/HostApiRequestQueue.hpp"
+#include "../zwave-protocol/application/Association.hpp"
+#include "../zwave-protocol/application/BinarySwitch.hpp"
 
 #include <array>
 #include <atomic>

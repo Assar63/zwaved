@@ -59,6 +59,15 @@ constexpr std::uint8_t SWITCH_STATE_OFF     = 0;
 constexpr std::uint8_t SWITCH_STATE_ON      = 1;
 constexpr std::uint8_t SWITCH_STATE_UNKNOWN = 2;
 
+// Command-class wire constants for decoding unsolicited binary on/off
+// traffic in ApplicationCommand frames.
+constexpr std::uint8_t CC_BASIC           = 0x20;
+constexpr std::uint8_t CC_SWITCH_BINARY   = 0x25;
+constexpr std::uint8_t CMD_SET            = 0x01;
+constexpr std::uint8_t CMD_REPORT         = 0x03;
+constexpr std::uint8_t WIRE_VALUE_OFF     = 0x00;
+constexpr std::uint8_t WIRE_VALUE_UNKNOWN = 0xFE;
+
 // Valid Z-Wave 8-bit node IDs (excluding broadcast 0 and reserved >232).
 constexpr int NODE_ID_MIN = 1;
 constexpr int NODE_ID_MAX = 232;
@@ -322,6 +331,57 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 std::ostringstream stream;
                 stream << "SwitchBinaryReport node=" << static_cast<unsigned>(sourceNodeId)
                        << " state=" << formatSwitchState(state);
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("ApplicationCommand")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t /*rxStatus*/, std::uint8_t sourceNodeId, const std::vector<std::uint8_t>& ccData)
+            {
+                // Surface unsolicited on/off events sent by binary-switch
+                // nodes. Wall switches typically push Basic SET to their
+                // lifeline association group on toggle; some devices send
+                // SwitchBinary SET for the same purpose. SwitchBinary REPORT
+                // (cmd 0x03) is handled by the typed SwitchBinaryReport
+                // signal — skipped here to avoid duplicate log lines.
+                if (ccData.size() < 3)
+                {
+                    return;
+                }
+                const auto commandClass = ccData.at(0);
+                const auto command      = ccData.at(1);
+                const auto value        = ccData.at(2);
+
+                const char* origin = nullptr;
+                if (commandClass == CC_BASIC && command == CMD_SET)
+                {
+                    origin = "Basic Set";
+                }
+                else if (commandClass == CC_BASIC && command == CMD_REPORT)
+                {
+                    origin = "Basic Report";
+                }
+                else if (commandClass == CC_SWITCH_BINARY && command == CMD_SET)
+                {
+                    origin = "SwitchBinary Set";
+                }
+                if (origin == nullptr)
+                {
+                    return;
+                }
+                const char* state = "On";
+                if (value == WIRE_VALUE_OFF)
+                {
+                    state = "Off";
+                }
+                else if (value == WIRE_VALUE_UNKNOWN)
+                {
+                    state = "Unknown";
+                }
+                std::ostringstream stream;
+                stream << origin << " node=" << static_cast<unsigned>(sourceNodeId) << " state=" << state;
                 logLine(stream.str());
             });
 

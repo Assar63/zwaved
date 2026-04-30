@@ -315,7 +315,7 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                std::uint8_t /*basic*/,
                std::uint8_t /*generic*/,
                std::uint8_t /*specific*/,
-               const std::vector<std::uint8_t>& /*ccs*/)
+               const std::vector<std::uint8_t>& /*ccs*/) -> void
             { logLine(formatStatusEntry("Inclusion", sessionId, status, nodeId)); });
 
     proxy.uponSignal("NodeExclusionStatus")
@@ -328,13 +328,13 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                std::uint8_t /*basic*/,
                std::uint8_t /*generic*/,
                std::uint8_t /*specific*/,
-               const std::vector<std::uint8_t>& /*ccs*/)
+               const std::vector<std::uint8_t>& /*ccs*/) -> void
             { logLine(formatStatusEntry("Exclusion", sessionId, status, nodeId)); });
 
     proxy.uponSignal("DongleStatus")
         .onInterface(IFACE_NAME)
         .call(
-            [](bool connected, const std::string& path)
+            [](bool connected, const std::string& path) -> void
             {
                 setDongleStatus(connected, path);
                 logLine(connected ? "DongleStatus: connected " + path : "DongleStatus: disconnected");
@@ -355,7 +355,7 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
     proxy.uponSignal("SwitchBinaryReport")
         .onInterface(IFACE_NAME)
         .call(
-            [](std::uint8_t sourceNodeId, std::uint8_t state)
+            [](std::uint8_t sourceNodeId, std::uint8_t state) -> void
             {
                 std::ostringstream stream;
                 stream << "SwitchBinaryReport node=" << static_cast<unsigned>(sourceNodeId)
@@ -367,7 +367,7 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
         .onInterface(IFACE_NAME)
         .call(
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
-            [](std::uint8_t /*rxStatus*/, std::uint8_t sourceNodeId, const std::vector<std::uint8_t>& ccData)
+            [](std::uint8_t /*rxStatus*/, std::uint8_t sourceNodeId, const std::vector<std::uint8_t>& ccData) -> void
             {
                 // Surface unsolicited on/off events sent by binary-switch
                 // nodes. Wall switches typically push Basic SET to their
@@ -422,7 +422,7 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                std::uint8_t groupId,
                std::uint8_t maxSupported,
                std::uint8_t reportsToFollow,
-               const std::vector<std::uint8_t>& members)
+               const std::vector<std::uint8_t>& members) -> void
             {
                 std::ostringstream stream;
                 stream << "AssociationReport node=" << static_cast<unsigned>(sourceNodeId)
@@ -448,7 +448,7 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
             // Auto-chains a GetAssociation for each group when a groupings
             // report arrives, so [l] introspection (and manual [g]) end up
             // showing each group's members without further keystrokes.
-            [&proxy](std::uint8_t sourceNodeId, std::uint8_t supportedGroupings)
+            [&proxy](std::uint8_t sourceNodeId, std::uint8_t supportedGroupings) -> void
             {
                 std::ostringstream stream;
                 stream << "AssociationGroupingsReport node=" << static_cast<unsigned>(sourceNodeId)
@@ -476,7 +476,7 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
             [](const std::string& libraryVersion,
                std::uint8_t libraryType,
                const std::vector<std::uint8_t>& homeId,
-               std::uint8_t controllerNodeId)
+               std::uint8_t controllerNodeId) -> void
             {
                 std::ostringstream stream;
                 stream << "DongleInfo: \"" << libraryVersion << "\" libType=" << static_cast<unsigned>(libraryType)
@@ -517,61 +517,61 @@ struct CcName
 };
 // NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers): Z-Wave CC IDs from the AWG spec
 constexpr auto CC_NAMES = std::to_array<CcName>({
-    {0x20, "Basic"},
-    {0x22, "ApplicationStatus"},
-    {0x25, "SwitchBinary"},
-    {0x26, "SwitchMultilevel"},
-    {0x27, "SwitchAll"},
-    {0x2B, "SceneActivation"},
-    {0x2C, "SceneActuatorConf"},
-    {0x2D, "SceneControllerConf"},
-    {0x30, "SensorBinary"},
-    {0x31, "SensorMultilevel"},
-    {0x32, "Meter"},
-    {0x33, "ColorSwitch"},
-    {0x40, "ThermostatMode"},
-    {0x42, "ThermostatOperatingState"},
-    {0x43, "ThermostatSetpoint"},
-    {0x44, "ThermostatFanMode"},
-    {0x45, "ThermostatFanState"},
-    {0x55, "TransportService"},
-    {0x56, "Crc16Encap"},
-    {0x59, "AssociationGrpInfo"},
-    {0x5A, "DeviceResetLocally"},
-    {0x5B, "CentralScene"},
-    {0x5E, "ZwavePlusInfo"},
-    {0x60, "MultiChannel"},
-    {0x62, "DoorLock"},
-    {0x63, "UserCode"},
-    {0x6C, "Supervision"},
-    {0x70, "Configuration"},
-    {0x71, "Notification"},
-    {0x72, "ManufacturerSpecific"},
-    {0x73, "Powerlevel"},
-    {0x75, "Protection"},
-    {0x77, "NodeNaming"},
-    {0x7A, "FirmwareUpdateMd"},
-    {0x80, "Battery"},
-    {0x81, "Clock"},
-    {0x82, "Hail"},
-    {0x84, "WakeUp"},
-    {0x85, "Association"},
-    {0x86, "Version"},
-    {0x87, "Indicator"},
-    {0x8E, "MultiChannelAssociation"},
-    {0x8F, "MultiCmd"},
-    {0x98, "Security"},
-    {0x9F, "Security2"},
+    {.id = 0x20, .name = "Basic"},
+    {.id = 0x22, .name = "ApplicationStatus"},
+    {.id = 0x25, .name = "SwitchBinary"},
+    {.id = 0x26, .name = "SwitchMultilevel"},
+    {.id = 0x27, .name = "SwitchAll"},
+    {.id = 0x2B, .name = "SceneActivation"},
+    {.id = 0x2C, .name = "SceneActuatorConf"},
+    {.id = 0x2D, .name = "SceneControllerConf"},
+    {.id = 0x30, .name = "SensorBinary"},
+    {.id = 0x31, .name = "SensorMultilevel"},
+    {.id = 0x32, .name = "Meter"},
+    {.id = 0x33, .name = "ColorSwitch"},
+    {.id = 0x40, .name = "ThermostatMode"},
+    {.id = 0x42, .name = "ThermostatOperatingState"},
+    {.id = 0x43, .name = "ThermostatSetpoint"},
+    {.id = 0x44, .name = "ThermostatFanMode"},
+    {.id = 0x45, .name = "ThermostatFanState"},
+    {.id = 0x55, .name = "TransportService"},
+    {.id = 0x56, .name = "Crc16Encap"},
+    {.id = 0x59, .name = "AssociationGrpInfo"},
+    {.id = 0x5A, .name = "DeviceResetLocally"},
+    {.id = 0x5B, .name = "CentralScene"},
+    {.id = 0x5E, .name = "ZwavePlusInfo"},
+    {.id = 0x60, .name = "MultiChannel"},
+    {.id = 0x62, .name = "DoorLock"},
+    {.id = 0x63, .name = "UserCode"},
+    {.id = 0x6C, .name = "Supervision"},
+    {.id = 0x70, .name = "Configuration"},
+    {.id = 0x71, .name = "Notification"},
+    {.id = 0x72, .name = "ManufacturerSpecific"},
+    {.id = 0x73, .name = "Powerlevel"},
+    {.id = 0x75, .name = "Protection"},
+    {.id = 0x77, .name = "NodeNaming"},
+    {.id = 0x7A, .name = "FirmwareUpdateMd"},
+    {.id = 0x80, .name = "Battery"},
+    {.id = 0x81, .name = "Clock"},
+    {.id = 0x82, .name = "Hail"},
+    {.id = 0x84, .name = "WakeUp"},
+    {.id = 0x85, .name = "Association"},
+    {.id = 0x86, .name = "Version"},
+    {.id = 0x87, .name = "Indicator"},
+    {.id = 0x8E, .name = "MultiChannelAssociation"},
+    {.id = 0x8F, .name = "MultiCmd"},
+    {.id = 0x98, .name = "Security"},
+    {.id = 0x9F, .name = "Security2"},
 });
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 
 auto commandClassName(std::uint8_t commandClass) -> const char*
 {
-    for (const auto& entry : CC_NAMES)
+    for (const auto& [id, name] : CC_NAMES)
     {
-        if (entry.id == commandClass)
+        if (id == commandClass)
         {
-            return entry.name;
+            return name;
         }
     }
     return nullptr;

@@ -78,6 +78,13 @@ constexpr std::uint8_t CC_MARK = 0xEF;
 constexpr int NODE_ID_MIN = 1;
 constexpr int NODE_ID_MAX = 232;
 
+// Association group IDs are 1..255 per spec (0 reserved).
+constexpr int GROUP_ID_MIN = 1;
+constexpr int GROUP_ID_MAX = 255;
+
+// Conventional Z-Wave lifeline association group.
+constexpr std::uint8_t LIFELINE_GROUP = 1;
+
 // Max characters of node-id input read from the bottom-row prompt
 // (3 digits + null terminator, with slack).
 constexpr std::size_t NODE_ID_INPUT_BUFFER = 8;
@@ -199,11 +206,12 @@ auto formatSwitchState(std::uint8_t state) -> const char*
     }
 }
 
-/// Prompt at the bottom row for a node ID. Switches ncurses to blocking
-/// echoing input, reads a line, parses it as a 1..232 integer, then
-/// restores the periodic-redraw input mode. Returns std::nullopt if the
-/// input is empty or out of range.
-auto promptNodeId(const char* label) -> std::optional<std::uint8_t>
+/// Prompt at the bottom row for an integer in [minVal, maxVal]. Switches
+/// ncurses to blocking echoing input, reads a line, parses it, then
+/// restores the periodic-redraw input mode. Returns std::nullopt on
+/// empty input, parse error, or out-of-range value.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): min/max are clearly named at call sites
+auto promptByte(const char* label, int minVal, int maxVal) -> std::optional<std::uint8_t>
 {
     const int rows = getmaxy(stdscr);
     move(rows - 1, 0);
@@ -235,11 +243,16 @@ auto promptNodeId(const char* label) -> std::optional<std::uint8_t>
 
     int value                   = 0;
     auto const [ptr, errorCode] = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (errorCode != std::errc{} || value < NODE_ID_MIN || value > NODE_ID_MAX)
+    if (errorCode != std::errc{} || value < minVal || value > maxVal)
     {
         return std::nullopt;
     }
     return static_cast<std::uint8_t>(value);
+}
+
+auto promptNodeId(const char* label) -> std::optional<std::uint8_t>
+{
+    return promptByte(label, NODE_ID_MIN, NODE_ID_MAX);
 }
 
 auto draw(std::uint8_t lastSession) -> void
@@ -259,6 +272,9 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [2] Remove zwave node");
     mvprintw(row++, 0, "  [3] Switch binary ON  (prompts for node id)");
     mvprintw(row++, 0, "  [4] Switch binary OFF (prompts for node id)");
+    mvprintw(row++, 0, "  [a] Get association group members");
+    mvprintw(row++, 0, "  [g] Get association group count");
+    mvprintw(row++, 0, "  [L] Set lifeline (controller -> group 1)");
     mvprintw(row++, 0, "  [l] List included nodes");
     mvprintw(row++, 0, "  [i] Dongle info");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));
@@ -320,7 +336,7 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
     proxy.uponSignal("SendDataStatus")
         .onInterface(IFACE_NAME)
         .call(
-            [](std::uint8_t callbackId, std::uint8_t txStatus)
+            [](std::uint8_t callbackId, std::uint8_t txStatus) -> void
             {
                 std::ostringstream stream;
                 stream << "SendDataStatus callback=" << static_cast<unsigned>(callbackId) << " status=0x" << std::hex
@@ -605,6 +621,112 @@ auto handleDongleInfo(sdbus::IProxy& proxy) -> void
     logLine(stream.str());
 }
 
+auto fetchControllerNodeId(sdbus::IProxy& proxy) -> std::optional<std::uint8_t>
+{
+    using DongleInfoTuple = sdbus::Struct<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>;
+    DongleInfoTuple info;
+    try
+    {
+        proxy.callMethod("GetDongleInfo").onInterface(IFACE_NAME).storeResultsTo(info);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetDongleInfo failed: "} + err.what());
+        return std::nullopt;
+    }
+    const auto controllerNodeId = std::get<3>(info);
+    if (controllerNodeId == 0)
+    {
+        return std::nullopt;
+    }
+    return controllerNodeId;
+}
+
+auto handleGetAssociationGroupings(sdbus::IProxy& proxy, std::uint8_t& callbackCounter) -> void
+{
+    auto nodeId = promptByte("Node ID (1-232):", NODE_ID_MIN, NODE_ID_MAX);
+    if (!nodeId.has_value())
+    {
+        logLine("GetAssociationGroupings: cancelled or invalid node id");
+        return;
+    }
+    ++callbackCounter;
+    try
+    {
+        proxy.callMethod("GetAssociationGroupings").onInterface(IFACE_NAME).withArguments(*nodeId, callbackCounter);
+        std::ostringstream stream;
+        stream << "GetAssociationGroupings node=" << static_cast<unsigned>(*nodeId)
+               << " callback=" << static_cast<unsigned>(callbackCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetAssociationGroupings failed: "} + err.what());
+    }
+}
+
+auto handleGetAssociation(sdbus::IProxy& proxy, std::uint8_t& callbackCounter) -> void
+{
+    auto nodeId = promptByte("Node ID (1-232):", NODE_ID_MIN, NODE_ID_MAX);
+    if (!nodeId.has_value())
+    {
+        logLine("GetAssociation: cancelled or invalid node id");
+        return;
+    }
+    auto groupId = promptByte("Group ID (1-255):", GROUP_ID_MIN, GROUP_ID_MAX);
+    if (!groupId.has_value())
+    {
+        logLine("GetAssociation: cancelled or invalid group id");
+        return;
+    }
+    ++callbackCounter;
+    try
+    {
+        proxy.callMethod("GetAssociation").onInterface(IFACE_NAME).withArguments(*nodeId, *groupId, callbackCounter);
+        std::ostringstream stream;
+        stream << "GetAssociation node=" << static_cast<unsigned>(*nodeId)
+               << " group=" << static_cast<unsigned>(*groupId)
+               << " callback=" << static_cast<unsigned>(callbackCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetAssociation failed: "} + err.what());
+    }
+}
+
+auto handleSetLifeline(sdbus::IProxy& proxy, std::uint8_t& callbackCounter) -> void
+{
+    auto nodeId = promptByte("Node ID (1-232):", NODE_ID_MIN, NODE_ID_MAX);
+    if (!nodeId.has_value())
+    {
+        logLine("SetAssociation (lifeline): cancelled or invalid node id");
+        return;
+    }
+    auto controllerNodeId = fetchControllerNodeId(proxy);
+    if (!controllerNodeId.has_value())
+    {
+        logLine("SetAssociation (lifeline): controller node id unavailable (no DongleInfo yet)");
+        return;
+    }
+    ++callbackCounter;
+    const std::vector<std::uint8_t> members{*controllerNodeId};
+    try
+    {
+        proxy.callMethod("SetAssociation")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, LIFELINE_GROUP, members, callbackCounter);
+        std::ostringstream stream;
+        stream << "SetAssociation (lifeline) node=" << static_cast<unsigned>(*nodeId) << " group=1 members=["
+               << static_cast<unsigned>(*controllerNodeId) << "] callback=" << static_cast<unsigned>(callbackCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetAssociation failed: "} + err.what());
+    }
+}
+
 auto handleListNodes(sdbus::IProxy& proxy) -> void
 {
     using NodeTuple = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t, std::vector<std::uint8_t>>;
@@ -644,6 +766,7 @@ auto handleListNodes(sdbus::IProxy& proxy) -> void
 }
 }  // namespace
 
+// NOLINTBEGIN(readability-function-cognitive-complexity): flat key-dispatch table
 auto main() -> int
 {
     std::unique_ptr<sdbus::IConnection> connection;
@@ -726,6 +849,18 @@ auto main() -> int
             {
                 handleDongleInfo(*proxy);
             }
+            else if (key == 'a')
+            {
+                handleGetAssociation(*proxy, sessionCounter);
+            }
+            else if (key == 'g' || key == 'G')
+            {
+                handleGetAssociationGroupings(*proxy, sessionCounter);
+            }
+            else if (key == 'L')
+            {
+                handleSetLifeline(*proxy, sessionCounter);
+            }
             else if (key == 's' || key == 'S')
             {
                 if (lastSession == 0)
@@ -754,3 +889,4 @@ auto main() -> int
     connection->leaveEventLoop();
     return 0;
 }
+// NOLINTEND(readability-function-cognitive-complexity)

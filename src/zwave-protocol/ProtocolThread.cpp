@@ -42,6 +42,16 @@ constexpr std::uint8_t STATUS_COMPLETED     = 0x06;
 // generous so a slow-booting dongle still answers.
 constexpr int INTROSPECTION_TIMEOUT_MS = 2000;
 
+// SendData serialization. The dongle CANs when a new SendData REQUEST
+// arrives while it's still routing the previous one, so we wait for
+// the SendData completion callback before letting the protocol loop
+// pop the next queued request.
+constexpr int SEND_DATA_CALLBACK_TIMEOUT_MS = 5000;
+// Fallback when callbackId == 0 — the dongle won't emit a completion
+// callback, so we just sleep long enough for a typical Z-Wave transmit
+// to clear before issuing the next SendData.
+constexpr int SEND_DATA_NO_CALLBACK_DELAY_MS = 300;
+
 struct ZwaveProtocolState
 {
     std::thread thread;
@@ -212,8 +222,10 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
     }
 }
 
+// NOLINTNEXTLINE(readability-function-cognitive-complexity): flat per-variant dispatch
 auto dispatchRequest(FrameTransport& transport,
                      HostApi::SessionTracker& tracker,
+                     std::optional<std::uint8_t>& pendingSendData,
                      const HostApi::Request& request) -> void
 {
     std::visit(
@@ -257,6 +269,27 @@ auto dispatchRequest(FrameTransport& transport,
                     // notified instead of waiting indefinitely for a response.
                     HostApi::publishCallback(HostApi::SendDataCallback{.callbackId = concrete.callbackId,
                                                                        .txStatus   = HostApi::TRANSMIT_COMPLETE_FAIL});
+                    return;
+                }
+                // Throttle back-to-back SendData: the dongle will CAN any new
+                // frame while it's still routing the previous one. Wait for
+                // the completion callback (cleared by the transport handler
+                // in runConnectedSession) — or fall back to a fixed delay if
+                // the caller asked for no callback (callbackId == 0).
+                if (concrete.callbackId != 0)
+                {
+                    pendingSendData     = concrete.callbackId;
+                    using Clock         = std::chrono::steady_clock;
+                    const auto deadline = Clock::now() + std::chrono::milliseconds(SEND_DATA_CALLBACK_TIMEOUT_MS);
+                    while (pendingSendData.has_value() && Clock::now() < deadline && state().running.load())
+                    {
+                        transport.pumpOnce(IDLE_PUMP_TIMEOUT_MS);
+                    }
+                    pendingSendData.reset();
+                }
+                else
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(SEND_DATA_NO_CALLBACK_DELAY_MS));
                 }
             }
         },
@@ -266,8 +299,24 @@ auto dispatchRequest(FrameTransport& transport,
 auto runConnectedSession(SerialPort& port) -> void
 {
     HostApi::SessionTracker tracker;
+    std::optional<std::uint8_t> pendingSendData;
+
     FrameTransport transport(&port,
-                             [&tracker](const ZwaveDataFrame& frame) -> void { handleIncomingFrame(tracker, frame); });
+                             [&](const ZwaveDataFrame& frame) -> void
+                             {
+                                 // Clear the pending-SendData gate as soon as the matching
+                                 // completion callback arrives. handleIncomingFrame will also
+                                 // publish the callback to the external-API consumer queue.
+                                 if (pendingSendData.has_value())
+                                 {
+                                     if (const auto callback = HostApi::decodeSendDataCallback(frame);
+                                         callback.has_value() && callback->callbackId == *pendingSendData)
+                                     {
+                                         pendingSendData.reset();
+                                     }
+                                 }
+                                 handleIncomingFrame(tracker, frame);
+                             });
 
     while (state().running && port.isOpen())
     {
@@ -281,7 +330,7 @@ auto runConnectedSession(SerialPort& port) -> void
         auto request = HostApi::popRequest(state().running, REQUEST_WAIT_TIMEOUT_MS);
         if (request.has_value())
         {
-            dispatchRequest(transport, tracker, *request);
+            dispatchRequest(transport, tracker, pendingSendData, *request);
         }
         else
         {

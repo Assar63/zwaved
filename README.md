@@ -4,12 +4,13 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 
 ## Features
 
-- **Z-Wave Communication Thread**: A dedicated thread named "ZWaveComm" handles all Z-Wave device communication
-- **Automatic Thread Management**: Thread starts before `main()` and stops after via `__attribute__((constructor))` and `__attribute__((destructor))`
-- **Z-Wave Device Monitoring**: Monitors USB device insertion/removal events to detect Z-Wave dongle connection/disconnection
-- **Multi-Compiler Support**: Build with GCC 15 or LLVM/Clang 20 using CMake presets
-- **Thread Awareness**: The thread is aware of application start and stop events via atomic flags
-- **Connected to Aeotec Z-Stick Gen5**: Supports communication with Z-Wave USB controllers via `/dev/ttyACM0`
+- **Priority-managed component threads**: Each component starts before `main()` and stops after via `__attribute__((constructor(N)))` / `__attribute__((destructor(N)))` at known priorities (101 signals, 201 dongle monitor, 202 protocol, 203 external API)
+- **USB hot-plug detection**: `libudev` watches for the Aeotec Z-Stick Gen5 (VID `0658`, PID `0200`) and publishes the discovered TTY path through a `DeviceHandoff` channel
+- **Z-Wave Host API frame transport**: SOF / ACK / NAK / CAN parser, send-with-ACK retry on NAK/CAN/timeout (`Tn = 100 + n × 1000 ms`, 3 attempts), spec-compliant XOR checksum
+- **Add Node / Remove Node support**: Classic inclusion (Mode `0x01`), SmartStart Listen (Mode `0x09`) and SmartStart Include (Mode `0x08`) for `0x4A`; classic exclusion for `0x4B`; stop via Mode `0x05`
+- **External D-Bus interface (sdbus-c++)**: System bus name `com.tiunda.ZWaved`, methods `AddNode` / `StopAddNode` / `RemoveNode` / `StopRemoveNode`, signals `NodeInclusionStatus` / `NodeExclusionStatus` / `DongleStatus`. See [MANUAL.md](MANUAL.md) for operator usage.
+- **Pluggable transport backends**: A clean `IBackend` interface allows a future ubus backend to plug in without disturbing the protocol layer; selectable via the `ZWAVED_EXTERNAL_API` CMake cache option (`dbus` default; `ubus` and `both` reserved)
+- **Multi-Compiler Support**: Build with GCC 15 or LLVM/Clang 20 using CMake presets, with optional `clang-tidy`-integrated variants
 
 ## Prerequisites
 
@@ -17,6 +18,8 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 - **GCC 15.2.0** or **LLVM/Clang 20.1.8** (or both for multi-compiler support)
 - **POSIX-compliant system** (Linux)
 - **C++26 standard support**
+- **libudev** development files (`libudev-dev`) — USB device monitoring
+- **sdbus-c++** development files (`libsdbus-c++-dev`) — D-Bus interface; pulls in `libsystemd-dev` transitively
 
 ## Installation
 
@@ -33,8 +36,8 @@ sudo apt install -y g++-15 gcc-15
 # LLVM 20
 sudo apt install -y clang-20 llvm-20
 
-# CMake
-sudo apt install -y cmake
+# CMake + runtime libs
+sudo apt install -y cmake libudev-dev libsdbus-c++-dev
 ```
 
 ## Compilation
@@ -111,66 +114,110 @@ make
 
 ### Running Output
 
-The application will output:
+The daemon logs lifecycle events to stdout. Plug in the Aeotec Z-Stick and
+you should see something like:
+
 ```
-Z-Wave communication thread running
-Hello and welcome to C++!
-i = 1
-i = 2
-i = 3
-i = 4
-i = 5
-Z-Wave communication thread running
-Z-Wave communication thread running
-...
+[SignalHandler] Registered SIGHUP/SIGTERM/SIGINT handlers
+Z-Wave dongle inserted: ...
+Z-Wave dongle tty node: /dev/ttyACM0
+[SerialPort] opened /dev/ttyACM0 at 115200 8N1
+[DBusBackend] listening on system bus as com.tiunda.ZWaved
 ```
 
-The "Z-Wave communication thread running" message appears every second and will stop when the application exits.
+External callers then drive Add/Remove Node operations via D-Bus — see
+[MANUAL.md](MANUAL.md).
 
 ### Stop the Application
 
-Press `Ctrl+C` to gracefully stop the application. The thread will print:
+Press `Ctrl+C` (SIGINT) or send SIGTERM. Each component prints a
+shutdown line as it joins.
+
+## External API (D-Bus)
+
+zwaved exposes the Z-Wave Host API on the **system bus**:
+
+- **Bus name:** `com.tiunda.ZWaved`
+- **Object:** `/com/tiunda/ZWaved`
+- **Interface:** `com.tiunda.ZWaved1`
+- **Methods:** `AddNode(y y y ay ay)`, `StopAddNode(y)`, `RemoveNode(y y y)`, `StopRemoveNode(y)`
+- **Signals:** `NodeInclusionStatus(y y q y y y ay)`, `NodeExclusionStatus(y y q y y y ay)`, `DongleStatus(b s)`
+
+Install the system bus policy once per host:
+
+```bash
+sudo install -m 0644 dbus/com.tiunda.ZWaved.conf /etc/dbus-1/system.d/
+sudo systemctl reload dbus
 ```
-Z-Wave communication thread stopping
-```
+
+The `ZWAVED_EXTERNAL_API` CMake cache option selects which transports
+build into the binary — `dbus` (default), `ubus` (placeholder, not yet
+implemented), or `both`. A future ubus backend will plug into the same
+`IBackend` interface and mirror these method/signal names.
+
+For full operator usage (classic vs SmartStart inclusion, signal
+progression, flag-byte layout, status table, troubleshooting), see
+[MANUAL.md](MANUAL.md).
 
 ## Project Structure
 
 ```
 zwaved/
-├── CMakeLists.txt                 # Root CMake configuration
-├── CMakePresets.json              # CMake presets for GCC and LLVM
+├── CMakeLists.txt                  # Root CMake configuration
+├── CMakePresets.json               # CMake presets (gnu, llvm, gnu-tidy, llvm-tidy)
 ├── README.md                       # This file
+├── MANUAL.md                       # D-Bus operator manual
+├── CLAUDE.md                       # Notes for Claude Code
+├── dbus/
+│   └── com.tiunda.ZWaved.conf      # System bus policy file
+├── docs/                           # Z-Wave Host API specification (PDF)
 ├── src/
-│   ├── CMakeLists.txt             # src subdirectory CMake configuration
-│   ├── main.cpp                    # Main application entry point with signal handler registration
-│   ├── zwave/
-│   │   ├── CMakeLists.txt         # Z-Wave component CMake configuration
-│   │   ├── ZWaveMonitor.cpp       # USB device monitoring implementation
-│   │   ├── ZWaveMonitor.hpp       # USB device monitoring header
-│   │   └── MonitorThread.cpp        # Z-Wave monitor thread startup/shutdown
-│   └── zwave-protocol/
-│       ├── CMakeLists.txt         # Protocol component CMake configuration
-│       ├── ThreadManager.cpp       # Thread lifecycle management
-│       ├── SignalHandler.cpp       # Signal handling (SIGHUP, SIGTERM, SIGINT)
-│       └── SignalHandler.hpp       # Signal handler declarations
+│   ├── CMakeLists.txt
+│   ├── main.cpp                    # Loops on applicationRunning until shutdown
+│   ├── zwaved.h                    # Component priority constants
+│   ├── SignalHandler.hpp/.cpp      # SIGHUP/SIGTERM/SIGINT handlers (priority 101)
+│   ├── zwave-dongle/               # USB monitoring (priority 201)
+│   │   ├── CMakeLists.txt
+│   │   ├── MonitorThread.cpp       # libudev hot-plug detection
+│   │   └── DeviceHandoff.hpp/.cpp  # Single-slot TTY path channel
+│   ├── zwave-protocol/             # Serial I/O + host API (priority 202)
+│   │   ├── CMakeLists.txt
+│   │   ├── ProtocolThread.cpp      # Main protocol event loop
+│   │   ├── SerialPort.hpp/.cpp     # RAII 115200 8N1 raw TTY wrapper
+│   │   ├── FrameTransport.hpp/.cpp # SOF/ACK/NAK/CAN parser + retry
+│   │   ├── HostApi.hpp/.cpp        # 0x4A/0x4B encoders + callback decoder
+│   │   ├── HostApiSession.hpp/.cpp # Active session tracker
+│   │   ├── HostApiRequestQueue.hpp/.cpp
+│   │   ├── HostApiCallbackDispatcher.hpp/.cpp
+│   │   ├── ZwaveDataFrame.hpp/.cpp # SOF data frame
+│   │   ├── ZwaveACCFrame.hpp/.cpp  # ACK (0x06)
+│   │   ├── ZwaveNAKFrame.hpp/.cpp  # NAK (0x15)
+│   │   └── ZwaveCANFrame.hpp/.cpp  # CAN (0x18)
+│   └── external-api/               # External transports (priority 203)
+│       ├── CMakeLists.txt
+│       ├── IExternalApi.hpp        # Backend interface
+│       ├── ExternalApiThread.cpp   # Component lifecycle + factory
+│       └── DBusBackend.hpp/.cpp    # sdbus-c++ implementation
 ├── .cmake/
-│   ├── gnu-toolchain.cmake        # GCC 15 toolchain configuration
-│   └── llvm-toolchain.cmake       # LLVM/Clang 20 toolchain configuration
-├── .clang-format                   # Code formatting rules
-├── .clang-tidy                     # Static analysis rules
-├── .gitignore                      # Git ignore patterns
-└── cmake-build-*                  # Build directories (generated)
+│   ├── gnu-toolchain.cmake
+│   └── llvm-toolchain.cmake
+├── .clang-format
+├── .clang-tidy
+├── gitscripts/
+│   └── pre-commit                  # clang-format + clang-tidy gate
+├── .gitignore
+└── cmake-build-*                   # Build directories (generated)
 ```
 
 ## Modular CMake Build System
 
 The project uses a modular CMake structure for better organization and scalability:
 
-- **Root CMakeLists.txt**: Defines the project, finds dependencies (libudev), and builds the main executable
-- **src/CMakeLists.txt**: Processes subdirectories for Z-Wave and protocol components
-- **src/zwave/CMakeLists.txt**: Z-Wave device monitoring component sources
-- **src/zwave-protocol/CMakeLists.txt**: Thread management and protocol handling component sources
+- **Root CMakeLists.txt**: Defines the project, finds dependencies (`libudev`, `sdbus-c++`), and exposes `ZWAVED_EXTERNAL_API`
+- **src/CMakeLists.txt**: Processes subdirectories for the dongle monitor, protocol, and external-API components
+- **src/zwave-dongle/CMakeLists.txt**: USB hot-plug monitoring + device handoff sources
+- **src/zwave-protocol/CMakeLists.txt**: Serial port, frame transport, host-API codec, and session/queue sources
+- **src/external-api/CMakeLists.txt**: External-transport backends (gated on `ZWAVED_EXTERNAL_API`)
 
 This hierarchical structure allows:
 - Clean separation of concerns
@@ -187,9 +234,24 @@ To add a new component:
 
 ### Thread Lifecycle
 
-- **Start**: The `startZWaveThread()` function is executed before `main()` via `__attribute__((constructor(101)))`
-- **Running**: The thread loops while `running` atomic flag is true, printing status every second
-- **Stop**: The `stopZWaveThread()` function is executed after `main()` exits via `__attribute__((destructor(101)))`
+Each component is owned by a dedicated thread, started before `main()`
+via `__attribute__((constructor(N)))` and stopped after `main()` returns
+via `__attribute__((destructor(N)))`. Priorities are defined in
+`src/zwaved.h`:
+
+| Priority | Component | Thread name | Purpose |
+|----------|-----------|-------------|---------|
+| 101 | `SignalHandler` | (no thread) | Registers signal handlers; sets `applicationRunning = true` |
+| 201 | `MonitorThread` | `ZWaveComm` | libudev hot-plug → `DeviceHandoff::publish` |
+| 202 | `ProtocolThread` | `ZWaveProto` | Awaits TTY path → opens `SerialPort` → runs `FrameTransport` event loop |
+| 203 | `ExternalApiThread` | `ZWaveExtApi` | Runs the configured backend (D-Bus today) |
+
+Components communicate through three thread-safe channels in
+`src/zwave-protocol/`: `DeviceHandoff` (monitor → protocol),
+`HostApiRequestQueue` (external API → protocol), and
+`HostApiCallbackDispatcher` (protocol → external API). All three use
+`std::mutex` + `std::condition_variable` for blocking waits with
+shutdown wake-up.
 
 
 ### Signal Handling
@@ -226,10 +288,10 @@ kill -HUP <pid>
 ps aux | grep zwaved
 ```
 
-- **Name**: "ZWaveComm" (set via `prctl(PR_SET_NAME, ...)`)
-- **Type**: `std::thread` stored in global scope
-- **Synchronization**: Uses `std::atomic<bool>` for thread-safe stop signaling
-- **Port**: `/dev/ttyACM0` (when Z-Wave USB controller is connected)
+- **Names**: `ZWaveComm`, `ZWaveProto`, `ZWaveExtApi` (set via `prctl(PR_SET_NAME, ...)`)
+- **Type**: `std::thread` stored in component-local anonymous namespaces
+- **Synchronization**: `std::atomic<bool>` for stop signaling; mutex + cv for the inter-thread channels
+- **Port**: `/dev/ttyACMx` discovered at runtime by libudev; the protocol thread reopens automatically on hot-plug
 
 ### Available Compilers
 

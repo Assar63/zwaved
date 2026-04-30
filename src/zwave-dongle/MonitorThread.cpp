@@ -1,13 +1,17 @@
+#include "../message-bus/MessageBus.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
+#include "DeviceHandoff.hpp"
+
 #include <atomic>
 #include <cstring>
 #include <iostream>
-#include <libudev.h>
 #include <string>
+#include <thread>
+
+#include <libudev.h>
 #include <sys/prctl.h>
 #include <sys/select.h>
 #include <sys/time.h>  // NOLINT(misc-include-cleaner): provides timeval used by select()
-#include <thread>
 
 namespace
 {
@@ -184,6 +188,11 @@ auto handleDeviceEvent(udev* udev, udev_device* dev, std::string& trackedDevpath
         {
             trackedDevpath = logZWaveDongleDetails(udev, dev, "Z-Wave dongle inserted: ");
             trackedTtyNode = findAttachedTtyNode(udev, dev);
+            if (!trackedTtyNode.empty())
+            {
+                DeviceHandoff::publish(trackedTtyNode);
+                MessageBus::publish(MessageBus::DongleStatus{.connected = true, .ttyPath = trackedTtyNode});
+            }
         }
     }
     else if (strcmp(action, "remove") == 0)
@@ -196,6 +205,8 @@ auto handleDeviceEvent(udev* udev, udev_device* dev, std::string& trackedDevpath
                 std::cout << "Z-Wave dongle tty node was: " << trackedTtyNode << '\n';
             }
 
+            DeviceHandoff::clear();
+            MessageBus::publish(MessageBus::DongleStatus{.connected = false, .ttyPath = {}});
             trackedDevpath.clear();
             trackedTtyNode.clear();
         }
@@ -211,6 +222,8 @@ auto runMonitorLoop(udev* udev, udev_monitor* mon, std::string& trackedDevpath, 
 
     while (state().running)
     {
+        std::cout << "Z-Wave device monitor thread running\n";
+
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(fileDescriptor, &fds);
@@ -258,6 +271,11 @@ auto zwaveMonitorThread() -> void
             trackedTtyNode = findAttachedTtyNode(udev, usbDevice);
             trackedDevpath = logZWaveDongleDetails(udev, usbDevice, "Z-Wave dongle already inserted at startup: ");
             udev_device_unref(usbDevice);
+            if (!trackedTtyNode.empty())
+            {
+                DeviceHandoff::publish(trackedTtyNode);
+                MessageBus::publish(MessageBus::DongleStatus{.connected = true, .ttyPath = trackedTtyNode});
+            }
         }
     }
 
@@ -270,15 +288,18 @@ auto zwaveMonitorThread() -> void
 
 __attribute__((constructor(CONFIG_ZWAVE_DONGLE_PRIO))) auto startZWaveMonitorThread() -> void
 {
-    state().thread = std::thread(zwaveMonitorThread);
+    state().running = true;
+    state().thread  = std::thread(zwaveMonitorThread);
 }
 
 __attribute__((destructor(CONFIG_ZWAVE_DONGLE_PRIO))) auto stopZWaveMonitorThread() -> void
 {
     state().running = false;
+    DeviceHandoff::wakeAll();
     if (state().thread.joinable())
     {
         state().thread.join();
     }
+    std::cout << "Z-Wave device monitor thread shutdown complete\n";
 }
 }  // namespace

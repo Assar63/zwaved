@@ -39,12 +39,27 @@ done <<< "${changed_files}"
 
 echo "Running clang-tidy check..."
 
+# Locate a build directory with compile_commands.json so clang-tidy can
+# resolve C++26 features and third-party headers (sdbus-c++, eventpp, ...).
+tidy_build_dir=""
+for candidate in cmake-build-gnu cmake-build-llvm cmake-build-gnu-tidy cmake-build-llvm-tidy; do
+    if [[ -f "${candidate}/compile_commands.json" ]]; then
+        tidy_build_dir="${candidate}"
+        break
+    fi
+done
+
+if [[ -z "${tidy_build_dir}" ]]; then
+    echo "error: no compile_commands.json found under cmake-build-*; configure a preset first (e.g. cmake --preset gnu)"
+    exit 1
+fi
+
 while IFS= read -r file; do
     [[ -f "${file}" ]] || continue
 
     case "${file}" in
         *.cpp | *.cxx | *.cc | *.c)
-            if ! clang-tidy "${file}" --quiet -- >/dev/null; then
+            if ! clang-tidy "${file}" --quiet -p "${tidy_build_dir}" >/dev/null; then
                 echo "clang-tidy failed: ${file}"
                 tidy_failed=1
             fi

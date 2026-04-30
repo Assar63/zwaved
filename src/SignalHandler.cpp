@@ -1,7 +1,10 @@
 #include "SignalHandler.hpp"
+
 #include "zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
+
 #include <atomic>
 #include <iostream>
+
 #include <signal.h>  // NOLINT(modernize-deprecated-headers): <csignal> lacks POSIX sigaction/sigemptyset
 
 namespace

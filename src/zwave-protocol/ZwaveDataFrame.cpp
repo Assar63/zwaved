@@ -1,4 +1,5 @@
 #include "ZwaveDataFrame.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>

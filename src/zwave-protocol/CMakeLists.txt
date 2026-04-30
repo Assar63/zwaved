@@ -7,4 +7,10 @@ target_sources(zwaved PRIVATE
     ZwaveACCFrame.cpp
     ZwaveNAKFrame.cpp
     ZwaveCANFrame.cpp
+    SerialPort.cpp
+    FrameTransport.cpp
+    HostApi.cpp
+    HostApiSession.cpp
+    HostApiRequestQueue.cpp
+    HostApiCallbackDispatcher.cpp
 )

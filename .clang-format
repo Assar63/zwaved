@@ -11,7 +11,7 @@ AllowShortLoopsOnASingleLine: false
 BreakBeforeBraces: Allman
 PointerAlignment: Left
 ReferenceAlignment: Left
-AlignAfterOpenBracket: Align
+AlignAfterOpenBracket: true
 AlignConsecutiveAssignments: true
 AlignOperands: true
 BinPackArguments: false
@@ -40,4 +40,14 @@ SpacesInCStyleCastParentheses: false
 SpacesInContainerLiterals: true
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^".*"'
+    Priority: 1
+  - Regex: '^<[^.]+>$'
+    Priority: 2
+  - Regex: '^<.*\.h>'
+    Priority: 3
+  - Regex: '.*'
+    Priority: 4

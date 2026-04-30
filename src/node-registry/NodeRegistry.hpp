@@ -25,6 +25,12 @@ struct NodeInfo
 auto add(const NodeInfo& info) -> void;
 auto remove(std::uint8_t nodeId) -> void;
 
+/// Insert a placeholder entry for a node ID we know is included
+/// (e.g. from FUNC_ID_SERIAL_API_GET_INIT_DATA's bitmap) but for
+/// which we have no device-class or CC info yet. No-op if an
+/// entry already exists — won't downgrade a fully-populated node.
+auto seed(std::uint8_t nodeId) -> void;
+
 /// Thread-safe copy of the current registry, sorted ascending by nodeId.
 [[nodiscard]] auto snapshot() -> std::vector<NodeInfo>;
 }  // namespace NodeRegistry

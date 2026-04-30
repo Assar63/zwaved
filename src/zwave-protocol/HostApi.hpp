@@ -13,6 +13,7 @@ namespace HostApi
 {
 using SessionId = uint8_t;
 
+constexpr uint8_t CMD_SERIAL_API_GET_INIT_DATA = 0x02;
 constexpr uint8_t CMD_APPLICATION_COMMAND      = 0x04;
 constexpr uint8_t CMD_SEND_DATA                = 0x13;
 constexpr uint8_t CMD_GET_VERSION              = 0x15;
@@ -115,6 +116,21 @@ struct MemoryIdResponse
     uint8_t controllerNodeId = 0;
 };
 
+/// Decoded payload of FUNC_ID_SERIAL_API_GET_INIT_DATA (0x02) RESPONSE.
+/// Returned during the dongle's startup introspection — nodeIds is the
+/// expanded node bitmap (every nodeId currently included in the
+/// network, regardless of whether the daemon has met it during this
+/// run). Capabilities bits per INS12350: 0=secondary, 1=no-send,
+/// 2=SIS, 3=real-primary.
+struct InitDataResponse
+{
+    uint8_t serialApiVersion = 0;
+    uint8_t capabilities     = 0;
+    uint8_t chipType         = 0;
+    uint8_t chipVersion      = 0;
+    std::vector<uint8_t> nodeIds;
+};
+
 /// Decoded payload of FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04). Emitted
 /// by the controller whenever a node sends an unsolicited Command Class
 /// frame (e.g. SwitchBinary REPORT after a manual toggle, sensor pings,
@@ -158,6 +174,11 @@ struct NodeStatusCallback
 
 /// Decode a FUNC_ID_MEMORY_GET_ID (0x20) RESPONSE.
 [[nodiscard]] auto decodeMemoryId(const ZwaveDataFrame& frame) -> std::optional<MemoryIdResponse>;
+
+/// Decode a FUNC_ID_SERIAL_API_GET_INIT_DATA (0x02) RESPONSE; expands
+/// the node bitmap into a sorted nodeIds vector (only valid 1..232
+/// node IDs are emitted).
+[[nodiscard]] auto decodeInitData(const ZwaveDataFrame& frame) -> std::optional<InitDataResponse>;
 
 /// Decode either a 0x4A or 0x4B callback. Pass nodeId16Bit = true if the
 /// controller has been configured for 16-bit node IDs (default false matches

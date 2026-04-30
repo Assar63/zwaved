@@ -16,7 +16,8 @@ companion `zwave-terminal` client, and packaging.
 - [x] **Unsolicited event handling** — `FUNC_ID_APPLICATION_COMMAND_HANDLER` decoded and fanned out via `MessageBus`.
 - [x] **Node list** — `src/node-registry/` tracks included nodes; exposed as `GetNodes()` on D-Bus and via `[l]` in the terminal.
 - [x] **Dongle introspection on connect** — `GET_VERSION` + `MEMORY_GET_ID` synchronously after serial open; published as `DongleInfo` (retained on the bus, signalled on D-Bus, cached for `GetDongleInfo`). `[i]` in the terminal queries it.
-- [ ] **Existing-network discovery** — `FUNC_ID_SERIAL_API_GET_INIT_DATA` (0x02) at startup to populate `NodeRegistry` from dongle memory so node list survives daemon restarts.
+- [x] **Existing-network discovery** — `FUNC_ID_SERIAL_API_GET_INIT_DATA` (0x02) runs at startup; node bitmap is expanded and seeded into `NodeRegistry`. Full payload exposed as `GetInitData()` D-Bus method + `InitData` signal.
+- [ ] **Per-node protocol info** — call `FUNC_ID_GET_NODE_PROTOCOL_INFO` (0x41) for each seeded node so the registry's device-class triple and CC list survive daemon restarts too (today seeded entries have those fields zeroed until the node is re-included).
 - [ ] **Node info** — detailed per-node view (capabilities, status, recent activity).
 - [ ] **Network info** — aggregate view (node count, statuses, activity).
 - [ ] **Network status** — current health, ongoing operations, errors.

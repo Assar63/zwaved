@@ -13,6 +13,7 @@ namespace
 {
 using DongleStatusList       = eventpp::CallbackList<void(const MessageBus::DongleStatus&)>;
 using DongleInfoList         = eventpp::CallbackList<void(const MessageBus::DongleInfo&)>;
+using InitDataList           = eventpp::CallbackList<void(const MessageBus::InitData&)>;
 using ApplicationCommandList = eventpp::CallbackList<void(const MessageBus::ApplicationCommand&)>;
 
 // State events (currently just DongleStatus) are retained so that late
@@ -29,12 +30,14 @@ struct State
 {
     DongleStatusList dongleStatus;
     DongleInfoList dongleInfo;
+    InitDataList initData;
     ApplicationCommandList applicationCommand;
     std::mutex stateMutex;
     std::atomic<MessageBus::SubscriptionId> nextId{1};
     std::unordered_map<MessageBus::SubscriptionId, std::function<void()>> removers;
     std::optional<MessageBus::DongleStatus> lastDongleStatus;
     std::optional<MessageBus::DongleInfo> lastDongleInfo;
+    std::optional<MessageBus::InitData> lastInitData;
 };
 
 auto state() -> State&
@@ -98,6 +101,26 @@ auto MessageBus::publish(const DongleInfo& info) -> void
     std::scoped_lock const lock(state().stateMutex);
     state().lastDongleInfo = info;
     state().dongleInfo(info);
+}
+
+auto MessageBus::subscribe(const std::function<void(const InitData&)>& handler) -> SubscriptionId
+{
+    std::scoped_lock const lock(state().stateMutex);
+    const auto handle          = state().initData.append(handler);
+    const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
+    state().removers.emplace(newId, [handle]() { state().initData.remove(handle); });
+    if (const auto cached = state().lastInitData; cached.has_value())
+    {
+        handler(*cached);
+    }
+    return newId;
+}
+
+auto MessageBus::publish(const InitData& info) -> void
+{
+    std::scoped_lock const lock(state().stateMutex);
+    state().lastInitData = info;
+    state().initData(info);
 }
 
 auto MessageBus::subscribe(const std::function<void(const ApplicationCommand&)>& handler) -> SubscriptionId

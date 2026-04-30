@@ -106,17 +106,27 @@ auto isPathSet() -> bool
     return state().path.has_value();
 }
 
+struct IntrospectionResult
+{
+    std::optional<MessageBus::DongleInfo> dongleInfo;
+    std::optional<MessageBus::InitData> initData;
+};
+
 /// Run the dongle's startup introspection: GET_VERSION (0x15) +
-/// MEMORY_GET_ID (0x20). Uses a short-lived FrameTransport with its
-/// own capturing handler so RESPONSE frames land in local optionals
-/// without going through the runtime callback path. Returns
-/// std::nullopt if either request times out or fails to send.
-auto introspectDongle(SerialPort& port) -> std::optional<MessageBus::DongleInfo>
+/// MEMORY_GET_ID (0x20) + SERIAL_API_GET_INIT_DATA (0x02). Uses a
+/// short-lived FrameTransport with its own capturing handler so
+/// RESPONSE frames land in local optionals without going through the
+/// runtime callback path. GET_VERSION and MEMORY_GET_ID failures are
+/// fatal (no DongleInfo); GET_INIT_DATA is best-effort — if it
+/// times out or the dongle doesn't support the FUNC_ID, the result
+/// just has no initData payload.
+auto introspectDongle(SerialPort& port) -> IntrospectionResult
 {
     using Clock = std::chrono::steady_clock;
 
     std::optional<HostApi::VersionResponse> version;
     std::optional<HostApi::MemoryIdResponse> identity;
+    std::optional<HostApi::InitDataResponse> initData;
 
     FrameTransport transport(&port,
                              [&](const ZwaveDataFrame& frame)
@@ -128,6 +138,10 @@ auto introspectDongle(SerialPort& port) -> std::optional<MessageBus::DongleInfo>
                                  else if (auto resp = HostApi::decodeMemoryId(frame); resp.has_value())
                                  {
                                      identity = resp;
+                                 }
+                                 else if (auto resp = HostApi::decodeInitData(frame); resp.has_value())
+                                 {
+                                     initData = resp;
                                  }
                              });
 
@@ -147,21 +161,25 @@ auto introspectDongle(SerialPort& port) -> std::optional<MessageBus::DongleInfo>
         return slot.has_value();
     };
 
+    IntrospectionResult result;
+
     if (!sendAndAwait(HostApi::CMD_GET_VERSION, version))
     {
         std::cerr << "[ProtocolThread] GET_VERSION introspection failed\n";
-        return std::nullopt;
+        return result;
     }
     if (!sendAndAwait(HostApi::CMD_MEMORY_GET_ID, identity))
     {
         std::cerr << "[ProtocolThread] MEMORY_GET_ID introspection failed\n";
-        return std::nullopt;
+        return result;
     }
-    // Belt-and-braces: sendAndAwait already returns false unless the slot was
-    // populated, but the static analyzer can't trace that across the helper.
+    if (!sendAndAwait(HostApi::CMD_SERIAL_API_GET_INIT_DATA, initData))
+    {
+        std::cerr << "[ProtocolThread] SERIAL_API_GET_INIT_DATA introspection failed (continuing)\n";
+    }
     if (!version.has_value() || !identity.has_value())
     {
-        return std::nullopt;
+        return result;
     }
 
     MessageBus::DongleInfo info;
@@ -169,7 +187,19 @@ auto introspectDongle(SerialPort& port) -> std::optional<MessageBus::DongleInfo>
     info.libraryType    = version->libraryType;
     info.homeId.assign(identity->homeId.begin(), identity->homeId.end());
     info.controllerNodeId = identity->controllerNodeId;
-    return info;
+    result.dongleInfo     = info;
+
+    if (initData.has_value())
+    {
+        MessageBus::InitData payload;
+        payload.serialApiVersion = initData->serialApiVersion;
+        payload.capabilities     = initData->capabilities;
+        payload.chipType         = initData->chipType;
+        payload.chipVersion      = initData->chipVersion;
+        payload.nodeIds          = initData->nodeIds;
+        result.initData          = payload;
+    }
+    return result;
 }
 
 auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame& frame) -> void
@@ -365,12 +395,25 @@ auto zwaveCommunicationThread() -> void
             continue;
         }
 
-        if (auto info = introspectDongle(port); info.has_value())
+        if (auto introspection = introspectDongle(port); introspection.dongleInfo.has_value())
         {
-            std::cout << "[ProtocolThread] dongle " << info->libraryVersion << " (lib type "
-                      << static_cast<int>(info->libraryType) << ", controller node "
-                      << static_cast<int>(info->controllerNodeId) << ")\n";
-            MessageBus::publish(*info);
+            const auto& info = *introspection.dongleInfo;
+            std::cout << "[ProtocolThread] dongle " << info.libraryVersion << " (lib type "
+                      << static_cast<int>(info.libraryType) << ", controller node "
+                      << static_cast<int>(info.controllerNodeId) << ")\n";
+            MessageBus::publish(info);
+
+            if (introspection.initData.has_value())
+            {
+                const auto& init = *introspection.initData;
+                std::cout << "[ProtocolThread] init-data: " << init.nodeIds.size() << " node(s) included, chip type "
+                          << static_cast<int>(init.chipType) << " rev " << static_cast<int>(init.chipVersion) << '\n';
+                for (const auto nodeId : init.nodeIds)
+                {
+                    NodeRegistry::seed(nodeId);
+                }
+                MessageBus::publish(init);
+            }
         }
 
         HostApi::clear();

@@ -211,6 +211,20 @@ auto NodeRegistry::remove(std::uint8_t nodeId) -> void
     persistRemove(nodeId);
 }
 
+auto NodeRegistry::seed(std::uint8_t nodeId) -> void
+{
+    initIfNeeded();
+    std::scoped_lock const lock(state().mutex);
+    if (state().nodes.find(nodeId) != state().nodes.end())
+    {
+        return;
+    }
+    NodeInfo info;
+    info.nodeId           = nodeId;
+    state().nodes[nodeId] = info;
+    persistAdd(info);
+}
+
 auto NodeRegistry::snapshot() -> std::vector<NodeInfo>
 {
     initIfNeeded();

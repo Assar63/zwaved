@@ -19,6 +19,10 @@ constexpr uint8_t FLAG_NWE_BIT      = 6;  // Remove Node
 constexpr std::size_t HOMEID_LEN         = 4;
 constexpr std::size_t VERSION_STRING_LEN = 12;
 constexpr std::size_t DEVICE_CLASS_BYTES = 3;  // basic + generic + specific
+constexpr std::size_t INIT_DATA_HEADER   = 3;  // serialApiVersion + capabilities + bLen
+constexpr std::size_t INIT_DATA_TRAILER  = 2;  // chipType + chipVersion
+constexpr unsigned BITS_PER_BYTE         = 8;
+constexpr std::uint8_t MAX_VALID_NODE_ID = 232;
 constexpr unsigned NODE_ID_HIGH_SHIFT    = 8;
 
 auto makeFlagByte(const uint8_t mode,
@@ -195,6 +199,52 @@ auto HostApi::decodeVersion(const ZwaveDataFrame& frame) -> std::optional<Versio
         out.version.push_back(static_cast<char>(payload[idx]));
     }
     out.libraryType = payload[VERSION_STRING_LEN];
+    return out;
+}
+
+auto HostApi::decodeInitData(const ZwaveDataFrame& frame) -> std::optional<InitDataResponse>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_SERIAL_API_GET_INIT_DATA ||
+        frame.getType() != ZwaveDataFrame::FrameType::RESPONSE)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload  = frame.getPayload();
+    std::size_t const total = frame.getPayloadSize();
+    if (payload == nullptr || total < INIT_DATA_HEADER)
+    {
+        return std::nullopt;
+    }
+
+    InitDataResponse out;
+    out.serialApiVersion        = payload[0];
+    out.capabilities            = payload[1];
+    const std::size_t bitmapLen = payload[2];
+    if (total < INIT_DATA_HEADER + bitmapLen + INIT_DATA_TRAILER)
+    {
+        return std::nullopt;
+    }
+
+    out.nodeIds.reserve(bitmapLen * BITS_PER_BYTE);
+    for (std::size_t byteIdx = 0; byteIdx < bitmapLen; ++byteIdx)
+    {
+        const uint8_t bits = payload[INIT_DATA_HEADER + byteIdx];
+        for (unsigned bit = 0; bit < BITS_PER_BYTE; ++bit)
+        {
+            if ((bits & (1U << bit)) == 0U)
+            {
+                continue;
+            }
+            const std::size_t nodeId = (byteIdx * BITS_PER_BYTE) + bit + 1;
+            if (nodeId <= MAX_VALID_NODE_ID)
+            {
+                out.nodeIds.push_back(static_cast<uint8_t>(nodeId));
+            }
+        }
+    }
+
+    out.chipType    = payload[INIT_DATA_HEADER + bitmapLen];
+    out.chipVersion = payload[INIT_DATA_HEADER + bitmapLen + 1];
     return out;
 }
 

@@ -44,6 +44,20 @@ struct DongleInfo
     std::uint8_t controllerNodeId = 0;
 };
 
+/// FUNC_ID_SERIAL_API_GET_INIT_DATA (0x02) payload, captured once
+/// during startup introspection. nodeIds is the expanded node bitmap
+/// (every node ID currently included in the network, regardless of
+/// whether the daemon has met it during this run). Retained on the
+/// bus so late subscribers see the latest snapshot.
+struct InitData
+{
+    std::uint8_t serialApiVersion = 0;
+    std::uint8_t capabilities     = 0;
+    std::uint8_t chipType         = 0;
+    std::uint8_t chipVersion      = 0;
+    std::vector<std::uint8_t> nodeIds;
+};
+
 /// Unsolicited command-class frame received from a node, carried inside
 /// FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04). Transient: not retained
 /// across subscribes.
@@ -56,10 +70,12 @@ struct ApplicationCommand
 
 [[nodiscard]] auto subscribe(const std::function<void(const DongleStatus&)>& handler) -> SubscriptionId;
 [[nodiscard]] auto subscribe(const std::function<void(const DongleInfo&)>& handler) -> SubscriptionId;
+[[nodiscard]] auto subscribe(const std::function<void(const InitData&)>& handler) -> SubscriptionId;
 [[nodiscard]] auto subscribe(const std::function<void(const ApplicationCommand&)>& handler) -> SubscriptionId;
 auto unsubscribe(SubscriptionId subscriptionId) -> void;
 auto publish(const DongleStatus& status) -> void;
 auto publish(const DongleInfo& info) -> void;
+auto publish(const InitData& info) -> void;
 auto publish(const ApplicationCommand& event) -> void;
 }  // namespace MessageBus
 

@@ -470,6 +470,24 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 }
             });
 
+    proxy.uponSignal("InitData")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t serialApiVersion,
+               std::uint8_t capabilities,
+               const std::vector<std::uint8_t>& nodeIds,
+               std::uint8_t chipType,
+               std::uint8_t chipVersion) -> void
+            {
+                std::ostringstream stream;
+                stream << "InitData: serialApiVersion=" << static_cast<unsigned>(serialApiVersion) << " capabilities=0x"
+                       << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(capabilities)
+                       << std::dec << " chipType=" << static_cast<unsigned>(chipType)
+                       << " chipVer=" << static_cast<unsigned>(chipVersion) << " nodes=" << nodeIds.size();
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("DongleInfo")
         .onInterface(IFACE_NAME)
         .call(

@@ -37,6 +37,7 @@ constexpr const char* SIGNAL_INCLUSION_STATUS             = "NodeInclusionStatus
 constexpr const char* SIGNAL_EXCLUSION_STATUS             = "NodeExclusionStatus";
 constexpr const char* SIGNAL_DONGLE_STATUS                = "DongleStatus";
 constexpr const char* SIGNAL_DONGLE_INFO                  = "DongleInfo";
+constexpr const char* SIGNAL_INIT_DATA                    = "InitData";
 constexpr const char* SIGNAL_SEND_DATA_STATUS             = "SendDataStatus";
 constexpr const char* SIGNAL_APPLICATION_COMMAND          = "ApplicationCommand";
 constexpr const char* SIGNAL_SWITCH_BINARY_REPORT         = "SwitchBinaryReport";
@@ -80,6 +81,24 @@ auto emitDongleInfo(sdbus::IObject& obj, const MessageBus::DongleInfo& info) -> 
     catch (const sdbus::Error& err)
     {
         std::cerr << "[DBusBackend] failed to emit DongleInfo: " << err.what() << '\n';
+    }
+}
+
+auto emitInitData(sdbus::IObject& obj, const MessageBus::InitData& info) -> void
+{
+    try
+    {
+        auto signal = obj.createSignal(IFACE_NAME, SIGNAL_INIT_DATA);
+        signal << info.serialApiVersion;
+        signal << info.capabilities;
+        signal << info.nodeIds;
+        signal << info.chipType;
+        signal << info.chipVersion;
+        obj.emitSignal(signal);
+    }
+    catch (const sdbus::Error& err)
+    {
+        std::cerr << "[DBusBackend] failed to emit InitData: " << err.what() << '\n';
     }
 }
 
@@ -145,9 +164,12 @@ struct DBusBackend::Impl
     std::atomic<bool> connected{false};
     MessageBus::SubscriptionId dongleSubscription{0};
     MessageBus::SubscriptionId dongleInfoSubscription{0};
+    MessageBus::SubscriptionId initDataSubscription{0};
     MessageBus::SubscriptionId applicationCommandSubscription{0};
     std::mutex dongleInfoMutex;
     MessageBus::DongleInfo lastDongleInfo;
+    std::mutex initDataMutex;
+    MessageBus::InitData lastInitData;
 };
 
 DBusBackend::DBusBackend()
@@ -341,6 +363,20 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                                        impl->lastDongleInfo.controllerNodeId};
             });
 
+    using InitDataTuple = sdbus::Struct<uint8_t, uint8_t, std::vector<uint8_t>, uint8_t, uint8_t>;
+    obj.registerMethod("GetInitData")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            [this]() -> InitDataTuple
+            {
+                std::scoped_lock const lock(impl->initDataMutex);
+                return InitDataTuple{impl->lastInitData.serialApiVersion,
+                                     impl->lastInitData.capabilities,
+                                     impl->lastInitData.nodeIds,
+                                     impl->lastInitData.chipType,
+                                     impl->lastInitData.chipVersion};
+            });
+
     obj.registerSignal(SIGNAL_INCLUSION_STATUS)
         .onInterface(IFACE_NAME)
         .withParameters<uint8_t, uint8_t, uint16_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>(
@@ -359,6 +395,11 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
         .onInterface(IFACE_NAME)
         .withParameters<std::string, uint8_t, std::vector<uint8_t>, uint8_t>(
             "libraryVersion", "libraryType", "homeId", "controllerNodeId");
+
+    obj.registerSignal(SIGNAL_INIT_DATA)
+        .onInterface(IFACE_NAME)
+        .withParameters<uint8_t, uint8_t, std::vector<uint8_t>, uint8_t, uint8_t>(
+            "serialApiVersion", "capabilities", "nodeIds", "chipType", "chipVersion");
 
     obj.registerSignal(SIGNAL_SEND_DATA_STATUS)
         .onInterface(IFACE_NAME)
@@ -427,6 +468,20 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
             emitDongleInfo(*impl->object, info);
         });
 
+    impl->initDataSubscription = MessageBus::subscribe(
+        [this](const MessageBus::InitData& info)
+        {
+            {
+                std::scoped_lock const lock(impl->initDataMutex);
+                impl->lastInitData = info;
+            }
+            if (!impl || !impl->connected.load() || !impl->object)
+            {
+                return;
+            }
+            emitInitData(*impl->object, info);
+        });
+
     impl->connection->enterEventLoopAsync();
     std::cout << "[DBusBackend] listening on system bus as " << BUS_NAME << '\n';
 
@@ -485,6 +540,11 @@ auto DBusBackend::stop() -> void
     {
         MessageBus::unsubscribe(impl->applicationCommandSubscription);
         impl->applicationCommandSubscription = 0;
+    }
+    if (impl && impl->initDataSubscription != 0)
+    {
+        MessageBus::unsubscribe(impl->initDataSubscription);
+        impl->initDataSubscription = 0;
     }
     if (impl && impl->dongleInfoSubscription != 0)
     {

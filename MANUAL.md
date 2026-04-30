@@ -38,12 +38,12 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list eleven methods (`AddNode`, `StopAddNode`,
+The introspection should list twelve methods (`AddNode`, `StopAddNode`,
 `RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`, `GetNodes`,
-`GetDongleInfo`, `SetAssociation`, `RemoveAssociation`,
-`GetAssociation`, `GetAssociationGroupings`) and nine signals
+`GetDongleInfo`, `GetInitData`, `SetAssociation`, `RemoveAssociation`,
+`GetAssociation`, `GetAssociationGroupings`) and ten signals
 (`NodeInclusionStatus`, `NodeExclusionStatus`, `DongleStatus`,
-`DongleInfo`, `SendDataStatus`, `ApplicationCommand`,
+`DongleInfo`, `InitData`, `SendDataStatus`, `ApplicationCommand`,
 `SwitchBinaryReport`, `AssociationReport`,
 `AssociationGroupingsReport`).
 
@@ -83,6 +83,7 @@ or wait for the next hot-plug to determine current state.
 | `SetSwitchBinary` | `y b y` (nodeId, on, callbackId) | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)` |
 | `GetNodes` | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes) | Return the in-memory list of currently-included nodes |
 | `GetDongleInfo` | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId) | Return the dongle introspection captured when the serial port opened |
+| `GetInitData` | `→ (y y ay y y)` (serialApiVersion, capabilities, nodeIds, chipType, chipVersion) | Return the SERIAL_API_GET_INIT_DATA response captured at startup; `nodeIds` is the expanded node bitmap |
 | `SetAssociation` | `y y ay y` (nodeId, groupId, members, callbackId) | Add `members` to `groupId` on `nodeId`'s association table (CC 0x85 cmd 0x01) |
 | `RemoveAssociation` | `y y ay y` (nodeId, groupId, members, callbackId) | Remove `members` from `groupId` (empty `members` means *all*) |
 | `GetAssociation` | `y y y` (nodeId, groupId, callbackId) | Query the current members of `groupId`; result arrives as `AssociationReport` |
@@ -389,7 +390,40 @@ should accumulate `members` across reports until they see zero.
 call (echoing the `callbackId` you passed); a successful Get/Groupings
 will be followed shortly after by the matching Report signal.
 
-## 15. Dongle introspection
+## 15. Existing-network discovery (`InitData`)
+
+In addition to `GET_VERSION` + `MEMORY_GET_ID`, the daemon now also runs
+`FUNC_ID_SERIAL_API_GET_INIT_DATA` (`0x02`) when the serial port opens.
+The dongle returns a node bitmap covering every node currently
+included in the network — including the ones the daemon hasn't met
+during this run. Each ID is seeded into the `NodeRegistry` (only if
+not already present, so it never downgrades a fully-populated node),
+which means **`GetNodes` reflects the full network on the first start
+after a reinstall** instead of starting empty.
+
+The full payload is also exposed:
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetInitData
+# → (yyayy)  1 8 1 5 11 12 …  5 0
+```
+
+Fields: `serialApiVersion`, `capabilities` (bit 0=secondary,
+1=no-send, 2=SIS, 3=real-primary), `nodeIds` (array of included node
+IDs), `chipType` (1=400-series, 2=500, 5=700), `chipVersion` (silicon
+revision).
+
+The same payload is emitted as the `InitData(y y ay y y)` signal once
+per serial-port open. Late D-Bus subscribers will miss the signal but
+can still recover the latest snapshot via `GetInitData`.
+
+Seeded nodes show in `GetNodes` with `basic`/`generic`/`specific`
+zeroed and an empty CC list — we know they exist but not what they
+are. Re-including them, or implementing `FUNC_ID_GET_NODE_PROTOCOL_INFO`
+(`0x41`) as a follow-up, would fill in the device class and CC list.
+
+## 16. Dongle introspection
 
 When the protocol thread opens the serial port to a dongle, it sends
 two host-API requests synchronously and caches the answers:
@@ -414,7 +448,7 @@ daemon started), `GetDongleInfo` returns an empty struct (empty
 `libraryVersion`, all bytes zero); clients should treat that as
 "not available yet" and wait for the next `DongleInfo` signal.
 
-## 16. Future: ubus
+## 17. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's
 ubus is on the roadmap. The CMake cache option `ZWAVED_EXTERNAL_API`

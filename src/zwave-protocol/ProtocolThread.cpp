@@ -28,10 +28,14 @@ namespace
 constexpr int IDLE_PUMP_TIMEOUT_MS    = 100;
 constexpr int REQUEST_WAIT_TIMEOUT_MS = 100;
 
-// Inclusion / exclusion progression — only the COMPLETED variant
-// updates the node registry; other terminal states (failure, not-primary)
-// just end the session.
-constexpr std::uint8_t STATUS_COMPLETED = 0x06;
+// Inclusion / exclusion progression status codes. Different controller
+// firmwares deliver the final full-info node callback at either 0x05
+// (Protocol complete; some Aeotec firmwares stop here) or 0x06
+// (Inclusion completed). Both are treated as "node payload arrived"
+// for registry purposes, gated on a non-zero nodeId so the StopAddNode
+// echo (commonly nodeId=0) doesn't pollute the registry.
+constexpr std::uint8_t STATUS_PROTOCOL_DONE = 0x05;
+constexpr std::uint8_t STATUS_COMPLETED     = 0x06;
 
 // Per-request deadline for introspection responses (GET_VERSION,
 // MEMORY_GET_ID). Real responses arrive in ~10s of ms; budget is
@@ -174,23 +178,27 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
     if (const auto nodeCb = HostApi::decodeNodeCallback(frame); nodeCb.has_value())
     {
         HostApi::publishCallback(*nodeCb);
+
+        const bool hasNodePayload =
+            nodeCb->nodeId != 0 && (nodeCb->status == STATUS_PROTOCOL_DONE || nodeCb->status == STATUS_COMPLETED);
+        if (hasNodePayload)
+        {
+            if (nodeCb->commandId == HostApi::CMD_ADD_NODE_TO_NETWORK)
+            {
+                NodeRegistry::add({.nodeId         = static_cast<std::uint8_t>(nodeCb->nodeId),
+                                   .basicType      = nodeCb->basicDeviceType,
+                                   .genericType    = nodeCb->genericDeviceType,
+                                   .specificType   = nodeCb->specificDeviceType,
+                                   .commandClasses = nodeCb->commandClasses});
+            }
+            else if (nodeCb->commandId == HostApi::CMD_REMOVE_NODE_FROM_NETWORK)
+            {
+                NodeRegistry::remove(static_cast<std::uint8_t>(nodeCb->nodeId));
+            }
+        }
+
         if (HostApi::isTerminalStatus(nodeCb->commandId, nodeCb->status))
         {
-            if (nodeCb->status == STATUS_COMPLETED)
-            {
-                if (nodeCb->commandId == HostApi::CMD_ADD_NODE_TO_NETWORK)
-                {
-                    NodeRegistry::add({.nodeId         = static_cast<std::uint8_t>(nodeCb->nodeId),
-                                       .basicType      = nodeCb->basicDeviceType,
-                                       .genericType    = nodeCb->genericDeviceType,
-                                       .specificType   = nodeCb->specificDeviceType,
-                                       .commandClasses = nodeCb->commandClasses});
-                }
-                else if (nodeCb->commandId == HostApi::CMD_REMOVE_NODE_FROM_NETWORK)
-                {
-                    NodeRegistry::remove(static_cast<std::uint8_t>(nodeCb->nodeId));
-                }
-            }
             tracker.end();
         }
     }

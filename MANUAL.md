@@ -39,9 +39,9 @@ busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
 The introspection should list five methods (`AddNode`, `StopAddNode`,
-`RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`) and four signals
+`RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`) and six signals
 (`NodeInclusionStatus`, `NodeExclusionStatus`, `DongleStatus`,
-`SendDataStatus`).
+`SendDataStatus`, `ApplicationCommand`, `SwitchBinaryReport`).
 
 ### Always monitor signals in another terminal
 
@@ -294,7 +294,26 @@ Get/Report (reading the current state from a node) is not yet
 implemented — the daemon does not yet decode `APPLICATION_COMMAND_HANDLER`
 incoming frames.
 
-## 12. Future: ubus
+## 12. Unsolicited node events
+
+When a node sends an unsolicited Command Class frame — most commonly a
+Binary Switch `REPORT` after the user manually flips a wall switch, but
+also sensor pings and other notifications — the dongle delivers it via
+`FUNC_ID_APPLICATION_COMMAND_HANDLER` (0x04). `zwaved` decodes the
+frame and re-broadcasts it on D-Bus in two parallel forms:
+
+- **`ApplicationCommand(y y ay)`** — `(rxStatus, sourceNodeId, ccBytes)`.
+  The raw passthrough so any client can decode CCs that `zwaved` itself
+  doesn't know about.
+- **`SwitchBinaryReport(y y)`** — `(sourceNodeId, state)` where `state`
+  is `0` Off, `1` On, `2` Unknown. Emitted only when the CC bytes parse
+  as a Binary Switch Report (CC `0x25`, command `0x03`).
+
+Both are visible in `busctl --system monitor com.tiunda.ZWaved`. Use
+the typed signal when you only care about Binary Switch state changes;
+use the raw signal when you need to handle arbitrary CCs.
+
+## 13. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's
 ubus is on the roadmap. The CMake cache option `ZWAVED_EXTERNAL_API`

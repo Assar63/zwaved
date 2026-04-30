@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -28,10 +29,12 @@ constexpr const char* BUS_NAME    = "com.tiunda.ZWaved";
 constexpr const char* OBJECT_PATH = "/com/tiunda/ZWaved";
 constexpr const char* IFACE_NAME  = "com.tiunda.ZWaved1";
 
-constexpr const char* SIGNAL_INCLUSION_STATUS = "NodeInclusionStatus";
-constexpr const char* SIGNAL_EXCLUSION_STATUS = "NodeExclusionStatus";
-constexpr const char* SIGNAL_DONGLE_STATUS    = "DongleStatus";
-constexpr const char* SIGNAL_SEND_DATA_STATUS = "SendDataStatus";
+constexpr const char* SIGNAL_INCLUSION_STATUS     = "NodeInclusionStatus";
+constexpr const char* SIGNAL_EXCLUSION_STATUS     = "NodeExclusionStatus";
+constexpr const char* SIGNAL_DONGLE_STATUS        = "DongleStatus";
+constexpr const char* SIGNAL_SEND_DATA_STATUS     = "SendDataStatus";
+constexpr const char* SIGNAL_APPLICATION_COMMAND  = "ApplicationCommand";
+constexpr const char* SIGNAL_SWITCH_BINARY_REPORT = "SwitchBinaryReport";
 
 constexpr int CALLBACK_POLL_MS = 200;
 
@@ -55,6 +58,30 @@ constexpr uint8_t FLAG_NWE_BIT      = 6;
     }
     return result;
 }
+
+auto emitApplicationCommand(sdbus::IObject& obj, const MessageBus::ApplicationCommand& event) -> void
+{
+    try
+    {
+        auto raw = obj.createSignal(IFACE_NAME, SIGNAL_APPLICATION_COMMAND);
+        raw << event.rxStatus;
+        raw << event.sourceNodeId;
+        raw << event.ccData;
+        obj.emitSignal(raw);
+
+        if (const auto report = BinarySwitch::decodeReport(std::span<const uint8_t>(event.ccData)); report.has_value())
+        {
+            auto typed = obj.createSignal(IFACE_NAME, SIGNAL_SWITCH_BINARY_REPORT);
+            typed << event.sourceNodeId;
+            typed << static_cast<uint8_t>(report->state);
+            obj.emitSignal(typed);
+        }
+    }
+    catch (const sdbus::Error& err)
+    {
+        std::cerr << "[DBusBackend] failed to emit ApplicationCommand: " << err.what() << '\n';
+    }
+}
 }  // namespace
 
 namespace ExternalApi
@@ -65,6 +92,7 @@ struct DBusBackend::Impl
     std::unique_ptr<sdbus::IObject> object;
     std::atomic<bool> connected{false};
     MessageBus::SubscriptionId dongleSubscription{0};
+    MessageBus::SubscriptionId applicationCommandSubscription{0};
 };
 
 DBusBackend::DBusBackend()
@@ -186,6 +214,14 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
         .onInterface(IFACE_NAME)
         .withParameters<uint8_t, uint8_t>("callbackId", "txStatus");
 
+    obj.registerSignal(SIGNAL_APPLICATION_COMMAND)
+        .onInterface(IFACE_NAME)
+        .withParameters<uint8_t, uint8_t, std::vector<uint8_t>>("rxStatus", "sourceNodeId", "ccData");
+
+    obj.registerSignal(SIGNAL_SWITCH_BINARY_REPORT)
+        .onInterface(IFACE_NAME)
+        .withParameters<uint8_t, uint8_t>("sourceNodeId", "state");
+
     obj.finishRegistration();
 
     impl->dongleSubscription = MessageBus::subscribe(
@@ -206,6 +242,16 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
             {
                 std::cerr << "[DBusBackend] failed to emit DongleStatus: " << err.what() << '\n';
             }
+        });
+
+    impl->applicationCommandSubscription = MessageBus::subscribe(
+        [this](const MessageBus::ApplicationCommand& event)
+        {
+            if (!impl || !impl->connected.load() || !impl->object)
+            {
+                return;
+            }
+            emitApplicationCommand(*impl->object, event);
         });
 
     impl->connection->enterEventLoopAsync();
@@ -261,6 +307,11 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
 
 auto DBusBackend::stop() -> void
 {
+    if (impl && impl->applicationCommandSubscription != 0)
+    {
+        MessageBus::unsubscribe(impl->applicationCommandSubscription);
+        impl->applicationCommandSubscription = 0;
+    }
     if (impl && impl->dongleSubscription != 0)
     {
         MessageBus::unsubscribe(impl->dongleSubscription);

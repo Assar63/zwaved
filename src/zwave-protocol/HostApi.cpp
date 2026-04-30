@@ -142,6 +142,31 @@ auto HostApi::decodeSendDataCallback(const ZwaveDataFrame& frame) -> std::option
     return out;
 }
 
+auto HostApi::decodeApplicationCommand(const ZwaveDataFrame& frame) -> std::optional<ApplicationCommand>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_APPLICATION_COMMAND)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload  = frame.getPayload();
+    std::size_t const total = frame.getPayloadSize();
+    // rxStatus + sourceNodeId + cmdLength = 3 bytes minimum.
+    if (payload == nullptr || total < 3)
+    {
+        return std::nullopt;
+    }
+    ApplicationCommand out;
+    out.rxStatus            = payload[0];
+    out.sourceNodeId        = payload[1];
+    std::size_t const ccLen = payload[2];
+    if (ccLen == 0 || total < 3 + ccLen)
+    {
+        return std::nullopt;
+    }
+    out.ccData.assign(payload + 3, payload + 3 + ccLen);
+    return out;
+}
+
 auto HostApi::decodeNodeCallback(const ZwaveDataFrame& frame, bool nodeId16Bit) -> std::optional<NodeStatusCallback>
 {
     if (!frame.isValid())

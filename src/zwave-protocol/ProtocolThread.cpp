@@ -87,6 +87,12 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
         HostApi::publishCallback(*sendDataCb);
         return;
     }
+    if (const auto appCmd = HostApi::decodeApplicationCommand(frame); appCmd.has_value())
+    {
+        MessageBus::publish(MessageBus::ApplicationCommand{
+            .rxStatus = appCmd->rxStatus, .sourceNodeId = appCmd->sourceNodeId, .ccData = appCmd->ccData});
+        return;
+    }
     if (const auto nodeCb = HostApi::decodeNodeCallback(frame); nodeCb.has_value())
     {
         HostApi::publishCallback(*nodeCb);

@@ -12,6 +12,7 @@ namespace HostApi
 {
 using SessionId = uint8_t;
 
+constexpr uint8_t CMD_APPLICATION_COMMAND      = 0x04;
 constexpr uint8_t CMD_SEND_DATA                = 0x13;
 constexpr uint8_t CMD_ADD_NODE_TO_NETWORK      = 0x4A;
 constexpr uint8_t CMD_REMOVE_NODE_FROM_NETWORK = 0x4B;
@@ -83,6 +84,18 @@ struct SendDataCallback
     uint8_t txStatus   = TRANSMIT_COMPLETE_FAIL;
 };
 
+/// Decoded payload of FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04). Emitted
+/// by the controller whenever a node sends an unsolicited Command Class
+/// frame (e.g. SwitchBinary REPORT after a manual toggle, sensor pings,
+/// etc.). The 8-bit sourceNodeId form is decoded; 16-bit Long Range node
+/// IDs are not supported yet.
+struct ApplicationCommand
+{
+    uint8_t rxStatus     = 0;
+    uint8_t sourceNodeId = 0;
+    std::vector<uint8_t> ccData;
+};
+
 /// Decoded callback payload for either Add (0x4A) or Remove (0x4B).
 struct NodeStatusCallback
 {
@@ -103,6 +116,11 @@ struct NodeStatusCallback
 /// Decode a FUNC_ID_ZW_SEND_DATA (0x13) callback. Returns std::nullopt
 /// if the frame is not a 0x13 callback or the payload is too short.
 [[nodiscard]] auto decodeSendDataCallback(const ZwaveDataFrame& frame) -> std::optional<SendDataCallback>;
+
+/// Decode a FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04) frame. Returns
+/// std::nullopt if the frame is not a 0x04 callback or the payload is
+/// too short / inconsistent.
+[[nodiscard]] auto decodeApplicationCommand(const ZwaveDataFrame& frame) -> std::optional<ApplicationCommand>;
 
 /// Decode either a 0x4A or 0x4B callback. Pass nodeId16Bit = true if the
 /// controller has been configured for 16-bit node IDs (default false matches

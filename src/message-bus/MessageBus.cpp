@@ -11,7 +11,8 @@
 
 namespace
 {
-using DongleStatusList = eventpp::CallbackList<void(const MessageBus::DongleStatus&)>;
+using DongleStatusList       = eventpp::CallbackList<void(const MessageBus::DongleStatus&)>;
+using ApplicationCommandList = eventpp::CallbackList<void(const MessageBus::ApplicationCommand&)>;
 
 // State events (currently just DongleStatus) are retained so that late
 // subscribers — components that come up after the publisher has already
@@ -20,9 +21,13 @@ using DongleStatusList = eventpp::CallbackList<void(const MessageBus::DongleStat
 // during a concurrent publish is observed atomically: it either sees the
 // publish via the callback list (if appended first) or via the replay
 // (if the cache update completed first), never both out of order.
+//
+// Transient events (ApplicationCommand) are not retained — late
+// subscribers do not get historic events.
 struct State
 {
     DongleStatusList dongleStatus;
+    ApplicationCommandList applicationCommand;
     std::mutex stateMutex;
     std::atomic<MessageBus::SubscriptionId> nextId{1};
     std::unordered_map<MessageBus::SubscriptionId, std::function<void()>> removers;
@@ -70,4 +75,19 @@ auto MessageBus::publish(const DongleStatus& status) -> void
     std::lock_guard<std::mutex> const lock(state().stateMutex);
     state().lastDongleStatus = status;
     state().dongleStatus(status);
+}
+
+auto MessageBus::subscribe(const std::function<void(const ApplicationCommand&)>& handler) -> SubscriptionId
+{
+    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    const auto handle          = state().applicationCommand.append(handler);
+    const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
+    state().removers.emplace(newId, [handle]() { state().applicationCommand.remove(handle); });
+    return newId;
+}
+
+auto MessageBus::publish(const ApplicationCommand& event) -> void
+{
+    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    state().applicationCommand(event);
 }

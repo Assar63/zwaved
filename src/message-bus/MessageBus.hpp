@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 /**
  * In-process publish/subscribe bus for status broadcasts. Publishers
@@ -31,9 +32,21 @@ struct DongleStatus
     std::string ttyPath;  // Empty unless connected.
 };
 
+/// Unsolicited command-class frame received from a node, carried inside
+/// FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04). Transient: not retained
+/// across subscribes.
+struct ApplicationCommand
+{
+    uint8_t rxStatus     = 0;
+    uint8_t sourceNodeId = 0;
+    std::vector<uint8_t> ccData;
+};
+
 [[nodiscard]] auto subscribe(const std::function<void(const DongleStatus&)>& handler) -> SubscriptionId;
+[[nodiscard]] auto subscribe(const std::function<void(const ApplicationCommand&)>& handler) -> SubscriptionId;
 auto unsubscribe(SubscriptionId subscriptionId) -> void;
 auto publish(const DongleStatus& status) -> void;
+auto publish(const ApplicationCommand& event) -> void;
 }  // namespace MessageBus
 
 #endif  // ZWAVED_MESSAGE_BUS_HPP

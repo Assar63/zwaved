@@ -8,7 +8,7 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 - **USB hot-plug detection**: `libudev` watches for the Aeotec Z-Stick Gen5 (VID `0658`, PID `0200`) and publishes the discovered TTY path through a `DeviceHandoff` channel
 - **Z-Wave Host API frame transport**: SOF / ACK / NAK / CAN parser, send-with-ACK retry on NAK/CAN/timeout (`Tn = 100 + n × 1000 ms`, 3 attempts), spec-compliant XOR checksum
 - **Add Node / Remove Node support**: Classic inclusion (Mode `0x01`), SmartStart Listen (Mode `0x09`) and SmartStart Include (Mode `0x08`) for `0x4A`; classic exclusion for `0x4B`; stop via Mode `0x05`
-- **External D-Bus interface (sdbus-c++)**: System bus name `com.tiunda.ZWaved`, methods `AddNode` / `StopAddNode` / `RemoveNode` / `StopRemoveNode` / `SetSwitchBinary`, signals `NodeInclusionStatus` / `NodeExclusionStatus` / `DongleStatus` / `SendDataStatus`. See [MANUAL.md](MANUAL.md) for operator usage.
+- **External D-Bus interface (sdbus-c++)**: System bus name `com.tiunda.ZWaved`, methods `AddNode` / `StopAddNode` / `RemoveNode` / `StopRemoveNode` / `SetSwitchBinary`, signals `NodeInclusionStatus` / `NodeExclusionStatus` / `DongleStatus` / `SendDataStatus` / `ApplicationCommand` / `SwitchBinaryReport`. See [MANUAL.md](MANUAL.md) for operator usage.
 - **Pluggable transport backends**: A clean `IBackend` interface allows a future ubus backend to plug in without disturbing the protocol layer; selectable via the `ZWAVED_EXTERNAL_API` CMake cache option (`dbus` default; `ubus` and `both` reserved)
 - **Multi-Compiler Support**: Build with GCC 15 or LLVM/Clang 20 using CMake presets, with optional `clang-tidy`-integrated variants
 
@@ -141,7 +141,7 @@ zwaved exposes the Z-Wave Host API on the **system bus**:
 - **Object:** `/com/tiunda/ZWaved`
 - **Interface:** `com.tiunda.ZWaved1`
 - **Methods:** `AddNode(y y y ay ay)`, `StopAddNode(y)`, `RemoveNode(y y y)`, `StopRemoveNode(y)`, `SetSwitchBinary(y b y)`
-- **Signals:** `NodeInclusionStatus(y y q y y y ay)`, `NodeExclusionStatus(y y q y y y ay)`, `DongleStatus(b s)`, `SendDataStatus(y y)`
+- **Signals:** `NodeInclusionStatus(y y q y y y ay)`, `NodeExclusionStatus(y y q y y y ay)`, `DongleStatus(b s)`, `SendDataStatus(y y)`, `ApplicationCommand(y y ay)`, `SwitchBinaryReport(y y)`
 
 Install the system bus policy once per host:
 

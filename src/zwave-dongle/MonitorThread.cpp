@@ -1,6 +1,5 @@
 #include "../message-bus/MessageBus.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
-#include "DeviceHandoff.hpp"
 
 #include <atomic>
 #include <cstring>
@@ -190,7 +189,6 @@ auto handleDeviceEvent(udev* udev, udev_device* dev, std::string& trackedDevpath
             trackedTtyNode = findAttachedTtyNode(udev, dev);
             if (!trackedTtyNode.empty())
             {
-                DeviceHandoff::publish(trackedTtyNode);
                 MessageBus::publish(MessageBus::DongleStatus{.connected = true, .ttyPath = trackedTtyNode});
             }
         }
@@ -205,7 +203,6 @@ auto handleDeviceEvent(udev* udev, udev_device* dev, std::string& trackedDevpath
                 std::cout << "Z-Wave dongle tty node was: " << trackedTtyNode << '\n';
             }
 
-            DeviceHandoff::clear();
             MessageBus::publish(MessageBus::DongleStatus{.connected = false, .ttyPath = {}});
             trackedDevpath.clear();
             trackedTtyNode.clear();
@@ -273,7 +270,6 @@ auto zwaveMonitorThread() -> void
             udev_device_unref(usbDevice);
             if (!trackedTtyNode.empty())
             {
-                DeviceHandoff::publish(trackedTtyNode);
                 MessageBus::publish(MessageBus::DongleStatus{.connected = true, .ttyPath = trackedTtyNode});
             }
         }
@@ -295,7 +291,6 @@ __attribute__((constructor(CONFIG_ZWAVE_DONGLE_PRIO))) auto startZWaveMonitorThr
 __attribute__((destructor(CONFIG_ZWAVE_DONGLE_PRIO))) auto stopZWaveMonitorThread() -> void
 {
     state().running = false;
-    DeviceHandoff::wakeAll();
     if (state().thread.joinable())
     {
         state().thread.join();

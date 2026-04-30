@@ -1,4 +1,4 @@
-#include "../zwave-dongle/DeviceHandoff.hpp"
+#include "../message-bus/MessageBus.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 #include "FrameTransport.hpp"
 #include "HostApi.hpp"
@@ -10,7 +10,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -28,12 +30,54 @@ struct ZwaveProtocolState
 {
     std::thread thread;
     std::atomic<bool> running{false};
+
+    // Latest TTY path advertised over the message bus. Populated by the
+    // DongleStatus subscription; the protocol thread blocks on pathCv
+    // until path is set (or running flips to false).
+    std::mutex pathMutex;
+    std::condition_variable pathCv;
+    std::optional<std::string> path;
+
+    MessageBus::SubscriptionId dongleSubscription{0};
 };
 
 auto state() -> ZwaveProtocolState&
 {
     static ZwaveProtocolState instance;
     return instance;
+}
+
+auto onDongleStatus(const MessageBus::DongleStatus& status) -> void
+{
+    {
+        std::lock_guard<std::mutex> const lock(state().pathMutex);
+        if (status.connected && !status.ttyPath.empty())
+        {
+            state().path = status.ttyPath;
+        }
+        else
+        {
+            state().path.reset();
+        }
+    }
+    state().pathCv.notify_all();
+}
+
+auto awaitDevicePath() -> std::optional<std::string>
+{
+    std::unique_lock<std::mutex> lock(state().pathMutex);
+    state().pathCv.wait(lock, [] { return state().path.has_value() || !state().running.load(); });
+    if (!state().running.load())
+    {
+        return std::nullopt;
+    }
+    return state().path;
+}
+
+auto isPathSet() -> bool
+{
+    std::lock_guard<std::mutex> const lock(state().pathMutex);
+    return state().path.has_value();
 }
 
 auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame& frame) -> void
@@ -96,8 +140,7 @@ auto runConnectedSession(SerialPort& port) -> void
 
     while (state().running && port.isOpen())
     {
-        std::string const expected = DeviceHandoff::current();
-        if (expected.empty())
+        if (!isPathSet())
         {
             std::cout << "[ProtocolThread] device removed, closing serial port\n";
             port.close();
@@ -120,9 +163,11 @@ auto zwaveCommunicationThread() -> void
 {
     prctl(PR_SET_NAME, "ZWaveProto", 0, 0, 0);  // NOLINT(misc-include-cleaner): PR_SET_NAME from <sys/prctl.h>
 
+    state().dongleSubscription = MessageBus::subscribe(onDongleStatus);
+
     while (state().running)
     {
-        auto path = DeviceHandoff::awaitDevicePath(state().running);
+        auto path = awaitDevicePath();
         if (!state().running)
         {
             break;
@@ -144,6 +189,9 @@ auto zwaveCommunicationThread() -> void
         HostApi::clearCallbacks();
         runConnectedSession(port);
     }
+
+    MessageBus::unsubscribe(state().dongleSubscription);
+    state().dongleSubscription = 0;
 }
 
 __attribute__((constructor(CONFIG_ZWAVE_PROTOCOL_PRIO))) auto startZWaveThread() -> void
@@ -155,7 +203,7 @@ __attribute__((constructor(CONFIG_ZWAVE_PROTOCOL_PRIO))) auto startZWaveThread()
 __attribute__((destructor(CONFIG_ZWAVE_PROTOCOL_PRIO))) auto stopZWaveThread() -> void
 {
     state().running = false;
-    DeviceHandoff::wakeAll();
+    state().pathCv.notify_all();
     HostApi::wakeAll();
     HostApi::wakeAllCallbacks();
     if (state().thread.joinable())

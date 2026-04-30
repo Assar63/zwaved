@@ -3,5 +3,4 @@
 
 target_sources(zwaved PRIVATE
     MonitorThread.cpp
-    DeviceHandoff.cpp
 )

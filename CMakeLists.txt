@@ -32,6 +32,11 @@ endif()
 # Process source subdirectories
 add_subdirectory(src)
 
+option(ZWAVED_BUILD_UTILS "Build companion utility apps under utils/" ON)
+if(ZWAVED_BUILD_UTILS)
+    add_subdirectory(utils)
+endif()
+
 # Target: fix-tidy - Fix issues with clang-tidy
 add_custom_target(fix-tidy
     COMMAND clang-tidy --fix -p ${CMAKE_BINARY_DIR}

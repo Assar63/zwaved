@@ -83,6 +83,8 @@ Each component owns its thread and `running` flag inside an anonymous namespace,
 
 `src/message-bus/MessageBus` is the in-process publish/subscribe bus for status broadcasts (e.g. `DongleStatus`) that fan out to one or more external-API backends. It is a thin wrapper around the header-only **eventpp** library (resolved via `find_package(eventpp REQUIRED)` — expected to be provided by the system / cross-sysroot, not vendored). Dispatch is synchronous on the publisher's thread; eventpp does not appear in the public header, so the underlying library can be replaced without touching call sites.
 
+`utils/` holds optional companion binaries that talk to the daemon over its external API; built only when `ZWAVED_BUILD_UTILS=ON` (default). Today this is just `utils/zwave-terminal/` — an ncurses TUI client that connects to `com.tiunda.ZWaved` over the system bus to drive Add/Remove Node operations and watch the resulting signal traffic. It uses `pkg-config` for `ncurses` and `sdbus-c++` (re-resolving the latter only if the daemon build hasn't already done so).
+
 ## Naming Conventions (enforced by clang-tidy)
 
 - Classes: `UpperCamelCase`

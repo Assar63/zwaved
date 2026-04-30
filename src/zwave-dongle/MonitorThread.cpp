@@ -31,20 +31,20 @@ auto* const ZWAVE_PID = "0200";
 
 auto isZWaveDongle(udev_device* dev) -> bool
 {
-    const char* vid = udev_device_get_sysattr_value(dev, "idVendor");
-    const char* pid = udev_device_get_sysattr_value(dev, "idProduct");
+    const auto* vid = udev_device_get_sysattr_value(dev, "idVendor");
+    const auto* pid = udev_device_get_sysattr_value(dev, "idProduct");
     return vid != nullptr && pid != nullptr && strcmp(vid, ZWAVE_VID) == 0 && strcmp(pid, ZWAVE_PID) == 0;
 }
 
 auto findAttachedTtyNode(udev* udev, udev_device* usbDevice) -> std::string
 {
-    const char* usbSyspath = udev_device_get_syspath(usbDevice);
+    const auto* usbSyspath = udev_device_get_syspath(usbDevice);
     if (usbSyspath == nullptr)
     {
         return {};
     }
 
-    udev_enumerate* enumerate = udev_enumerate_new(udev);
+    auto* enumerate = udev_enumerate_new(udev);
     if (enumerate == nullptr)
     {
         return {};
@@ -58,7 +58,7 @@ auto findAttachedTtyNode(udev* udev, udev_device* usbDevice) -> std::string
 
     udev_list_entry_foreach(entry, devices)
     {
-        const char* syspath = udev_list_entry_get_name(entry);
+        const auto* syspath = udev_list_entry_get_name(entry);
         if (syspath == nullptr)
         {
             continue;
@@ -219,8 +219,6 @@ auto runMonitorLoop(udev* udev, udev_monitor* mon, std::string& trackedDevpath, 
 
     while (state().running)
     {
-        std::cout << "Z-Wave device monitor thread running\n";
-
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(fileDescriptor, &fds);
@@ -231,11 +229,10 @@ auto runMonitorLoop(udev* udev, udev_monitor* mon, std::string& trackedDevpath, 
             .tv_usec = 0,
         };
 
-        int const ret = select(fileDescriptor + 1, &fds, nullptr, nullptr, &time);
-        if (ret > 0 && FD_ISSET(fileDescriptor, &fds))
+        if (int const ret = select(fileDescriptor + 1, &fds, nullptr, nullptr, &time);
+            ret > 0 && FD_ISSET(fileDescriptor, &fds))
         {
-            udev_device* dev = udev_monitor_receive_device(mon);
-            if (dev != nullptr)
+            if (udev_device* dev = udev_monitor_receive_device(mon); dev != nullptr)
             {
                 handleDeviceEvent(udev, dev, trackedDevpath, trackedTtyNode);
                 udev_device_unref(dev);
@@ -259,11 +256,9 @@ auto zwaveMonitorThread() -> void
     std::string trackedDevpath;
     std::string trackedTtyNode;
 
-    std::string const trackedSyspath = findAlreadyInsertedZWaveDongleSyspath(udev);
-    if (!trackedSyspath.empty())
+    if (std::string const trackedSyspath = findAlreadyInsertedZWaveDongleSyspath(udev); !trackedSyspath.empty())
     {
-        udev_device* usbDevice = openUdevDeviceBySyspath(udev, trackedSyspath);
-        if (usbDevice != nullptr)
+        if (udev_device* usbDevice = openUdevDeviceBySyspath(udev, trackedSyspath); usbDevice != nullptr)
         {
             trackedTtyNode = findAttachedTtyNode(udev, usbDevice);
             trackedDevpath = logZWaveDongleDetails(udev, usbDevice, "Z-Wave dongle already inserted at startup: ");

@@ -11,8 +11,10 @@ namespace HostApi
 {
 /// Variant covering every request the external API may submit to the
 /// protocol thread. Add and Remove cover both initiation (mode 0x01..)
-/// and stop (mode 0x05) requests via the same struct.
-using Request = std::variant<AddNodeRequest, RemoveNodeRequest>;
+/// and stop (mode 0x05) requests via the same struct. SendData wraps
+/// any application-layer command (e.g. Binary Switch SET) addressed
+/// to a specific node.
+using Request = std::variant<AddNodeRequest, RemoveNodeRequest, SendDataRequest>;
 
 /// Push a new request. Wakes any thread blocked in popRequest().
 auto pushRequest(const Request& request) -> void;

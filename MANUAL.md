@@ -38,9 +38,10 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list four methods (`AddNode`, `StopAddNode`,
-`RemoveNode`, `StopRemoveNode`) and three signals (`NodeInclusionStatus`,
-`NodeExclusionStatus`, `DongleStatus`).
+The introspection should list five methods (`AddNode`, `StopAddNode`,
+`RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`) and four signals
+(`NodeInclusionStatus`, `NodeExclusionStatus`, `DongleStatus`,
+`SendDataStatus`).
 
 ### Always monitor signals in another terminal
 
@@ -75,6 +76,7 @@ or wait for the next hot-plug to determine current state.
 | `StopAddNode` | `y` (sessionId) | Send Mode `0x05` to stop an in-progress inclusion |
 | `RemoveNode` | `y y y` (mode, flags, sessionId) | Start an exclusion |
 | `StopRemoveNode` | `y` (sessionId) | Send Mode `0x05` to stop an in-progress exclusion |
+| `SetSwitchBinary` | `y b y` (nodeId, on, callbackId) | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)` |
 
 `y` = `BYTE` (uint8), `q` = `UINT16`, `ay` = array of bytes.
 
@@ -251,7 +253,48 @@ Source: spec Tables 4.124 and 4.134.
 - **Session ID `0` produces no signals** — by spec; pick a non-zero
   `sessionId` (1..255).
 
-## 11. Future: ubus
+## 11. Driving a Binary Switch (CC 0x25)
+
+`SetSwitchBinary` sends a Binary Switch SET (Command Class `0x25`,
+command `0x01`) to an already-included node. `nodeId` is the 1-byte
+node ID returned by the inclusion flow; `on=true` translates to value
+`0xFF`, `on=false` to `0x00`. `callbackId` is an opaque 1-byte token
+chosen by the caller and echoed back in the matching `SendDataStatus`
+signal.
+
+```bash
+# Turn node 5 on, with callback id 7:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetSwitchBinary yby 5 true 7
+```
+
+Watch the monitor terminal for:
+
+```
+SendDataStatus y y 7 0
+```
+
+The first byte is the echoed `callbackId`, the second is the
+`txStatus`:
+
+| `txStatus` | Meaning |
+|---|---|
+| `0x00` | Transmit complete OK (node ACK'd) |
+| `0x01` | No ACK from destination |
+| `0x02` | Transmit failed |
+| `0x03` | Routing not idle |
+| `0x04` | No route to destination |
+| `0x05` | Verified delivery |
+
+A `0x01` (no ACK) usually means the node is asleep or out of range.
+A `0x02` typically means the dongle accepted the request but
+transmission failed somewhere in the network.
+
+Get/Report (reading the current state from a node) is not yet
+implemented — the daemon does not yet decode `APPLICATION_COMMAND_HANDLER`
+incoming frames.
+
+## 12. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's
 ubus is on the roadmap. The CMake cache option `ZWAVED_EXTERNAL_API`

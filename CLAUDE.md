@@ -73,9 +73,10 @@ Each component owns its thread and `running` flag inside an anonymous namespace,
 `src/zwave-protocol/` contains:
 - Z-Wave serial framing classes (`ZwaveDataFrame`, `ZwaveACCFrame`, `ZwaveNAKFrame`, `ZwaveCANFrame`) implementing the serial API frame format
 - `SerialPort` (RAII 115200 8N1 raw TTY wrapper) and `FrameTransport` (six-frame-flow state machine with retry-on-NAK/CAN/timeout backoff `Tn = 100 + n × 1000 ms`)
-- `HostApi` codec for FUNC_ID_ZW_ADD_NODE_TO_NETWORK (`0x4A`, modes `0x01`/`0x05`/`0x06`/`0x08`/`0x09`) and FUNC_ID_ZW_REMOVE_NODE_FROM_NETWORK (`0x4B`, modes `0x01`/`0x05`)
+- `HostApi` codec for FUNC_ID_ZW_ADD_NODE_TO_NETWORK (`0x4A`, modes `0x01`/`0x05`/`0x06`/`0x08`/`0x09`), FUNC_ID_ZW_REMOVE_NODE_FROM_NETWORK (`0x4B`, modes `0x01`/`0x05`), and FUNC_ID_ZW_SEND_DATA (`0x13`) for application-layer commands addressed to a specific node
+- `BinarySwitch` codec for Command Class `0x25` (Set / Get / Report bytes); pairs with `SendDataRequest` to drive On/Off at a node
 - `HostApiSession` tracks the single active inclusion/exclusion session and correlates requests with their callbacks
-- Inter-thread channels: `HostApiRequestQueue` (in) and `HostApiCallbackDispatcher` (out)
+- Inter-thread channels: `HostApiRequestQueue` (in: `AddNodeRequest` / `RemoveNodeRequest` / `SendDataRequest` variant) and `HostApiCallbackDispatcher` (out: `NodeStatusCallback` / `SendDataCallback` variant)
 
 `src/external-api/` exposes the host API to clients. The transport-agnostic interface is `ExternalApi::IBackend` declared in `IExternalApi.hpp`, plus a `createBackend()` factory; `DBusBackend` is the only implementation today (system bus, name `com.tiunda.ZWaved`, object `/com/tiunda/ZWaved`, interface `com.tiunda.ZWaved1`). The system-bus policy XML is at `dbus/com.tiunda.ZWaved.conf` and must be installed under `/etc/dbus-1/system.d/` for non-root callers. Operator usage (classic vs SmartStart inclusion, signal payload layout, status table, troubleshooting) is in `MANUAL.md`.
 

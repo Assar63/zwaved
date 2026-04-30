@@ -82,15 +82,18 @@ auto isPathSet() -> bool
 
 auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame& frame) -> void
 {
-    const auto decoded = HostApi::decodeNodeCallback(frame);
-    if (!decoded.has_value())
+    if (const auto sendDataCb = HostApi::decodeSendDataCallback(frame); sendDataCb.has_value())
     {
+        HostApi::publishCallback(*sendDataCb);
         return;
     }
-    HostApi::publishCallback(*decoded);
-    if (HostApi::isTerminalStatus(decoded->commandId, decoded->status))
+    if (const auto nodeCb = HostApi::decodeNodeCallback(frame); nodeCb.has_value())
     {
-        tracker.end();
+        HostApi::publishCallback(*nodeCb);
+        if (HostApi::isTerminalStatus(nodeCb->commandId, nodeCb->status))
+        {
+            tracker.end();
+        }
     }
 }
 
@@ -126,6 +129,19 @@ auto dispatchRequest(FrameTransport& transport,
                 {
                     std::cerr << "[ProtocolThread] RemoveNode send failed (session "
                               << static_cast<int>(concrete.sessionId) << ")\n";
+                }
+            }
+            else if constexpr (std::is_same_v<T, HostApi::SendDataRequest>)
+            {
+                ZwaveDataFrame const frame = HostApi::encodeSendData(concrete);
+                if (!transport.sendRequest(frame))
+                {
+                    std::cerr << "[ProtocolThread] SendData send failed (node " << static_cast<int>(concrete.nodeId)
+                              << ", callback " << static_cast<int>(concrete.callbackId) << ")\n";
+                    // Synthesize a failure callback so the external API gets
+                    // notified instead of waiting indefinitely for a response.
+                    HostApi::publishCallback(HostApi::SendDataCallback{.callbackId = concrete.callbackId,
+                                                                       .txStatus   = HostApi::TRANSMIT_COMPLETE_FAIL});
                 }
             }
         },

@@ -1,6 +1,7 @@
 #include "DBusBackend.hpp"
 
 #include "../message-bus/MessageBus.hpp"
+#include "../zwave-protocol/BinarySwitch.hpp"
 #include "../zwave-protocol/HostApi.hpp"
 #include "../zwave-protocol/HostApiCallbackDispatcher.hpp"
 #include "../zwave-protocol/HostApiRequestQueue.hpp"
@@ -12,6 +13,8 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 #include <sdbus-c++/Error.h>
@@ -28,6 +31,7 @@ constexpr const char* IFACE_NAME  = "com.tiunda.ZWaved1";
 constexpr const char* SIGNAL_INCLUSION_STATUS = "NodeInclusionStatus";
 constexpr const char* SIGNAL_EXCLUSION_STATUS = "NodeExclusionStatus";
 constexpr const char* SIGNAL_DONGLE_STATUS    = "DongleStatus";
+constexpr const char* SIGNAL_SEND_DATA_STATUS = "SendDataStatus";
 
 constexpr int CALLBACK_POLL_MS = 200;
 
@@ -150,6 +154,20 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                 HostApi::pushRequest(req);
             });
 
+    obj.registerMethod("SetSwitchBinary")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [](const uint8_t& nodeId, const bool& turnOn, const uint8_t& callbackId)
+            {
+                HostApi::SendDataRequest req{};
+                req.nodeId     = nodeId;
+                req.data       = BinarySwitch::encodeSet(turnOn);
+                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+                req.callbackId = callbackId;
+                HostApi::pushRequest(req);
+            });
+
     obj.registerSignal(SIGNAL_INCLUSION_STATUS)
         .onInterface(IFACE_NAME)
         .withParameters<uint8_t, uint8_t, uint16_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>(
@@ -163,6 +181,10 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     obj.registerSignal(SIGNAL_DONGLE_STATUS)
         .onInterface(IFACE_NAME)
         .withParameters<bool, std::string>("connected", "ttyPath");
+
+    obj.registerSignal(SIGNAL_SEND_DATA_STATUS)
+        .onInterface(IFACE_NAME)
+        .withParameters<uint8_t, uint8_t>("callbackId", "txStatus");
 
     obj.finishRegistration();
 
@@ -198,18 +220,34 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
         }
         try
         {
-            const char* signalName = callback->commandId == HostApi::CMD_REMOVE_NODE_FROM_NETWORK
-                                         ? SIGNAL_EXCLUSION_STATUS
-                                         : SIGNAL_INCLUSION_STATUS;
-            auto signal            = obj.createSignal(IFACE_NAME, signalName);
-            signal << callback->sessionId;
-            signal << callback->status;
-            signal << callback->nodeId;
-            signal << callback->basicDeviceType;
-            signal << callback->genericDeviceType;
-            signal << callback->specificDeviceType;
-            signal << callback->commandClasses;
-            obj.emitSignal(signal);
+            std::visit(
+                [&obj](auto const& concrete)
+                {
+                    using T = std::decay_t<decltype(concrete)>;
+                    if constexpr (std::is_same_v<T, HostApi::NodeStatusCallback>)
+                    {
+                        const char* signalName = concrete.commandId == HostApi::CMD_REMOVE_NODE_FROM_NETWORK
+                                                     ? SIGNAL_EXCLUSION_STATUS
+                                                     : SIGNAL_INCLUSION_STATUS;
+                        auto signal            = obj.createSignal(IFACE_NAME, signalName);
+                        signal << concrete.sessionId;
+                        signal << concrete.status;
+                        signal << concrete.nodeId;
+                        signal << concrete.basicDeviceType;
+                        signal << concrete.genericDeviceType;
+                        signal << concrete.specificDeviceType;
+                        signal << concrete.commandClasses;
+                        obj.emitSignal(signal);
+                    }
+                    else if constexpr (std::is_same_v<T, HostApi::SendDataCallback>)
+                    {
+                        auto signal = obj.createSignal(IFACE_NAME, SIGNAL_SEND_DATA_STATUS);
+                        signal << concrete.callbackId;
+                        signal << concrete.txStatus;
+                        obj.emitSignal(signal);
+                    }
+                },
+                *callback);
         }
         catch (const sdbus::Error& err)
         {

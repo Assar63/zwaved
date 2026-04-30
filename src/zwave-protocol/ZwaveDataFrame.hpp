@@ -8,9 +8,10 @@ class ZwaveDataFrame
 {
   public:
     // Frame constants
-    static constexpr uint8_t SOF             = 0x01;                  // Start of Frame marker
-    static constexpr size_t MIN_FRAME_SIZE   = 5;                     // SOF + Length + Type + Cmd + Checksum
-    static constexpr size_t MAX_PAYLOAD_SIZE = 250;                   // Maximum payload bytes
+    static constexpr uint8_t SOF             = 0x01;  // Start of Frame marker
+    static constexpr uint8_t CHECKSUM_SEED   = 0xFF;  // Initial value for checksum register (INS12350 §6.4)
+    static constexpr size_t MIN_FRAME_SIZE   = 5;     // SOF + Length + Type + Cmd + Checksum
+    static constexpr size_t MAX_PAYLOAD_SIZE = 250;   // Maximum payload bytes
     static constexpr size_t MAX_FRAME_SIZE   = MAX_PAYLOAD_SIZE + 5;  // Full frame size
 
     // Frame Types

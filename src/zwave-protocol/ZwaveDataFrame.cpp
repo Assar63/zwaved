@@ -20,18 +20,20 @@ auto ZwaveDataFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
         return false;
     }
 
-    // Get frame length (number of bytes from Type to Checksum)
+    // Get frame length: number of bytes from Type through Checksum (inclusive),
+    // i.e. Type + Cmd + payload + Checksum. INS12350 §6.1.
     const uint8_t frameLength = buffer[1];
 
-    // Validate frame length
-    if (frameLength < 3 || frameLength > MAX_PAYLOAD_SIZE + 2)  // Min: Type(1) + Cmd(1) + Checksum(1)
+    // Validate frame length: minimum is 3 (Type + Cmd + Checksum, no payload),
+    // maximum is MAX_PAYLOAD_SIZE + 3.
+    if (frameLength < 3 || frameLength > MAX_PAYLOAD_SIZE + 3)
     {
         valid = false;
         return false;
     }
 
-    // Check that buffer contains complete frame
-    if (length < static_cast<size_t>(frameLength + 3))  // SOF + Length + frameLength + Checksum
+    // Check that buffer contains complete frame: SOF + LEN-byte + frameLength bytes.
+    if (length < static_cast<size_t>(frameLength) + 2)
     {
         valid = false;
         return false;
@@ -49,16 +51,16 @@ auto ZwaveDataFrame::parseFromBuffer(const uint8_t* buffer, const size_t length)
     // Extract command ID
     commandId = buffer[3];
 
-    // Extract payload
-    const size_t payloadSize = frameLength - 2;  // frameLength - Type - Cmd - Checksum (checksum is separate)
+    // Extract payload: frameLength minus Type, Cmd and Checksum.
+    const size_t payloadSize = frameLength - 3;
     payload.clear();
     if (payloadSize > 0)
     {
         payload.insert(payload.end(), buffer + 4, buffer + 4 + payloadSize);
     }
 
-    // Validate checksum
-    const uint8_t receivedChecksum = buffer[2 + frameLength];
+    // Checksum is the last byte covered by frameLength.
+    const uint8_t receivedChecksum = buffer[1 + frameLength];
     if (!validateChecksum(receivedChecksum))
     {
         valid = false;
@@ -152,9 +154,12 @@ auto ZwaveDataFrame::isValid() const -> bool
 
 auto ZwaveDataFrame::calculateChecksum() const -> uint8_t
 {
-    uint8_t checksum = 0;
+    // Z-Wave Serial API checksum: initial register is CHECKSUM_SEED (0xFF),
+    // then XOR every byte from LEN (inclusive) through the last data byte
+    // (i.e. excluding SOF and the checksum byte itself). Spec: INS12350 §6.4.
+    uint8_t checksum = CHECKSUM_SEED;
 
-    // Start with frame length
+    // XOR with frame length
     const auto frameLength = static_cast<uint8_t>(2 + payload.size() + 1);
     checksum ^= frameLength;
 

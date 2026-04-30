@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <type_traits>
@@ -34,6 +35,7 @@ constexpr const char* IFACE_NAME  = "com.tiunda.ZWaved1";
 constexpr const char* SIGNAL_INCLUSION_STATUS     = "NodeInclusionStatus";
 constexpr const char* SIGNAL_EXCLUSION_STATUS     = "NodeExclusionStatus";
 constexpr const char* SIGNAL_DONGLE_STATUS        = "DongleStatus";
+constexpr const char* SIGNAL_DONGLE_INFO          = "DongleInfo";
 constexpr const char* SIGNAL_SEND_DATA_STATUS     = "SendDataStatus";
 constexpr const char* SIGNAL_APPLICATION_COMMAND  = "ApplicationCommand";
 constexpr const char* SIGNAL_SWITCH_BINARY_REPORT = "SwitchBinaryReport";
@@ -59,6 +61,23 @@ constexpr uint8_t FLAG_NWE_BIT      = 6;
         result.at(i) = bytes.at(i);
     }
     return result;
+}
+
+auto emitDongleInfo(sdbus::IObject& obj, const MessageBus::DongleInfo& info) -> void
+{
+    try
+    {
+        auto signal = obj.createSignal(IFACE_NAME, SIGNAL_DONGLE_INFO);
+        signal << info.libraryVersion;
+        signal << info.libraryType;
+        signal << info.homeId;
+        signal << info.controllerNodeId;
+        obj.emitSignal(signal);
+    }
+    catch (const sdbus::Error& err)
+    {
+        std::cerr << "[DBusBackend] failed to emit DongleInfo: " << err.what() << '\n';
+    }
 }
 
 auto emitApplicationCommand(sdbus::IObject& obj, const MessageBus::ApplicationCommand& event) -> void
@@ -94,7 +113,10 @@ struct DBusBackend::Impl
     std::unique_ptr<sdbus::IObject> object;
     std::atomic<bool> connected{false};
     MessageBus::SubscriptionId dongleSubscription{0};
+    MessageBus::SubscriptionId dongleInfoSubscription{0};
     MessageBus::SubscriptionId applicationCommandSubscription{0};
+    std::mutex dongleInfoMutex;
+    MessageBus::DongleInfo lastDongleInfo;
 };
 
 DBusBackend::DBusBackend()
@@ -108,6 +130,7 @@ DBusBackend::~DBusBackend()
     stop();
 }
 
+// NOLINTBEGIN(readability-function-cognitive-complexity): flat D-Bus method/signal registration list
 auto DBusBackend::run(const std::atomic<bool>& running) -> void
 {
     try
@@ -213,6 +236,19 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                 return result;
             });
 
+    using DongleInfoTuple = sdbus::Struct<std::string, uint8_t, std::vector<uint8_t>, uint8_t>;
+    obj.registerMethod("GetDongleInfo")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            [this]() -> DongleInfoTuple
+            {
+                std::lock_guard<std::mutex> const lock(impl->dongleInfoMutex);
+                return DongleInfoTuple{impl->lastDongleInfo.libraryVersion,
+                                       impl->lastDongleInfo.libraryType,
+                                       impl->lastDongleInfo.homeId,
+                                       impl->lastDongleInfo.controllerNodeId};
+            });
+
     obj.registerSignal(SIGNAL_INCLUSION_STATUS)
         .onInterface(IFACE_NAME)
         .withParameters<uint8_t, uint8_t, uint16_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>(
@@ -226,6 +262,11 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     obj.registerSignal(SIGNAL_DONGLE_STATUS)
         .onInterface(IFACE_NAME)
         .withParameters<bool, std::string>("connected", "ttyPath");
+
+    obj.registerSignal(SIGNAL_DONGLE_INFO)
+        .onInterface(IFACE_NAME)
+        .withParameters<std::string, uint8_t, std::vector<uint8_t>, uint8_t>(
+            "libraryVersion", "libraryType", "homeId", "controllerNodeId");
 
     obj.registerSignal(SIGNAL_SEND_DATA_STATUS)
         .onInterface(IFACE_NAME)
@@ -269,6 +310,20 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                 return;
             }
             emitApplicationCommand(*impl->object, event);
+        });
+
+    impl->dongleInfoSubscription = MessageBus::subscribe(
+        [this](const MessageBus::DongleInfo& info)
+        {
+            {
+                std::lock_guard<std::mutex> const lock(impl->dongleInfoMutex);
+                impl->lastDongleInfo = info;
+            }
+            if (!impl || !impl->connected.load() || !impl->object)
+            {
+                return;
+            }
+            emitDongleInfo(*impl->object, info);
         });
 
     impl->connection->enterEventLoopAsync();
@@ -321,6 +376,7 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     impl->connection->leaveEventLoop();
     impl->connected = false;
 }
+// NOLINTEND(readability-function-cognitive-complexity)
 
 auto DBusBackend::stop() -> void
 {
@@ -328,6 +384,11 @@ auto DBusBackend::stop() -> void
     {
         MessageBus::unsubscribe(impl->applicationCommandSubscription);
         impl->applicationCommandSubscription = 0;
+    }
+    if (impl && impl->dongleInfoSubscription != 0)
+    {
+        MessageBus::unsubscribe(impl->dongleInfoSubscription);
+        impl->dongleInfoSubscription = 0;
     }
     if (impl && impl->dongleSubscription != 0)
     {

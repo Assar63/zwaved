@@ -33,6 +33,11 @@ constexpr int REQUEST_WAIT_TIMEOUT_MS = 100;
 // just end the session.
 constexpr std::uint8_t STATUS_COMPLETED = 0x06;
 
+// Per-request deadline for introspection responses (GET_VERSION,
+// MEMORY_GET_ID). Real responses arrive in ~10s of ms; budget is
+// generous so a slow-booting dongle still answers.
+constexpr int INTROSPECTION_TIMEOUT_MS = 2000;
+
 struct ZwaveProtocolState
 {
     std::thread thread;
@@ -85,6 +90,72 @@ auto isPathSet() -> bool
 {
     std::lock_guard<std::mutex> const lock(state().pathMutex);
     return state().path.has_value();
+}
+
+/// Run the dongle's startup introspection: GET_VERSION (0x15) +
+/// MEMORY_GET_ID (0x20). Uses a short-lived FrameTransport with its
+/// own capturing handler so RESPONSE frames land in local optionals
+/// without going through the runtime callback path. Returns
+/// std::nullopt if either request times out or fails to send.
+auto introspectDongle(SerialPort& port) -> std::optional<MessageBus::DongleInfo>
+{
+    using Clock = std::chrono::steady_clock;
+
+    std::optional<HostApi::VersionResponse> version;
+    std::optional<HostApi::MemoryIdResponse> identity;
+
+    FrameTransport transport(&port,
+                             [&](const ZwaveDataFrame& frame)
+                             {
+                                 if (auto resp = HostApi::decodeVersion(frame); resp.has_value())
+                                 {
+                                     version = resp;
+                                 }
+                                 else if (auto resp = HostApi::decodeMemoryId(frame); resp.has_value())
+                                 {
+                                     identity = resp;
+                                 }
+                             });
+
+    auto sendAndAwait = [&](std::uint8_t commandId, auto& slot) -> bool
+    {
+        ZwaveDataFrame request;
+        request.setHeader(ZwaveDataFrame::FrameType::REQUEST, commandId);
+        if (!transport.sendRequest(request))
+        {
+            return false;
+        }
+        const auto deadline = Clock::now() + std::chrono::milliseconds(INTROSPECTION_TIMEOUT_MS);
+        while (!slot.has_value() && Clock::now() < deadline)
+        {
+            transport.pumpOnce(IDLE_PUMP_TIMEOUT_MS);
+        }
+        return slot.has_value();
+    };
+
+    if (!sendAndAwait(HostApi::CMD_GET_VERSION, version))
+    {
+        std::cerr << "[ProtocolThread] GET_VERSION introspection failed\n";
+        return std::nullopt;
+    }
+    if (!sendAndAwait(HostApi::CMD_MEMORY_GET_ID, identity))
+    {
+        std::cerr << "[ProtocolThread] MEMORY_GET_ID introspection failed\n";
+        return std::nullopt;
+    }
+    // Belt-and-braces: sendAndAwait already returns false unless the slot was
+    // populated, but the static analyzer can't trace that across the helper.
+    if (!version.has_value() || !identity.has_value())
+    {
+        return std::nullopt;
+    }
+
+    MessageBus::DongleInfo info;
+    info.libraryVersion = version->version;
+    info.libraryType    = version->libraryType;
+    info.homeId.assign(identity->homeId.begin(), identity->homeId.end());
+    info.controllerNodeId = identity->controllerNodeId;
+    return info;
 }
 
 auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame& frame) -> void
@@ -227,6 +298,14 @@ auto zwaveCommunicationThread() -> void
             std::cerr << "[ProtocolThread] failed to open " << *path << "; backing off\n";
             std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;
+        }
+
+        if (auto info = introspectDongle(port); info.has_value())
+        {
+            std::cout << "[ProtocolThread] dongle " << info->libraryVersion << " (lib type "
+                      << static_cast<int>(info->libraryType) << ", controller node "
+                      << static_cast<int>(info->controllerNodeId) << ")\n";
+            MessageBus::publish(*info);
         }
 
         HostApi::clear();

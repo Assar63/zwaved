@@ -32,6 +32,18 @@ struct DongleStatus
     std::string ttyPath;  // Empty unless connected.
 };
 
+/// Static introspection captured once when the daemon opens the
+/// dongle's serial port: library version string + type, network home
+/// ID, and this controller's own node ID. Retained on the bus so late
+/// subscribers see the latest snapshot.
+struct DongleInfo
+{
+    std::string libraryVersion;
+    std::uint8_t libraryType = 0;
+    std::vector<std::uint8_t> homeId;  // 4 bytes
+    std::uint8_t controllerNodeId = 0;
+};
+
 /// Unsolicited command-class frame received from a node, carried inside
 /// FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04). Transient: not retained
 /// across subscribes.
@@ -43,9 +55,11 @@ struct ApplicationCommand
 };
 
 [[nodiscard]] auto subscribe(const std::function<void(const DongleStatus&)>& handler) -> SubscriptionId;
+[[nodiscard]] auto subscribe(const std::function<void(const DongleInfo&)>& handler) -> SubscriptionId;
 [[nodiscard]] auto subscribe(const std::function<void(const ApplicationCommand&)>& handler) -> SubscriptionId;
 auto unsubscribe(SubscriptionId subscriptionId) -> void;
 auto publish(const DongleStatus& status) -> void;
+auto publish(const DongleInfo& info) -> void;
 auto publish(const ApplicationCommand& event) -> void;
 }  // namespace MessageBus
 

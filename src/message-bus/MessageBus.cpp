@@ -12,6 +12,7 @@
 namespace
 {
 using DongleStatusList       = eventpp::CallbackList<void(const MessageBus::DongleStatus&)>;
+using DongleInfoList         = eventpp::CallbackList<void(const MessageBus::DongleInfo&)>;
 using ApplicationCommandList = eventpp::CallbackList<void(const MessageBus::ApplicationCommand&)>;
 
 // State events (currently just DongleStatus) are retained so that late
@@ -27,11 +28,13 @@ using ApplicationCommandList = eventpp::CallbackList<void(const MessageBus::Appl
 struct State
 {
     DongleStatusList dongleStatus;
+    DongleInfoList dongleInfo;
     ApplicationCommandList applicationCommand;
     std::mutex stateMutex;
     std::atomic<MessageBus::SubscriptionId> nextId{1};
     std::unordered_map<MessageBus::SubscriptionId, std::function<void()>> removers;
     std::optional<MessageBus::DongleStatus> lastDongleStatus;
+    std::optional<MessageBus::DongleInfo> lastDongleInfo;
 };
 
 auto state() -> State&
@@ -75,6 +78,26 @@ auto MessageBus::publish(const DongleStatus& status) -> void
     std::lock_guard<std::mutex> const lock(state().stateMutex);
     state().lastDongleStatus = status;
     state().dongleStatus(status);
+}
+
+auto MessageBus::subscribe(const std::function<void(const DongleInfo&)>& handler) -> SubscriptionId
+{
+    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    const auto handle          = state().dongleInfo.append(handler);
+    const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
+    state().removers.emplace(newId, [handle]() { state().dongleInfo.remove(handle); });
+    if (const auto cached = state().lastDongleInfo; cached.has_value())
+    {
+        handler(*cached);
+    }
+    return newId;
+}
+
+auto MessageBus::publish(const DongleInfo& info) -> void
+{
+    std::lock_guard<std::mutex> const lock(state().stateMutex);
+    state().lastDongleInfo = info;
+    state().dongleInfo(info);
 }
 
 auto MessageBus::subscribe(const std::function<void(const ApplicationCommand&)>& handler) -> SubscriptionId

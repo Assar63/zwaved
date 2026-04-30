@@ -16,8 +16,9 @@ constexpr uint8_t FLAG_PROTOCOL_BIT = 5;  // Add Node
 constexpr uint8_t FLAG_SFLND_BIT    = 4;  // Add Node
 constexpr uint8_t FLAG_NWE_BIT      = 6;  // Remove Node
 
-constexpr std::size_t HOMEID_LEN      = 4;
-constexpr unsigned NODE_ID_HIGH_SHIFT = 8;
+constexpr std::size_t HOMEID_LEN         = 4;
+constexpr std::size_t VERSION_STRING_LEN = 12;
+constexpr unsigned NODE_ID_HIGH_SHIFT    = 8;
 
 auto makeFlagByte(const uint8_t mode,
                   const bool power,
@@ -164,6 +165,57 @@ auto HostApi::decodeApplicationCommand(const ZwaveDataFrame& frame) -> std::opti
         return std::nullopt;
     }
     out.ccData.assign(payload + 3, payload + 3 + ccLen);
+    return out;
+}
+
+auto HostApi::decodeVersion(const ZwaveDataFrame& frame) -> std::optional<VersionResponse>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_GET_VERSION ||
+        frame.getType() != ZwaveDataFrame::FrameType::RESPONSE)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload  = frame.getPayload();
+    std::size_t const total = frame.getPayloadSize();
+    // 12 ASCII bytes (null-terminated string) + 1 library-type byte.
+    if (payload == nullptr || total < VERSION_STRING_LEN + 1)
+    {
+        return std::nullopt;
+    }
+    VersionResponse out;
+    std::size_t len = 0;
+    while (len < VERSION_STRING_LEN && payload[len] != 0)
+    {
+        ++len;
+    }
+    out.version.reserve(len);
+    for (std::size_t idx = 0; idx < len; ++idx)
+    {
+        out.version.push_back(static_cast<char>(payload[idx]));
+    }
+    out.libraryType = payload[VERSION_STRING_LEN];
+    return out;
+}
+
+auto HostApi::decodeMemoryId(const ZwaveDataFrame& frame) -> std::optional<MemoryIdResponse>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_MEMORY_GET_ID ||
+        frame.getType() != ZwaveDataFrame::FrameType::RESPONSE)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload = frame.getPayload();
+    // 4 home-id bytes + 1 controller-node-id byte.
+    if (std::size_t const total = frame.getPayloadSize(); payload == nullptr || total < HOMEID_LEN + 1)
+    {
+        return std::nullopt;
+    }
+    MemoryIdResponse out;
+    for (std::size_t idx = 0; idx < HOMEID_LEN; ++idx)
+    {
+        out.homeId.at(idx) = payload[idx];
+    }
+    out.controllerNodeId = payload[HOMEID_LEN];
     return out;
 }
 

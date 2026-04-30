@@ -38,10 +38,11 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list six methods (`AddNode`, `StopAddNode`,
-`RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`, `GetNodes`) and six
-signals (`NodeInclusionStatus`, `NodeExclusionStatus`, `DongleStatus`,
-`SendDataStatus`, `ApplicationCommand`, `SwitchBinaryReport`).
+The introspection should list seven methods (`AddNode`, `StopAddNode`,
+`RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`, `GetNodes`,
+`GetDongleInfo`) and seven signals (`NodeInclusionStatus`,
+`NodeExclusionStatus`, `DongleStatus`, `DongleInfo`, `SendDataStatus`,
+`ApplicationCommand`, `SwitchBinaryReport`).
 
 ### Always monitor signals in another terminal
 
@@ -78,6 +79,7 @@ or wait for the next hot-plug to determine current state.
 | `StopRemoveNode` | `y` (sessionId) | Send Mode `0x05` to stop an in-progress exclusion |
 | `SetSwitchBinary` | `y b y` (nodeId, on, callbackId) | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)` |
 | `GetNodes` | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes) | Return the in-memory list of currently-included nodes |
+| `GetDongleInfo` | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId) | Return the dongle introspection captured when the serial port opened |
 
 `y` = `BYTE` (uint8), `q` = `UINT16`, `ay` = array of bytes.
 
@@ -335,7 +337,32 @@ a(yyyyay) 1 5 4 16 1 5 0x25 0x70 0x86 0x59 0x85
 The registry is in-memory only — it survives USB reconnects but is
 discarded on daemon restart. Persistence is on the roadmap.
 
-## 14. Future: ubus
+## 14. Dongle introspection
+
+When the protocol thread opens the serial port to a dongle, it sends
+two host-API requests synchronously and caches the answers:
+
+- `FUNC_ID_GET_VERSION` (`0x15`) → printable Z-Wave library version
+  string + library type byte (`1` = Static Controller, `7` = Bridge,
+  etc.)
+- `FUNC_ID_MEMORY_GET_ID` (`0x20`) → 4-byte network Home ID +
+  this controller's own 1-byte Node ID.
+
+Both values are emitted on D-Bus as a `DongleInfo(s y ay y)` signal
+and cached so `GetDongleInfo()` can return the latest snapshot to
+clients that connect later.
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetDongleInfo
+```
+
+If a dongle has not yet been introspected (none plugged in since the
+daemon started), `GetDongleInfo` returns an empty struct (empty
+`libraryVersion`, all bytes zero); clients should treat that as
+"not available yet" and wait for the next `DongleInfo` signal.
+
+## 15. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's
 ubus is on the roadmap. The CMake cache option `ZWAVED_EXTERNAL_API`

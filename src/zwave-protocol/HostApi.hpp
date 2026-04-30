@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace HostApi
@@ -14,8 +15,20 @@ using SessionId = uint8_t;
 
 constexpr uint8_t CMD_APPLICATION_COMMAND      = 0x04;
 constexpr uint8_t CMD_SEND_DATA                = 0x13;
+constexpr uint8_t CMD_GET_VERSION              = 0x15;
+constexpr uint8_t CMD_MEMORY_GET_ID            = 0x20;
 constexpr uint8_t CMD_ADD_NODE_TO_NETWORK      = 0x4A;
 constexpr uint8_t CMD_REMOVE_NODE_FROM_NETWORK = 0x4B;
+
+// FUNC_ID_GET_VERSION library types (response byte 12).
+constexpr uint8_t LIBRARY_TYPE_STATIC_CONTROLLER = 1;
+constexpr uint8_t LIBRARY_TYPE_CONTROLLER        = 2;
+constexpr uint8_t LIBRARY_TYPE_ENHANCED_SLAVE    = 3;
+constexpr uint8_t LIBRARY_TYPE_SLAVE             = 4;
+constexpr uint8_t LIBRARY_TYPE_INSTALLER         = 5;
+constexpr uint8_t LIBRARY_TYPE_ROUTING_SLAVE     = 6;
+constexpr uint8_t LIBRARY_TYPE_BRIDGE_CONTROLLER = 7;
+constexpr uint8_t LIBRARY_TYPE_DUT               = 8;
 
 // FUNC_ID_ZW_SEND_DATA transmit options.
 constexpr uint8_t TRANSMIT_OPTION_ACK        = 0x01;
@@ -84,6 +97,24 @@ struct SendDataCallback
     uint8_t txStatus   = TRANSMIT_COMPLETE_FAIL;
 };
 
+/// Decoded payload of FUNC_ID_GET_VERSION (0x15) RESPONSE. The version
+/// string is the dongle's printable Z-Wave library version (e.g.
+/// "Z-Wave 6.07"); libraryType is one of the LIBRARY_TYPE_* constants.
+struct VersionResponse
+{
+    std::string version;
+    uint8_t libraryType = 0;
+};
+
+/// Decoded payload of FUNC_ID_MEMORY_GET_ID (0x20) RESPONSE. Home ID
+/// is the 4-byte network identifier (big-endian as transmitted);
+/// controllerNodeId is this controller's own node ID inside the network.
+struct MemoryIdResponse
+{
+    std::array<uint8_t, 4> homeId{};
+    uint8_t controllerNodeId = 0;
+};
+
 /// Decoded payload of FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04). Emitted
 /// by the controller whenever a node sends an unsolicited Command Class
 /// frame (e.g. SwitchBinary REPORT after a manual toggle, sensor pings,
@@ -121,6 +152,12 @@ struct NodeStatusCallback
 /// std::nullopt if the frame is not a 0x04 callback or the payload is
 /// too short / inconsistent.
 [[nodiscard]] auto decodeApplicationCommand(const ZwaveDataFrame& frame) -> std::optional<ApplicationCommand>;
+
+/// Decode a FUNC_ID_GET_VERSION (0x15) RESPONSE.
+[[nodiscard]] auto decodeVersion(const ZwaveDataFrame& frame) -> std::optional<VersionResponse>;
+
+/// Decode a FUNC_ID_MEMORY_GET_ID (0x20) RESPONSE.
+[[nodiscard]] auto decodeMemoryId(const ZwaveDataFrame& frame) -> std::optional<MemoryIdResponse>;
 
 /// Decode either a 0x4A or 0x4B callback. Pass nodeId16Bit = true if the
 /// controller has been configured for 16-bit node IDs (default false matches

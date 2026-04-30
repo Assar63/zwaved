@@ -245,6 +245,7 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [3] Switch binary ON  (prompts for node id)");
     mvprintw(row++, 0, "  [4] Switch binary OFF (prompts for node id)");
     mvprintw(row++, 0, "  [l] List included nodes");
+    mvprintw(row++, 0, "  [i] Dongle info");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));
     mvprintw(row++, 0, "  [q] Quit");
     mvhline(row++, 0, '-', getmaxx(stdscr));
@@ -323,6 +324,25 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                        << " state=" << formatSwitchState(state);
                 logLine(stream.str());
             });
+
+    proxy.uponSignal("DongleInfo")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](const std::string& libraryVersion,
+               std::uint8_t libraryType,
+               const std::vector<std::uint8_t>& homeId,
+               std::uint8_t controllerNodeId)
+            {
+                std::ostringstream stream;
+                stream << "DongleInfo: \"" << libraryVersion << "\" libType=" << static_cast<unsigned>(libraryType)
+                       << " homeId=";
+                for (const auto byte : homeId)
+                {
+                    stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(byte);
+                }
+                stream << std::dec << " controllerNode=" << static_cast<unsigned>(controllerNodeId);
+                logLine(stream.str());
+            });
 }
 
 auto handleSwitchBinary(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, bool turnOn) -> void
@@ -355,6 +375,38 @@ auto formatCcList(const std::vector<std::uint8_t>& ccs) -> std::string
     }
     stream << "]";
     return stream.str();
+}
+
+auto handleDongleInfo(sdbus::IProxy& proxy) -> void
+{
+    using DongleInfoTuple = sdbus::Struct<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>;
+    DongleInfoTuple info;
+    try
+    {
+        proxy.callMethod("GetDongleInfo").onInterface(IFACE_NAME).storeResultsTo(info);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetDongleInfo failed: "} + err.what());
+        return;
+    }
+    const auto& libraryVersion  = std::get<0>(info);
+    const auto libraryType      = std::get<1>(info);
+    const auto& homeId          = std::get<2>(info);
+    const auto controllerNodeId = std::get<3>(info);
+    if (libraryVersion.empty() && libraryType == 0)
+    {
+        logLine("DongleInfo: (not yet introspected — connect a dongle first)");
+        return;
+    }
+    std::ostringstream stream;
+    stream << "DongleInfo: \"" << libraryVersion << "\" libType=" << static_cast<unsigned>(libraryType) << " homeId=";
+    for (const auto byte : homeId)
+    {
+        stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(byte);
+    }
+    stream << std::dec << " controllerNode=" << static_cast<unsigned>(controllerNodeId);
+    logLine(stream.str());
 }
 
 auto handleListNodes(sdbus::IProxy& proxy) -> void
@@ -473,6 +525,10 @@ auto main() -> int
             else if (key == 'l' || key == 'L')
             {
                 handleListNodes(*proxy);
+            }
+            else if (key == 'i' || key == 'I')
+            {
+                handleDongleInfo(*proxy);
             }
             else if (key == 's' || key == 'S')
             {

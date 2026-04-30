@@ -72,7 +72,13 @@ constexpr std::uint8_t WIRE_VALUE_UNKNOWN = 0xFE;
 // COMMAND_CLASS_MARK separates the CCs the node *supports* (i.e.
 // will respond to) from the ones it *controls* (i.e. emits to its
 // associated nodes — typically Basic SET on a wall switch toggle).
-constexpr std::uint8_t CC_MARK = 0xEF;
+constexpr std::uint8_t CC_MARK        = 0xEF;
+constexpr std::uint8_t CC_ASSOCIATION = 0x85;
+
+// callbackId=0 in SendData means "no completion callback wanted from
+// the dongle"; the node's application reply still arrives normally,
+// so it's perfect for fire-and-forget auto-introspection queries.
+constexpr std::uint8_t CALLBACK_ID_NONE = 0;
 
 // Valid Z-Wave 8-bit node IDs (excluding broadcast 0 and reserved >232).
 constexpr int NODE_ID_MIN = 1;
@@ -296,6 +302,7 @@ auto draw(std::uint8_t lastSession) -> void
     refresh();
 }
 
+// NOLINTBEGIN(readability-function-cognitive-complexity): flat list of signal subscriptions
 auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
 {
     proxy.uponSignal("NodeInclusionStatus")
@@ -438,12 +445,29 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
     proxy.uponSignal("AssociationGroupingsReport")
         .onInterface(IFACE_NAME)
         .call(
-            [](std::uint8_t sourceNodeId, std::uint8_t supportedGroupings)
+            // Auto-chains a GetAssociation for each group when a groupings
+            // report arrives, so [l] introspection (and manual [g]) end up
+            // showing each group's members without further keystrokes.
+            [&proxy](std::uint8_t sourceNodeId, std::uint8_t supportedGroupings)
             {
                 std::ostringstream stream;
                 stream << "AssociationGroupingsReport node=" << static_cast<unsigned>(sourceNodeId)
                        << " groupings=" << static_cast<unsigned>(supportedGroupings);
                 logLine(stream.str());
+                for (std::uint8_t group = 1; group <= supportedGroupings; ++group)
+                {
+                    try
+                    {
+                        proxy.callMethod("GetAssociation")
+                            .onInterface(IFACE_NAME)
+                            .withArguments(sourceNodeId, group, CALLBACK_ID_NONE);
+                    }
+                    catch (const sdbus::Error& err)
+                    {
+                        logLine(std::string{"auto GetAssociation failed: "} + err.what());
+                        break;
+                    }
+                }
             });
 
     proxy.uponSignal("DongleInfo")
@@ -465,6 +489,7 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 }
+// NOLINTEND(readability-function-cognitive-complexity)
 
 auto handleSwitchBinary(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, bool turnOn) -> void
 {
@@ -621,6 +646,26 @@ auto handleDongleInfo(sdbus::IProxy& proxy) -> void
     logLine(stream.str());
 }
 
+/// True if `targetCc` appears in `ccs` *before* COMMAND_CLASS_MARK,
+/// i.e. the node will respond to it as a target. Anything after the
+/// mark is the node's controlled set, which it emits to others —
+/// listing those there does not mean the node responds to that CC.
+auto nodeSupportsCc(const std::vector<std::uint8_t>& ccs, std::uint8_t targetCc) -> bool
+{
+    for (const auto byte : ccs)
+    {
+        if (byte == CC_MARK)
+        {
+            return false;
+        }
+        if (byte == targetCc)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 auto fetchControllerNodeId(sdbus::IProxy& proxy) -> std::optional<std::uint8_t>
 {
     using DongleInfoTuple = sdbus::Struct<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>;
@@ -762,6 +807,23 @@ auto handleListNodes(sdbus::IProxy& proxy) -> void
                << static_cast<unsigned>(generic) << " specific=0x" << std::setw(2) << static_cast<unsigned>(specific)
                << std::dec << " " << formatCcList(ccs);
         logLine(stream.str());
+
+        // Auto-introspect Association on supporting nodes. The
+        // AssociationGroupingsReport handler chains GetAssociation
+        // for each group, so we just kick off the GROUPINGS GET here.
+        if (nodeSupportsCc(ccs, CC_ASSOCIATION))
+        {
+            try
+            {
+                proxy.callMethod("GetAssociationGroupings")
+                    .onInterface(IFACE_NAME)
+                    .withArguments(nodeId, CALLBACK_ID_NONE);
+            }
+            catch (const sdbus::Error& err)
+            {
+                logLine(std::string{"auto GetAssociationGroupings failed: "} + err.what());
+            }
+        }
     }
 }
 }  // namespace

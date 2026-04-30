@@ -179,11 +179,17 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
     {
         HostApi::publishCallback(*nodeCb);
 
-        const bool hasNodePayload =
-            nodeCb->nodeId != 0 && (nodeCb->status == STATUS_PROTOCOL_DONE || nodeCb->status == STATUS_COMPLETED);
-        if (hasNodePayload)
+        // Inclusion: most controllers deliver the node's full info (device
+        // class triple + supported command classes) at 0x03/0x04 (Inclusion
+        // ongoing — End Node / Controller); a thinner 0x05/0x06 follows
+        // with just nodeId. Register on the *first* callback that carries
+        // payload, irrespective of status, so we capture the CC list. UPSERT
+        // makes a later thinner callback for the same node a no-op overwrite.
+        if (nodeCb->commandId == HostApi::CMD_ADD_NODE_TO_NETWORK && nodeCb->nodeId != 0)
         {
-            if (nodeCb->commandId == HostApi::CMD_ADD_NODE_TO_NETWORK)
+            const bool hasNodeInfo = !nodeCb->commandClasses.empty() || nodeCb->basicDeviceType != 0 ||
+                                     nodeCb->genericDeviceType != 0 || nodeCb->specificDeviceType != 0;
+            if (hasNodeInfo)
             {
                 NodeRegistry::add({.nodeId         = static_cast<std::uint8_t>(nodeCb->nodeId),
                                    .basicType      = nodeCb->basicDeviceType,
@@ -191,10 +197,12 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
                                    .specificType   = nodeCb->specificDeviceType,
                                    .commandClasses = nodeCb->commandClasses});
             }
-            else if (nodeCb->commandId == HostApi::CMD_REMOVE_NODE_FROM_NETWORK)
-            {
-                NodeRegistry::remove(static_cast<std::uint8_t>(nodeCb->nodeId));
-            }
+        }
+        // Exclusion: only nodeId is needed; trigger on a session-ending status.
+        else if (nodeCb->commandId == HostApi::CMD_REMOVE_NODE_FROM_NETWORK && nodeCb->nodeId != 0 &&
+                 (nodeCb->status == STATUS_PROTOCOL_DONE || nodeCb->status == STATUS_COMPLETED))
+        {
+            NodeRegistry::remove(static_cast<std::uint8_t>(nodeCb->nodeId));
         }
 
         if (HostApi::isTerminalStatus(nodeCb->commandId, nodeCb->status))

@@ -29,7 +29,8 @@ companion `zwave-terminal` client, and packaging.
 
 ### Persistence & configuration
 
-- [ ] Local database for nodes and network metadata _(may force a structural re-layout)_.
+- [x] **SQLite-backed node registry** — `nodes.db` at `${ZWAVED_STATE_DIR:-/var/lib/zwaved}` keeps the included-node list across daemon restarts. Static info only.
+- [ ] Persist additional network metadata (per-node dynamic state, association groups, configuration parameters).
 - [ ] Configuration file for daemon settings.
 
 ### Observability

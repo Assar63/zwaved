@@ -334,8 +334,14 @@ Sample output for one node:
 a(yyyyay) 1 5 4 16 1 5 0x25 0x70 0x86 0x59 0x85
 ```
 
-The registry is in-memory only — it survives USB reconnects but is
-discarded on daemon restart. Persistence is on the roadmap.
+The registry is backed by SQLite (`${ZWAVED_STATE_DIR:-/var/lib/zwaved}/nodes.db`)
+so the list survives both USB reconnects and daemon restarts. The
+schema captures only the static info from inclusion (device-class
+triple + command classes); dynamic per-node state continues to flow
+through the CC-specific signals (`SwitchBinaryReport`, etc.) rather
+than being duplicated in the database. If the state directory can't
+be created or opened, the daemon logs a warning and falls back to
+in-memory only.
 
 ## 14. Dongle introspection
 

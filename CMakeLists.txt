@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 26)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUDEV REQUIRED IMPORTED_TARGET libudev)
+pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
 
 # Header-only event dispatcher / queue. Expected to be provided by the
 # system / cross-sysroot (e.g. Yocto meta-oe recipe, distro package);

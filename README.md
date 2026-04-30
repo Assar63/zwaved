@@ -20,6 +20,7 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 - **C++26 standard support**
 - **libudev** development files (`libudev-dev`) — USB device monitoring
 - **sdbus-c++** development files (`libsdbus-c++-dev`) — D-Bus interface; pulls in `libsystemd-dev` transitively
+- **SQLite3** development files (`libsqlite3-dev`) — node-registry persistence
 
 ## Installation
 
@@ -37,7 +38,7 @@ sudo apt install -y g++-15 gcc-15
 sudo apt install -y clang-20 llvm-20
 
 # CMake + runtime libs
-sudo apt install -y cmake libudev-dev libsdbus-c++-dev
+sudo apt install -y cmake libudev-dev libsdbus-c++-dev libsqlite3-dev
 ```
 
 ## Compilation

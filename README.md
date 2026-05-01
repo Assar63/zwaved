@@ -280,7 +280,13 @@ cache option:
 - `syslog` — calls `syslog(3)` with the `LOG_DAEMON` facility and
   `zwaved` ident; severity maps from the logger level. Suitable for
   OpenWRT / non-systemd deployments where logd or rsyslog routes to
-  `/var/log/messages`.
+  `/var/log/messages`. Under this sink the daemon also reopens stdin
+  on `/dev/null` and reroutes stdout / stderr through Logger via
+  pipes, so any rogue `printf`, `std::cout`, `std::cerr`, library
+  panic or assert trace ends up in syslog alongside the structured
+  log output. (Capture is intentionally **not** enabled under the
+  `stdout` sink — Logger's own writes would loop back through its
+  own pipe.)
 
 ```bash
 cmake --preset gnu -DZWAVED_LOGGER_SINK=syslog

@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>  // NOLINT(misc-include-cleaner): errno checked in captureReaderLoop's read() error branch
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdio>
 #include <ctime>
 #include <deque>
 #include <iomanip>
@@ -20,6 +22,7 @@
 #include <utility>
 
 #include <sys/prctl.h>
+#include <unistd.h>  // NOLINT(misc-include-cleaner): pipe/dup2/read/close/STDOUT_FILENO/STDERR_FILENO
 
 #ifdef ZWAVED_LOGGER_SYSLOG
 #    include <syslog.h>
@@ -40,6 +43,20 @@ struct LogEntry
     std::string message;
 };
 
+/// Per-stream capture state for stdout / stderr. The kernel duplicates
+/// the writer side of a pipe over fd 1 / fd 2, so any printf or
+/// std::cout in the process now writes into the pipe; a dedicated
+/// reader thread drains it line-by-line into Logger::log.
+struct StreamCapture
+{
+    std::thread thread;
+    int readFd          = -1;
+    int writeFd         = -1;
+    int targetFd        = -1;  // STDOUT_FILENO or STDERR_FILENO
+    Logger::Level level = Logger::Level::Info;
+    std::string buffer;  // partial-line accumulator, owned by the reader thread
+};
+
 struct LoggerState
 {
     std::thread thread;
@@ -47,6 +64,12 @@ struct LoggerState
     std::mutex mutex;
     std::condition_variable cv;
     std::deque<LogEntry> queue;
+
+#ifdef ZWAVED_LOGGER_SYSLOG
+    std::once_flag claimFlag;
+    StreamCapture stdoutCapture;
+    StreamCapture stderrCapture;
+#endif
 };
 
 auto state() -> LoggerState&
@@ -128,6 +151,104 @@ auto pushEntry(Logger::Level level, std::string message) -> void
     state().cv.notify_one();
 }
 
+#ifdef ZWAVED_LOGGER_SYSLOG
+constexpr std::size_t CAPTURE_CHUNK_BYTES = 256;
+constexpr const char* STDOUT_READER_NAME  = "ZWaveCapO";
+constexpr const char* STDERR_READER_NAME  = "ZWaveCapE";
+
+/// Reader-thread body for a captured stream. Reads in chunks, splits
+/// on newlines, ships each complete line through Logger::log. Exits on
+/// EOF (the daemon's destructor closes the writer-side fd as part of
+/// teardown), draining any trailing partial line as it leaves.
+auto captureReaderLoop(StreamCapture& capture, const char* threadName) -> void
+{
+    prctl(PR_SET_NAME, threadName, 0, 0, 0);  // NOLINT(misc-include-cleaner)
+    std::array<char, CAPTURE_CHUNK_BYTES> chunk{};
+    while (true)
+    {
+        const ssize_t got = ::read(capture.readFd, chunk.data(), chunk.size());
+        if (got > 0)
+        {
+            capture.buffer.append(chunk.data(), static_cast<std::size_t>(got));
+            std::size_t pos = 0;
+            while ((pos = capture.buffer.find('\n')) != std::string::npos)
+            {
+                std::string line = capture.buffer.substr(0, pos);
+                capture.buffer.erase(0, pos + 1);
+                if (!line.empty())
+                {
+                    Logger::log(capture.level, std::move(line));
+                }
+            }
+            continue;
+        }
+        if (got == 0)
+        {
+            break;  // writer side closed → EOF
+        }
+        if (errno == EINTR)
+        {
+            continue;
+        }
+        break;  // any other error: stop draining
+    }
+    if (!capture.buffer.empty())
+    {
+        Logger::log(capture.level, std::move(capture.buffer));
+    }
+}
+
+/// Build a pipe and dup2 its writer-side over `targetFd`, so anything
+/// that writes to the original fd (printf to stdout, std::cerr, a
+/// dlopen'd library that hits assert) now lands in the pipe. The
+/// reader-side fd is stashed for the reader thread.
+auto stealStream(StreamCapture& capture, int targetFd, Logger::Level level, const char* threadName) -> void
+{
+    std::array<int, 2> pipeFds{-1, -1};
+    if (::pipe(pipeFds.data()) != 0)
+    {
+        std::cerr << "[Logger] pipe() for fd " << targetFd << " failed\n";
+        return;
+    }
+    if (::dup2(pipeFds.at(1), targetFd) < 0)
+    {
+        std::cerr << "[Logger] dup2() for fd " << targetFd << " failed\n";
+        ::close(pipeFds.at(0));
+        ::close(pipeFds.at(1));
+        return;
+    }
+    // The original write end is no longer needed — fd `targetFd` is
+    // now a duplicate. Closing it here means the only remaining
+    // reference is targetFd itself; closing targetFd in the destructor
+    // therefore reaches the reader as EOF.
+    ::close(pipeFds.at(1));
+    capture.readFd   = pipeFds.at(0);
+    capture.writeFd  = -1;
+    capture.targetFd = targetFd;
+    capture.level    = level;
+    capture.thread   = std::thread([&capture, threadName] { captureReaderLoop(capture, threadName); });
+}
+
+auto joinCapture(StreamCapture& capture) -> void
+{
+    if (capture.targetFd >= 0)
+    {
+        // Close the dup2'd writer side. The reader sees EOF and exits.
+        ::close(capture.targetFd);
+        capture.targetFd = -1;
+    }
+    if (capture.thread.joinable())
+    {
+        capture.thread.join();
+    }
+    if (capture.readFd >= 0)
+    {
+        ::close(capture.readFd);
+        capture.readFd = -1;
+    }
+}
+#endif  // ZWAVED_LOGGER_SYSLOG
+
 /// Consumer loop — drain the queue in batches and emit each entry.
 /// `running == false` plus an empty queue ends the loop, so the
 /// destructor's wake-up always exits cleanly.
@@ -200,16 +321,54 @@ auto Logger::error(std::string message) -> void
     pushEntry(Level::Error, std::move(message));
 }
 
+auto Logger::claimStandardStreams() -> void
+{
+#ifdef ZWAVED_LOGGER_SYSLOG
+    std::call_once(state().claimFlag,
+                   []
+                   {
+                       // stdin is meaningless for a daemon — point it at /dev/null
+                       // so any fgets() / read() returns immediately rather than
+                       // blocking on a closed terminal.
+                       if (std::freopen("/dev/null", "r", stdin) == nullptr)
+                       {
+                           std::cerr << "[Logger] freopen(stdin, /dev/null) failed\n";
+                       }
+                       stealStream(state().stdoutCapture, STDOUT_FILENO, Level::Info, STDOUT_READER_NAME);
+                       stealStream(state().stderrCapture, STDERR_FILENO, Level::Error, STDERR_READER_NAME);
+                       // Force line buffering so a half-finished printf doesn't
+                       // sit in the FILE* buffer waiting for a flush.
+                       ::setvbuf(stdout, nullptr, _IOLBF, 0);
+                       ::setvbuf(stderr, nullptr, _IOLBF, 0);
+                   });
+#endif
+    // Under the stdout sink: deliberate no-op (capturing stdout would
+    // loop the consumer thread's own writes back through the pipe).
+}
+
 namespace
 {
 __attribute__((constructor(CONFIG_LOGGER_PRIO))) auto startLogger() -> void
 {
     state().running = true;
     state().thread  = std::thread(loggerThread);
+#ifdef ZWAVED_LOGGER_SYSLOG
+    // With the syslog sink there is no looping risk and capturing
+    // stdout/stderr is the whole point of running as a daemon — engage
+    // it automatically so callers don't have to remember.
+    Logger::claimStandardStreams();
+#endif
 }
 
 __attribute__((destructor(CONFIG_LOGGER_PRIO))) auto stopLogger() -> void
 {
+#ifdef ZWAVED_LOGGER_SYSLOG
+    // Tear down the captures *before* the consumer thread, so any
+    // trailing line each reader flushes still lands in the queue while
+    // the consumer is alive to drain it.
+    joinCapture(state().stdoutCapture);
+    joinCapture(state().stderrCapture);
+#endif
     {
         std::scoped_lock const lock(state().mutex);
         state().running = false;

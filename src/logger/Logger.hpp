@@ -47,6 +47,23 @@ auto debug(std::string message) -> void;
 auto info(std::string message) -> void;
 auto warn(std::string message) -> void;
 auto error(std::string message) -> void;
+
+/// Detach stdin from the controlling terminal and reroute stdout /
+/// stderr through Logger so any rogue printf, std::cout, std::cerr,
+/// library panic or assert trace ends up in the same pipeline as the
+/// rest of the daemon's output. Idempotent.
+///
+/// **Build constraint:** capturing stdout only makes sense when the
+/// configured sink isn't itself stdout — under the `stdout` sink the
+/// Logger consumer thread writes there directly, so capturing would
+/// loop the output back through its own pipe. Therefore:
+///
+///   - `ZWAVED_LOGGER_SINK = syslog` — engaged automatically from
+///     Logger's constructor; this function is normally a no-op for
+///     callers because the work is already done.
+///   - `ZWAVED_LOGGER_SINK = stdout` — this function is a no-op even
+///     when called explicitly, by design.
+auto claimStandardStreams() -> void;
 }  // namespace Logger
 
 #endif  // ZWAVED_LOGGER_HPP

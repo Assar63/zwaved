@@ -11,8 +11,6 @@ target_sources(zwaved PRIVATE
     FrameTransport.cpp
     HostApi.cpp
     HostApiSession.cpp
-    HostApiRequestQueue.cpp
-    HostApiCallbackDispatcher.cpp
 )
 
 add_subdirectory(application)

@@ -3,19 +3,21 @@
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 #include "FrameTransport.hpp"
 #include "HostApi.hpp"
-#include "HostApiCallbackDispatcher.hpp"
-#include "HostApiRequestQueue.hpp"
 #include "HostApiSession.hpp"
 #include "SerialPort.hpp"
 #include "ZwaveDataFrame.hpp"
+#include "application/Association.hpp"
+#include "application/BinarySwitch.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <iostream>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -52,6 +54,14 @@ constexpr int SEND_DATA_CALLBACK_TIMEOUT_MS = 5000;
 // to clear before issuing the next SendData.
 constexpr int SEND_DATA_NO_CALLBACK_DELAY_MS = 300;
 
+/// Internal protocol-thread request variant. Bus-command subscribers
+/// translate semantic events into one of these and push to the queue;
+/// the protocol loop pops and serializes them onto the dongle's serial
+/// link via FrameTransport. Not exposed beyond this translation unit —
+/// external transports speak in MessageBus events, not host-API wire
+/// shapes.
+using Request = std::variant<HostApi::AddNodeRequest, HostApi::RemoveNodeRequest, HostApi::SendDataRequest>;
+
 struct ZwaveProtocolState
 {
     std::thread thread;
@@ -64,13 +74,59 @@ struct ZwaveProtocolState
     std::condition_variable pathCv;
     std::optional<std::string> path;
 
+    // Internal request queue. Bus-command subscribers translate
+    // semantic commands (AddNodeCommand, SetSwitchBinaryCommand, ...)
+    // into Request and push here; the protocol loop pops and
+    // sends them one at a time so the dongle isn't asked to route two
+    // SendData frames in parallel.
+    std::mutex queueMutex;
+    std::condition_variable queueCv;
+    std::deque<Request> queue;
+
+    // Bus subscription IDs, released on shutdown.
     MessageBus::SubscriptionId dongleSubscription{0};
+    MessageBus::SubscriptionId addNodeSubscription{0};
+    MessageBus::SubscriptionId removeNodeSubscription{0};
+    MessageBus::SubscriptionId switchBinarySubscription{0};
+    MessageBus::SubscriptionId setAssociationSubscription{0};
+    MessageBus::SubscriptionId removeAssociationSubscription{0};
+    MessageBus::SubscriptionId getAssociationSubscription{0};
+    MessageBus::SubscriptionId getAssociationGroupingsSubscription{0};
 };
 
 auto state() -> ZwaveProtocolState&
 {
     static ZwaveProtocolState instance;
     return instance;
+}
+
+auto pushRequest(const Request& request) -> void
+{
+    {
+        std::scoped_lock const lock(state().queueMutex);
+        state().queue.push_back(request);
+    }
+    state().queueCv.notify_one();
+}
+
+auto popRequest(int timeoutMs) -> std::optional<Request>
+{
+    std::unique_lock<std::mutex> lock(state().queueMutex);
+    state().queueCv.wait_for(
+        lock, std::chrono::milliseconds(timeoutMs), [] { return !state().queue.empty() || !state().running.load(); });
+    if (state().queue.empty())
+    {
+        return std::nullopt;
+    }
+    auto out = state().queue.front();
+    state().queue.pop_front();
+    return out;
+}
+
+auto clearRequests() -> void
+{
+    std::scoped_lock const lock(state().queueMutex);
+    state().queue.clear();
 }
 
 auto onDongleStatus(const MessageBus::DongleStatus& status) -> void
@@ -89,6 +145,81 @@ auto onDongleStatus(const MessageBus::DongleStatus& status) -> void
     state().pathCv.notify_all();
 }
 
+auto onAddNodeCommand(const MessageBus::AddNodeCommand& cmd) -> void
+{
+    HostApi::AddNodeRequest req{};
+    req.mode              = cmd.mode;
+    req.power             = cmd.power;
+    req.nwi               = cmd.nwi;
+    req.protocolLongRange = cmd.protocolLongRange;
+    req.skipFlNeighbors   = cmd.skipFlNeighbors;
+    req.sessionId         = cmd.sessionId;
+    req.includeHomeIds    = cmd.includeHomeIds;
+    req.nwiHomeId         = cmd.nwiHomeId;
+    req.authHomeId        = cmd.authHomeId;
+    pushRequest(req);
+}
+
+auto onRemoveNodeCommand(const MessageBus::RemoveNodeCommand& cmd) -> void
+{
+    HostApi::RemoveNodeRequest req{};
+    req.mode      = cmd.mode;
+    req.power     = cmd.power;
+    req.nwe       = cmd.nwe;
+    req.sessionId = cmd.sessionId;
+    pushRequest(req);
+}
+
+auto onSetSwitchBinary(const MessageBus::SetSwitchBinaryCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = BinarySwitch::encodeSet(cmd.turnOn);
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onSetAssociation(const MessageBus::SetAssociationCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = Association::encodeSet(cmd.groupId, std::span<const std::uint8_t>(cmd.members));
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onRemoveAssociation(const MessageBus::RemoveAssociationCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = Association::encodeRemove(cmd.groupId, std::span<const std::uint8_t>(cmd.members));
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onGetAssociation(const MessageBus::GetAssociationCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = Association::encodeGet(cmd.groupId);
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onGetAssociationGroupings(const MessageBus::GetAssociationGroupingsCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = Association::encodeGroupingsGet();
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
 auto awaitDevicePath() -> std::optional<std::string>
 {
     std::unique_lock<std::mutex> lock(state().pathMutex);
@@ -104,6 +235,32 @@ auto isPathSet() -> bool
 {
     std::scoped_lock const lock(state().pathMutex);
     return state().path.has_value();
+}
+
+/// Translate a HostApi NodeStatusCallback into the per-direction bus
+/// event (NodeInclusionStatus or NodeExclusionStatus) and publish.
+auto publishNodeStatus(const HostApi::NodeStatusCallback& callback) -> void
+{
+    if (callback.commandId == HostApi::CMD_REMOVE_NODE_FROM_NETWORK)
+    {
+        MessageBus::publish(MessageBus::NodeExclusionStatus{.sessionId          = callback.sessionId,
+                                                            .status             = callback.status,
+                                                            .nodeId             = callback.nodeId,
+                                                            .basicDeviceType    = callback.basicDeviceType,
+                                                            .genericDeviceType  = callback.genericDeviceType,
+                                                            .specificDeviceType = callback.specificDeviceType,
+                                                            .commandClasses     = callback.commandClasses});
+    }
+    else
+    {
+        MessageBus::publish(MessageBus::NodeInclusionStatus{.sessionId          = callback.sessionId,
+                                                            .status             = callback.status,
+                                                            .nodeId             = callback.nodeId,
+                                                            .basicDeviceType    = callback.basicDeviceType,
+                                                            .genericDeviceType  = callback.genericDeviceType,
+                                                            .specificDeviceType = callback.specificDeviceType,
+                                                            .commandClasses     = callback.commandClasses});
+    }
 }
 
 struct IntrospectionResult
@@ -206,7 +363,8 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
 {
     if (const auto sendDataCb = HostApi::decodeSendDataCallback(frame); sendDataCb.has_value())
     {
-        HostApi::publishCallback(*sendDataCb);
+        MessageBus::publish(
+            MessageBus::SendDataCallback{.callbackId = sendDataCb->callbackId, .txStatus = sendDataCb->txStatus});
         return;
     }
     if (const auto appCmd = HostApi::decodeApplicationCommand(frame); appCmd.has_value())
@@ -217,7 +375,7 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
     }
     if (const auto nodeCb = HostApi::decodeNodeCallback(frame); nodeCb.has_value())
     {
-        HostApi::publishCallback(*nodeCb);
+        publishNodeStatus(*nodeCb);
 
         // Inclusion: most controllers deliver the node's full info (device
         // class triple + supported command classes) at 0x03/0x04 (Inclusion
@@ -256,7 +414,7 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
 auto dispatchRequest(FrameTransport& transport,
                      HostApi::SessionTracker& tracker,
                      std::optional<std::uint8_t>& pendingSendData,
-                     const HostApi::Request& request) -> void
+                     const Request& request) -> void
 {
     std::visit(
         [&]<typename T0>(T0 const& concrete) -> auto
@@ -297,8 +455,8 @@ auto dispatchRequest(FrameTransport& transport,
                               << ", callback " << static_cast<int>(concrete.callbackId) << ")\n";
                     // Synthesize a failure callback so the external API gets
                     // notified instead of waiting indefinitely for a response.
-                    HostApi::publishCallback(HostApi::SendDataCallback{.callbackId = concrete.callbackId,
-                                                                       .txStatus   = HostApi::TRANSMIT_COMPLETE_FAIL});
+                    MessageBus::publish(MessageBus::SendDataCallback{.callbackId = concrete.callbackId,
+                                                                     .txStatus   = HostApi::TRANSMIT_COMPLETE_FAIL});
                     return;
                 }
                 // Throttle back-to-back SendData: the dongle will CAN any new
@@ -336,7 +494,7 @@ auto runConnectedSession(SerialPort& port) -> void
                              {
                                  // Clear the pending-SendData gate as soon as the matching
                                  // completion callback arrives. handleIncomingFrame will also
-                                 // publish the callback to the external-API consumer queue.
+                                 // publish the callback to the bus.
                                  if (pendingSendData.has_value())
                                  {
                                      if (const auto callback = HostApi::decodeSendDataCallback(frame);
@@ -357,7 +515,7 @@ auto runConnectedSession(SerialPort& port) -> void
             break;
         }
 
-        auto request = HostApi::popRequest(state().running, REQUEST_WAIT_TIMEOUT_MS);
+        auto request = popRequest(REQUEST_WAIT_TIMEOUT_MS);
         if (request.has_value())
         {
             dispatchRequest(transport, tracker, pendingSendData, *request);
@@ -369,11 +527,45 @@ auto runConnectedSession(SerialPort& port) -> void
     }
 }
 
+auto subscribeBus() -> void
+{
+    state().dongleSubscription         = MessageBus::subscribe<MessageBus::DongleStatus>(onDongleStatus);
+    state().addNodeSubscription        = MessageBus::subscribe<MessageBus::AddNodeCommand>(onAddNodeCommand);
+    state().removeNodeSubscription     = MessageBus::subscribe<MessageBus::RemoveNodeCommand>(onRemoveNodeCommand);
+    state().switchBinarySubscription   = MessageBus::subscribe<MessageBus::SetSwitchBinaryCommand>(onSetSwitchBinary);
+    state().setAssociationSubscription = MessageBus::subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
+    state().removeAssociationSubscription =
+        MessageBus::subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
+    state().getAssociationSubscription = MessageBus::subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);
+    state().getAssociationGroupingsSubscription =
+        MessageBus::subscribe<MessageBus::GetAssociationGroupingsCommand>(onGetAssociationGroupings);
+}
+
+auto unsubscribeBus() -> void
+{
+    MessageBus::unsubscribe(state().getAssociationGroupingsSubscription);
+    MessageBus::unsubscribe(state().getAssociationSubscription);
+    MessageBus::unsubscribe(state().removeAssociationSubscription);
+    MessageBus::unsubscribe(state().setAssociationSubscription);
+    MessageBus::unsubscribe(state().switchBinarySubscription);
+    MessageBus::unsubscribe(state().removeNodeSubscription);
+    MessageBus::unsubscribe(state().addNodeSubscription);
+    MessageBus::unsubscribe(state().dongleSubscription);
+    state().getAssociationGroupingsSubscription = 0;
+    state().getAssociationSubscription          = 0;
+    state().removeAssociationSubscription       = 0;
+    state().setAssociationSubscription          = 0;
+    state().switchBinarySubscription            = 0;
+    state().removeNodeSubscription              = 0;
+    state().addNodeSubscription                 = 0;
+    state().dongleSubscription                  = 0;
+}
+
 auto zwaveCommunicationThread() -> void
 {
     prctl(PR_SET_NAME, "ZWaveProto", 0, 0, 0);  // NOLINT(misc-include-cleaner): PR_SET_NAME from <sys/prctl.h>
 
-    state().dongleSubscription = MessageBus::subscribe(onDongleStatus);
+    subscribeBus();
 
     while (state().running)
     {
@@ -419,13 +611,11 @@ auto zwaveCommunicationThread() -> void
             }
         }
 
-        HostApi::clear();
-        HostApi::clearCallbacks();
+        clearRequests();
         runConnectedSession(port);
     }
 
-    MessageBus::unsubscribe(state().dongleSubscription);
-    state().dongleSubscription = 0;
+    unsubscribeBus();
 }
 
 __attribute__((constructor(CONFIG_ZWAVE_PROTOCOL_PRIO))) auto startZWaveThread() -> void
@@ -438,8 +628,7 @@ __attribute__((destructor(CONFIG_ZWAVE_PROTOCOL_PRIO))) auto stopZWaveThread() -
 {
     state().running = false;
     state().pathCv.notify_all();
-    HostApi::wakeAll();
-    HostApi::wakeAllCallbacks();
+    state().queueCv.notify_all();
     if (state().thread.joinable())
     {
         state().thread.join();

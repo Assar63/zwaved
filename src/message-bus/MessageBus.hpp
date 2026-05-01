@@ -1,29 +1,39 @@
 #ifndef ZWAVED_MESSAGE_BUS_HPP
 #define ZWAVED_MESSAGE_BUS_HPP
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 /**
- * In-process publish/subscribe bus for status broadcasts. Publishers
- * emit events that any number of subscribers can consume.
+ * In-process publish/subscribe bus for the daemon. Every cross-module
+ * conversation rides this bus — state broadcasts, command requests
+ * from external transports, and protocol-layer callbacks back to those
+ * transports. The bus is the only seam between the threads in
+ * src/zwave-protocol, src/zwave-dongle, src/external-api, and
+ * src/node-registry; modules do not include each other's headers.
  *
  * Dispatch is synchronous on the publisher's thread; handlers must
- * return promptly and not block. State events (currently just
- * DongleStatus) are retained: a new subscriber receives the most
+ * return promptly and not block. State events flagged retained
+ * (see IsRetained) are cached: a new subscriber receives the most
  * recent published value once, immediately, on subscribe — so late
  * starters don't miss the current state. Handlers must not call
  * publish() or subscribe() reentrantly.
  *
- * The implementation is a thin wrapper around eventpp; this header
- * is intentionally minimal so the underlying library can be replaced
- * without touching call sites.
+ * Adding a new event type:
+ *   1. Define the struct here.
+ *   2. (Optional) Specialize IsRetained<T> if late subscribers should
+ *      receive the latest value on subscribe.
+ *   3. Add explicit instantiations in MessageBus.cpp.
  */
 namespace MessageBus
 {
 using SubscriptionId = std::uint64_t;
+
+// ---- State events --------------------------------------------------
 
 /// Lifecycle state of the Z-Wave dongle's serial attachment.
 struct DongleStatus
@@ -34,8 +44,7 @@ struct DongleStatus
 
 /// Static introspection captured once when the daemon opens the
 /// dongle's serial port: library version string + type, network home
-/// ID, and this controller's own node ID. Retained on the bus so late
-/// subscribers see the latest snapshot.
+/// ID, and this controller's own node ID.
 struct DongleInfo
 {
     std::string libraryVersion;
@@ -46,9 +55,7 @@ struct DongleInfo
 
 /// FUNC_ID_SERIAL_API_GET_INIT_DATA (0x02) payload, captured once
 /// during startup introspection. nodeIds is the expanded node bitmap
-/// (every node ID currently included in the network, regardless of
-/// whether the daemon has met it during this run). Retained on the
-/// bus so late subscribers see the latest snapshot.
+/// (every node ID currently included in the network).
 struct InitData
 {
     std::uint8_t serialApiVersion = 0;
@@ -58,25 +65,170 @@ struct InitData
     std::vector<std::uint8_t> nodeIds;
 };
 
-/// Unsolicited command-class frame received from a node, carried inside
-/// FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04). Transient: not retained
-/// across subscribes.
-struct ApplicationCommand
+/// One node entry in the persistent registry. Mirrors NodeRegistry's
+/// internal NodeInfo, redeclared here so external-api consumers don't
+/// pull in node-registry headers.
+struct NodeInfo
 {
-    uint8_t rxStatus     = 0;
-    uint8_t sourceNodeId = 0;
-    std::vector<uint8_t> ccData;
+    std::uint8_t nodeId       = 0;
+    std::uint8_t basicType    = 0;
+    std::uint8_t genericType  = 0;
+    std::uint8_t specificType = 0;
+    std::vector<std::uint8_t> commandClasses;
 };
 
-[[nodiscard]] auto subscribe(const std::function<void(const DongleStatus&)>& handler) -> SubscriptionId;
-[[nodiscard]] auto subscribe(const std::function<void(const DongleInfo&)>& handler) -> SubscriptionId;
-[[nodiscard]] auto subscribe(const std::function<void(const InitData&)>& handler) -> SubscriptionId;
-[[nodiscard]] auto subscribe(const std::function<void(const ApplicationCommand&)>& handler) -> SubscriptionId;
+/// Snapshot of the node registry. Republished whenever the registry
+/// content changes (add / remove / seed / setHomeId).
+struct NodeListChanged
+{
+    std::vector<NodeInfo> nodes;
+};
+
+// ---- Transient protocol events ------------------------------------
+
+/// Unsolicited command-class frame received from a node, carried inside
+/// FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04).
+struct ApplicationCommand
+{
+    std::uint8_t rxStatus     = 0;
+    std::uint8_t sourceNodeId = 0;
+    std::vector<std::uint8_t> ccData;
+};
+
+/// Decoded callback for FUNC_ID_ZW_ADD_NODE_TO_NETWORK (0x4A) — emitted
+/// at every step of an inclusion session.
+struct NodeInclusionStatus
+{
+    std::uint8_t sessionId          = 0;
+    std::uint8_t status             = 0;
+    std::uint16_t nodeId            = 0;
+    std::uint8_t basicDeviceType    = 0;
+    std::uint8_t genericDeviceType  = 0;
+    std::uint8_t specificDeviceType = 0;
+    std::vector<std::uint8_t> commandClasses;
+};
+
+/// Decoded callback for FUNC_ID_ZW_REMOVE_NODE_FROM_NETWORK (0x4B).
+struct NodeExclusionStatus
+{
+    std::uint8_t sessionId          = 0;
+    std::uint8_t status             = 0;
+    std::uint16_t nodeId            = 0;
+    std::uint8_t basicDeviceType    = 0;
+    std::uint8_t genericDeviceType  = 0;
+    std::uint8_t specificDeviceType = 0;
+    std::vector<std::uint8_t> commandClasses;
+};
+
+/// Decoded callback for FUNC_ID_ZW_SEND_DATA (0x13) — emitted once a
+/// transmission completes (or fails).
+struct SendDataCallback
+{
+    std::uint8_t callbackId = 0;
+    std::uint8_t txStatus   = 0;
+};
+
+// ---- Command events (external transports → protocol thread) -------
+
+/// Initiate or stop FUNC_ID_ZW_ADD_NODE_TO_NETWORK (0x4A). Mirrors the
+/// wire-level shape; the protocol thread converts it into a Z-Wave
+/// data frame.
+struct AddNodeCommand
+{
+    static constexpr std::uint8_t MODE_ANY_NODE            = 0x01;
+    static constexpr std::uint8_t MODE_STOP                = 0x05;
+    static constexpr std::uint8_t MODE_STOP_REPLICATION    = 0x06;
+    static constexpr std::uint8_t MODE_SMART_START_INCLUDE = 0x08;
+    static constexpr std::uint8_t MODE_SMART_START_LISTEN  = 0x09;
+
+    std::uint8_t mode      = MODE_ANY_NODE;
+    bool power             = false;
+    bool nwi               = false;
+    bool protocolLongRange = false;
+    bool skipFlNeighbors   = false;
+    std::uint8_t sessionId = 0;
+    bool includeHomeIds    = false;
+    std::array<std::uint8_t, 4> nwiHomeId{};
+    std::array<std::uint8_t, 4> authHomeId{};
+};
+
+/// Initiate or stop FUNC_ID_ZW_REMOVE_NODE_FROM_NETWORK (0x4B).
+struct RemoveNodeCommand
+{
+    static constexpr std::uint8_t MODE_ANY_NODE = 0x01;
+    static constexpr std::uint8_t MODE_STOP     = 0x05;
+
+    std::uint8_t mode      = MODE_ANY_NODE;
+    bool power             = false;
+    bool nwe               = false;
+    std::uint8_t sessionId = 0;
+};
+
+/// Drive a node's Binary Switch (CC 0x25) on/off state.
+struct SetSwitchBinaryCommand
+{
+    std::uint8_t nodeId     = 0;
+    bool turnOn             = false;
+    std::uint8_t callbackId = 0;
+};
+
+/// Set / remove / get / get-groupings on the Association CC (0x85).
+struct SetAssociationCommand
+{
+    std::uint8_t nodeId  = 0;
+    std::uint8_t groupId = 0;
+    std::vector<std::uint8_t> members;
+    std::uint8_t callbackId = 0;
+};
+
+struct RemoveAssociationCommand
+{
+    std::uint8_t nodeId  = 0;
+    std::uint8_t groupId = 0;
+    std::vector<std::uint8_t> members;
+    std::uint8_t callbackId = 0;
+};
+
+struct GetAssociationCommand
+{
+    std::uint8_t nodeId     = 0;
+    std::uint8_t groupId    = 0;
+    std::uint8_t callbackId = 0;
+};
+
+struct GetAssociationGroupingsCommand
+{
+    std::uint8_t nodeId     = 0;
+    std::uint8_t callbackId = 0;
+};
+
+// ---- Retention trait ----------------------------------------------
+
+/// Specialize to true_type for events whose latest value should be
+/// replayed to a subscriber on subscribe.
+template <typename T> struct IsRetained : std::false_type
+{
+};
+template <> struct IsRetained<DongleStatus> : std::true_type
+{
+};
+template <> struct IsRetained<DongleInfo> : std::true_type
+{
+};
+template <> struct IsRetained<InitData> : std::true_type
+{
+};
+template <> struct IsRetained<NodeListChanged> : std::true_type
+{
+};
+
+// ---- Public API ---------------------------------------------------
+
+template <typename T> [[nodiscard]] auto subscribe(std::function<void(const T&)> handler) -> SubscriptionId;
+
+template <typename T> auto publish(const T& value) -> void;
+
 auto unsubscribe(SubscriptionId subscriptionId) -> void;
-auto publish(const DongleStatus& status) -> void;
-auto publish(const DongleInfo& info) -> void;
-auto publish(const InitData& info) -> void;
-auto publish(const ApplicationCommand& event) -> void;
 }  // namespace MessageBus
 
 #endif  // ZWAVED_MESSAGE_BUS_HPP

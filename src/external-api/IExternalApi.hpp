@@ -21,8 +21,9 @@ class IBackend
 
     /// Run the backend's main loop until `running` becomes false. The
     /// implementation is responsible for translating inbound calls into
-    /// HostApi::pushRequest(...) and consuming HostApi::popCallback(...)
-    /// to publish signals/events.
+    /// MessageBus command events (AddNodeCommand, SetSwitchBinaryCommand,
+    /// ...) and subscribing to the corresponding callback / state events
+    /// to publish outbound signals.
     virtual auto run(const std::atomic<bool>& running) -> void = 0;
 
     /// Wake any blocking work in run() so it can observe a stop request.

@@ -1,5 +1,7 @@
 #include "NodeRegistry.hpp"
 
+#include "../message-bus/MessageBus.hpp"
+
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -259,69 +261,107 @@ auto persistRemove(const std::string& homeId, std::uint8_t nodeId) -> void
     }
     sqlite3_finalize(stmt);
 }
+
+/// Build a NodeListChanged from the in-memory map. Caller holds the
+/// state mutex.
+auto snapshotEvent() -> MessageBus::NodeListChanged
+{
+    MessageBus::NodeListChanged event;
+    event.nodes.reserve(state().nodes.size());
+    for (const auto& [_id, info] : state().nodes)
+    {
+        event.nodes.push_back({.nodeId         = info.nodeId,
+                               .basicType      = info.basicType,
+                               .genericType    = info.genericType,
+                               .specificType   = info.specificType,
+                               .commandClasses = info.commandClasses});
+    }
+    return event;
+}
 }  // namespace
 
 auto NodeRegistry::setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -> void
 {
     initIfNeeded();
     auto homeIdStr = formatHomeId(homeIdBytes);
-    std::scoped_lock const lock(state().mutex);
-    if (const auto current = state().currentHomeId; current.has_value() && *current == homeIdStr)
+    std::optional<MessageBus::NodeListChanged> event;
     {
-        return;
+        std::scoped_lock const lock(state().mutex);
+        if (const auto current = state().currentHomeId; current.has_value() && *current == homeIdStr)
+        {
+            return;
+        }
+        state().currentHomeId = homeIdStr;
+        state().nodes.clear();
+        if (state().db != nullptr)
+        {
+            state().nodes = loadNodesForHome(state().db, homeIdStr);
+        }
+        std::cout << "[NodeRegistry] bound to home " << homeIdStr << " (" << state().nodes.size()
+                  << " node(s) loaded)\n";
+        event = snapshotEvent();
     }
-    state().currentHomeId = homeIdStr;
-    state().nodes.clear();
-    if (state().db != nullptr)
-    {
-        state().nodes = loadNodesForHome(state().db, homeIdStr);
-    }
-    std::cout << "[NodeRegistry] bound to home " << homeIdStr << " (" << state().nodes.size() << " node(s) loaded)\n";
+    MessageBus::publish(*event);
 }
 
 auto NodeRegistry::add(const NodeInfo& info) -> void
 {
     initIfNeeded();
-    std::scoped_lock const lock(state().mutex);
-    const auto home = state().currentHomeId;
-    if (!home.has_value())
+    std::optional<MessageBus::NodeListChanged> event;
     {
-        return;
+        std::scoped_lock const lock(state().mutex);
+        const auto home = state().currentHomeId;
+        if (!home.has_value())
+        {
+            return;
+        }
+        state().nodes[info.nodeId] = info;
+        persistAdd(*home, info);
+        event = snapshotEvent();
     }
-    state().nodes[info.nodeId] = info;
-    persistAdd(*home, info);
+    MessageBus::publish(*event);
 }
 
 auto NodeRegistry::remove(std::uint8_t nodeId) -> void
 {
     initIfNeeded();
-    std::scoped_lock const lock(state().mutex);
-    const auto home = state().currentHomeId;
-    if (!home.has_value())
+    std::optional<MessageBus::NodeListChanged> event;
     {
-        return;
+        std::scoped_lock const lock(state().mutex);
+        const auto home = state().currentHomeId;
+        if (!home.has_value())
+        {
+            return;
+        }
+        state().nodes.erase(nodeId);
+        persistRemove(*home, nodeId);
+        event = snapshotEvent();
     }
-    state().nodes.erase(nodeId);
-    persistRemove(*home, nodeId);
+    MessageBus::publish(*event);
 }
 
 auto NodeRegistry::seed(std::uint8_t nodeId) -> void
 {
     initIfNeeded();
-    std::scoped_lock const lock(state().mutex);
-    const auto home = state().currentHomeId;
-    if (!home.has_value())
+    std::optional<MessageBus::NodeListChanged> event;
     {
-        return;
+        std::scoped_lock const lock(state().mutex);
+        const auto home = state().currentHomeId;
+        if (!home.has_value())
+        {
+            return;
+        }
+        if (state().nodes.find(nodeId) != state().nodes.end())
+        {
+            return;
+        }
+        NodeInfo info;
+        info.nodeId           = nodeId;
+        state().nodes[nodeId] = info;
+        persistAdd(*home, info);
+        event = snapshotEvent();
     }
-    if (state().nodes.find(nodeId) != state().nodes.end())
-    {
-        return;
-    }
-    NodeInfo info;
-    info.nodeId           = nodeId;
-    state().nodes[nodeId] = info;
-    persistAdd(*home, info);
+    MessageBus::publish(*event);
 }
 
 auto NodeRegistry::snapshot() -> std::vector<NodeInfo>

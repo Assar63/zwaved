@@ -11,129 +11,118 @@
 
 namespace
 {
-using DongleStatusList       = eventpp::CallbackList<void(const MessageBus::DongleStatus&)>;
-using DongleInfoList         = eventpp::CallbackList<void(const MessageBus::DongleInfo&)>;
-using InitDataList           = eventpp::CallbackList<void(const MessageBus::InitData&)>;
-using ApplicationCommandList = eventpp::CallbackList<void(const MessageBus::ApplicationCommand&)>;
-
-// State events (currently just DongleStatus) are retained so that late
-// subscribers — components that come up after the publisher has already
-// announced its first state — see the latest value on subscribe. Both
-// publish() and subscribe() take the same mutex, so a subscriber added
-// during a concurrent publish is observed atomically: it either sees the
-// publish via the callback list (if appended first) or via the replay
-// (if the cache update completed first), never both out of order.
-//
-// Transient events (ApplicationCommand) are not retained — late
-// subscribers do not get historic events.
-struct State
+template <typename T> struct Topic
 {
-    DongleStatusList dongleStatus;
-    DongleInfoList dongleInfo;
-    InitDataList initData;
-    ApplicationCommandList applicationCommand;
-    std::mutex stateMutex;
-    std::atomic<MessageBus::SubscriptionId> nextId{1};
-    std::unordered_map<MessageBus::SubscriptionId, std::function<void()>> removers;
-    std::optional<MessageBus::DongleStatus> lastDongleStatus;
-    std::optional<MessageBus::DongleInfo> lastDongleInfo;
-    std::optional<MessageBus::InitData> lastInitData;
+    eventpp::CallbackList<void(const T&)> callbacks;
+    std::optional<T> retained;  // populated only for retained event types
 };
 
-auto state() -> State&
+// Per-event-type singleton. The instance() function provides per-T
+// storage without the topics having to be aggregated into a single
+// State struct, which would force MessageBus.cpp to be edited every
+// time a new event is added (just adding an instantiation block at the
+// bottom suffices). One shared mutex serializes all topics so that
+// publish/subscribe interleave atomically — the cost is negligible at
+// our event rates and keeps the replay-on-subscribe sequencing simple.
+struct BusState
 {
-    static State instance;
+    std::mutex mutex;
+    std::atomic<MessageBus::SubscriptionId> nextId{1};
+    std::unordered_map<MessageBus::SubscriptionId, std::function<void()>> removers;
+};
+
+auto bus() -> BusState&
+{
+    static BusState instance;
+    return instance;
+}
+
+template <typename T> auto topic() -> Topic<T>&
+{
+    static Topic<T> instance;
     return instance;
 }
 }  // namespace
 
-auto MessageBus::subscribe(const std::function<void(const DongleStatus&)>& handler) -> SubscriptionId
+template <typename T> auto MessageBus::subscribe(std::function<void(const T&)> handler) -> SubscriptionId
 {
-    std::scoped_lock const lock(state().stateMutex);
-    const auto handle          = state().dongleStatus.append(handler);
-    const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
-    state().removers.emplace(newId, [handle]() { state().dongleStatus.remove(handle); });
-    if (const auto cached = state().lastDongleStatus; cached.has_value())
+    std::scoped_lock const lock(bus().mutex);
+    auto& topicRef             = topic<T>();
+    const auto handle          = topicRef.callbacks.append(handler);
+    const SubscriptionId newId = bus().nextId.fetch_add(1, std::memory_order_relaxed);
+    bus().removers.emplace(newId, [handle]() { topic<T>().callbacks.remove(handle); });
+    if constexpr (IsRetained<T>::value)
     {
-        handler(*cached);
+        if (const auto cached = topicRef.retained; cached.has_value())
+        {
+            handler(*cached);
+        }
     }
     return newId;
+}
+
+template <typename T> auto MessageBus::publish(const T& value) -> void
+{
+    std::scoped_lock const lock(bus().mutex);
+    auto& topicRef = topic<T>();
+    if constexpr (IsRetained<T>::value)
+    {
+        topicRef.retained = value;
+    }
+    topicRef.callbacks(value);
 }
 
 auto MessageBus::unsubscribe(SubscriptionId subscriptionId) -> void
 {
     std::function<void()> remover;
     {
-        std::scoped_lock const lock(state().stateMutex);
-        const auto iter = state().removers.find(subscriptionId);
-        if (iter == state().removers.end())
+        std::scoped_lock const lock(bus().mutex);
+        const auto iter = bus().removers.find(subscriptionId);
+        if (iter == bus().removers.end())
         {
             return;
         }
         remover = std::move(iter->second);
-        state().removers.erase(iter);
+        bus().removers.erase(iter);
     }
     remover();
 }
 
-auto MessageBus::publish(const DongleStatus& status) -> void
-{
-    std::scoped_lock const lock(state().stateMutex);
-    state().lastDongleStatus = status;
-    state().dongleStatus(status);
-}
+// ---- Explicit instantiations -------------------------------------------
+// One pair per event type. Add new types here when extending MessageBus.hpp.
 
-auto MessageBus::subscribe(const std::function<void(const DongleInfo&)>& handler) -> SubscriptionId
+namespace MessageBus
 {
-    std::scoped_lock const lock(state().stateMutex);
-    const auto handle          = state().dongleInfo.append(handler);
-    const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
-    state().removers.emplace(newId, [handle]() { state().dongleInfo.remove(handle); });
-    if (const auto cached = state().lastDongleInfo; cached.has_value())
-    {
-        handler(*cached);
-    }
-    return newId;
-}
-
-auto MessageBus::publish(const DongleInfo& info) -> void
-{
-    std::scoped_lock const lock(state().stateMutex);
-    state().lastDongleInfo = info;
-    state().dongleInfo(info);
-}
-
-auto MessageBus::subscribe(const std::function<void(const InitData&)>& handler) -> SubscriptionId
-{
-    std::scoped_lock const lock(state().stateMutex);
-    const auto handle          = state().initData.append(handler);
-    const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
-    state().removers.emplace(newId, [handle]() { state().initData.remove(handle); });
-    if (const auto cached = state().lastInitData; cached.has_value())
-    {
-        handler(*cached);
-    }
-    return newId;
-}
-
-auto MessageBus::publish(const InitData& info) -> void
-{
-    std::scoped_lock const lock(state().stateMutex);
-    state().lastInitData = info;
-    state().initData(info);
-}
-
-auto MessageBus::subscribe(const std::function<void(const ApplicationCommand&)>& handler) -> SubscriptionId
-{
-    std::scoped_lock const lock(state().stateMutex);
-    const auto handle          = state().applicationCommand.append(handler);
-    const SubscriptionId newId = state().nextId.fetch_add(1, std::memory_order_relaxed);
-    state().removers.emplace(newId, [handle]() { state().applicationCommand.remove(handle); });
-    return newId;
-}
-
-auto MessageBus::publish(const ApplicationCommand& event) -> void
-{
-    std::scoped_lock const lock(state().stateMutex);
-    state().applicationCommand(event);
-}
+template auto subscribe<DongleStatus>(std::function<void(const DongleStatus&)>) -> SubscriptionId;
+template auto publish<DongleStatus>(const DongleStatus&) -> void;
+template auto subscribe<DongleInfo>(std::function<void(const DongleInfo&)>) -> SubscriptionId;
+template auto publish<DongleInfo>(const DongleInfo&) -> void;
+template auto subscribe<InitData>(std::function<void(const InitData&)>) -> SubscriptionId;
+template auto publish<InitData>(const InitData&) -> void;
+template auto subscribe<NodeListChanged>(std::function<void(const NodeListChanged&)>) -> SubscriptionId;
+template auto publish<NodeListChanged>(const NodeListChanged&) -> void;
+template auto subscribe<ApplicationCommand>(std::function<void(const ApplicationCommand&)>) -> SubscriptionId;
+template auto publish<ApplicationCommand>(const ApplicationCommand&) -> void;
+template auto subscribe<NodeInclusionStatus>(std::function<void(const NodeInclusionStatus&)>) -> SubscriptionId;
+template auto publish<NodeInclusionStatus>(const NodeInclusionStatus&) -> void;
+template auto subscribe<NodeExclusionStatus>(std::function<void(const NodeExclusionStatus&)>) -> SubscriptionId;
+template auto publish<NodeExclusionStatus>(const NodeExclusionStatus&) -> void;
+template auto subscribe<SendDataCallback>(std::function<void(const SendDataCallback&)>) -> SubscriptionId;
+template auto publish<SendDataCallback>(const SendDataCallback&) -> void;
+template auto subscribe<AddNodeCommand>(std::function<void(const AddNodeCommand&)>) -> SubscriptionId;
+template auto publish<AddNodeCommand>(const AddNodeCommand&) -> void;
+template auto subscribe<RemoveNodeCommand>(std::function<void(const RemoveNodeCommand&)>) -> SubscriptionId;
+template auto publish<RemoveNodeCommand>(const RemoveNodeCommand&) -> void;
+template auto subscribe<SetSwitchBinaryCommand>(std::function<void(const SetSwitchBinaryCommand&)>) -> SubscriptionId;
+template auto publish<SetSwitchBinaryCommand>(const SetSwitchBinaryCommand&) -> void;
+template auto subscribe<SetAssociationCommand>(std::function<void(const SetAssociationCommand&)>) -> SubscriptionId;
+template auto publish<SetAssociationCommand>(const SetAssociationCommand&) -> void;
+template auto subscribe<RemoveAssociationCommand>(std::function<void(const RemoveAssociationCommand&)>)
+    -> SubscriptionId;
+template auto publish<RemoveAssociationCommand>(const RemoveAssociationCommand&) -> void;
+template auto subscribe<GetAssociationCommand>(std::function<void(const GetAssociationCommand&)>) -> SubscriptionId;
+template auto publish<GetAssociationCommand>(const GetAssociationCommand&) -> void;
+template auto subscribe<GetAssociationGroupingsCommand>(std::function<void(const GetAssociationGroupingsCommand&)>)
+    -> SubscriptionId;
+template auto publish<GetAssociationGroupingsCommand>(const GetAssociationGroupingsCommand&) -> void;
+}  // namespace MessageBus

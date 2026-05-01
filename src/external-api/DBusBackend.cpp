@@ -1,24 +1,17 @@
 #include "DBusBackend.hpp"
 
 #include "../message-bus/MessageBus.hpp"
-#include "../node-registry/NodeRegistry.hpp"
-#include "../zwave-protocol/HostApi.hpp"
-#include "../zwave-protocol/HostApiCallbackDispatcher.hpp"
-#include "../zwave-protocol/HostApiRequestQueue.hpp"
-#include "../zwave-protocol/application/Association.hpp"
-#include "../zwave-protocol/application/BinarySwitch.hpp"
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <span>
 #include <string>
-#include <type_traits>
-#include <variant>
+#include <thread>
 #include <vector>
 
 #include <sdbus-c++/Error.h>
@@ -33,125 +26,35 @@ constexpr const char* BUS_NAME    = "com.tiunda.ZWaved";
 constexpr const char* OBJECT_PATH = "/com/tiunda/ZWaved";
 constexpr const char* IFACE_NAME  = "com.tiunda.ZWaved1";
 
-constexpr const char* SIGNAL_INCLUSION_STATUS             = "NodeInclusionStatus";
-constexpr const char* SIGNAL_EXCLUSION_STATUS             = "NodeExclusionStatus";
-constexpr const char* SIGNAL_DONGLE_STATUS                = "DongleStatus";
-constexpr const char* SIGNAL_DONGLE_INFO                  = "DongleInfo";
-constexpr const char* SIGNAL_INIT_DATA                    = "InitData";
-constexpr const char* SIGNAL_SEND_DATA_STATUS             = "SendDataStatus";
-constexpr const char* SIGNAL_APPLICATION_COMMAND          = "ApplicationCommand";
-constexpr const char* SIGNAL_SWITCH_BINARY_REPORT         = "SwitchBinaryReport";
-constexpr const char* SIGNAL_ASSOCIATION_REPORT           = "AssociationReport";
-constexpr const char* SIGNAL_ASSOCIATION_GROUPINGS_REPORT = "AssociationGroupingsReport";
+constexpr const char* SIGNAL_INCLUSION_STATUS    = "NodeInclusionStatus";
+constexpr const char* SIGNAL_EXCLUSION_STATUS    = "NodeExclusionStatus";
+constexpr const char* SIGNAL_DONGLE_STATUS       = "DongleStatus";
+constexpr const char* SIGNAL_DONGLE_INFO         = "DongleInfo";
+constexpr const char* SIGNAL_INIT_DATA           = "InitData";
+constexpr const char* SIGNAL_SEND_DATA_STATUS    = "SendDataStatus";
+constexpr const char* SIGNAL_APPLICATION_COMMAND = "ApplicationCommand";
 
-constexpr int CALLBACK_POLL_MS = 200;
+constexpr int IDLE_POLL_MS = 200;
 
-constexpr uint8_t FLAG_POWER_BIT    = 7;
-constexpr uint8_t FLAG_NWI_BIT      = 6;
-constexpr uint8_t FLAG_PROTOCOL_BIT = 5;
-constexpr uint8_t FLAG_SFLND_BIT    = 4;
-constexpr uint8_t FLAG_NWE_BIT      = 6;
+constexpr std::uint8_t FLAG_POWER_BIT    = 7;
+constexpr std::uint8_t FLAG_NWI_BIT      = 6;
+constexpr std::uint8_t FLAG_PROTOCOL_BIT = 5;
+constexpr std::uint8_t FLAG_SFLND_BIT    = 4;
+constexpr std::uint8_t FLAG_NWE_BIT      = 6;
 
-[[nodiscard]] auto bitSet(const uint8_t value, const uint8_t bit) -> bool
+[[nodiscard]] auto bitSet(const std::uint8_t value, const std::uint8_t bit) -> bool
 {
-    return (value & static_cast<uint8_t>(1U << bit)) != 0U;
+    return (value & static_cast<std::uint8_t>(1U << bit)) != 0U;
 }
 
-[[nodiscard]] auto homeIdFromVector(const std::vector<uint8_t>& bytes) -> std::array<uint8_t, 4>
+[[nodiscard]] auto homeIdFromVector(const std::vector<std::uint8_t>& bytes) -> std::array<std::uint8_t, 4>
 {
-    std::array<uint8_t, 4> result{};
+    std::array<std::uint8_t, 4> result{};
     for (std::size_t i = 0; i < bytes.size() && i < result.size(); ++i)
     {
         result.at(i) = bytes.at(i);
     }
     return result;
-}
-
-auto emitDongleInfo(sdbus::IObject& obj, const MessageBus::DongleInfo& info) -> void
-{
-    try
-    {
-        auto signal = obj.createSignal(IFACE_NAME, SIGNAL_DONGLE_INFO);
-        signal << info.libraryVersion;
-        signal << info.libraryType;
-        signal << info.homeId;
-        signal << info.controllerNodeId;
-        obj.emitSignal(signal);
-    }
-    catch (const sdbus::Error& err)
-    {
-        std::cerr << "[DBusBackend] failed to emit DongleInfo: " << err.what() << '\n';
-    }
-}
-
-auto emitInitData(sdbus::IObject& obj, const MessageBus::InitData& info) -> void
-{
-    try
-    {
-        auto signal = obj.createSignal(IFACE_NAME, SIGNAL_INIT_DATA);
-        signal << info.serialApiVersion;
-        signal << info.capabilities;
-        signal << info.nodeIds;
-        signal << info.chipType;
-        signal << info.chipVersion;
-        obj.emitSignal(signal);
-    }
-    catch (const sdbus::Error& err)
-    {
-        std::cerr << "[DBusBackend] failed to emit InitData: " << err.what() << '\n';
-    }
-}
-
-auto emitTypedSwitchBinary(sdbus::IObject& obj, std::uint8_t sourceNodeId, std::span<const std::uint8_t> ccData) -> void
-{
-    if (const auto report = BinarySwitch::decodeReport(ccData); report.has_value())
-    {
-        auto typed = obj.createSignal(IFACE_NAME, SIGNAL_SWITCH_BINARY_REPORT);
-        typed << sourceNodeId;
-        typed << static_cast<uint8_t>(report->state);
-        obj.emitSignal(typed);
-    }
-}
-
-auto emitTypedAssociation(sdbus::IObject& obj, std::uint8_t sourceNodeId, std::span<const std::uint8_t> ccData) -> void
-{
-    if (const auto report = Association::decodeReport(ccData); report.has_value())
-    {
-        auto typed = obj.createSignal(IFACE_NAME, SIGNAL_ASSOCIATION_REPORT);
-        typed << sourceNodeId;
-        typed << report->groupId;
-        typed << report->maxSupported;
-        typed << report->reportsToFollow;
-        typed << report->members;
-        obj.emitSignal(typed);
-    }
-    if (const auto report = Association::decodeGroupingsReport(ccData); report.has_value())
-    {
-        auto typed = obj.createSignal(IFACE_NAME, SIGNAL_ASSOCIATION_GROUPINGS_REPORT);
-        typed << sourceNodeId;
-        typed << report->supportedGroupings;
-        obj.emitSignal(typed);
-    }
-}
-
-auto emitApplicationCommand(sdbus::IObject& obj, const MessageBus::ApplicationCommand& event) -> void
-{
-    try
-    {
-        auto raw = obj.createSignal(IFACE_NAME, SIGNAL_APPLICATION_COMMAND);
-        raw << event.rxStatus;
-        raw << event.sourceNodeId;
-        raw << event.ccData;
-        obj.emitSignal(raw);
-
-        const std::span<const std::uint8_t> ccData{event.ccData};
-        emitTypedSwitchBinary(obj, event.sourceNodeId, ccData);
-        emitTypedAssociation(obj, event.sourceNodeId, ccData);
-    }
-    catch (const sdbus::Error& err)
-    {
-        std::cerr << "[DBusBackend] failed to emit ApplicationCommand: " << err.what() << '\n';
-    }
 }
 }  // namespace
 
@@ -162,14 +65,24 @@ struct DBusBackend::Impl
     std::unique_ptr<sdbus::IConnection> connection;
     std::unique_ptr<sdbus::IObject> object;
     std::atomic<bool> connected{false};
-    MessageBus::SubscriptionId dongleSubscription{0};
-    MessageBus::SubscriptionId dongleInfoSubscription{0};
-    MessageBus::SubscriptionId initDataSubscription{0};
-    MessageBus::SubscriptionId applicationCommandSubscription{0};
-    std::mutex dongleInfoMutex;
+
+    MessageBus::SubscriptionId dongleStatusSub{0};
+    MessageBus::SubscriptionId dongleInfoSub{0};
+    MessageBus::SubscriptionId initDataSub{0};
+    MessageBus::SubscriptionId applicationCommandSub{0};
+    MessageBus::SubscriptionId nodeListSub{0};
+    MessageBus::SubscriptionId inclusionSub{0};
+    MessageBus::SubscriptionId exclusionSub{0};
+    MessageBus::SubscriptionId sendDataSub{0};
+
+    // Cached state replayed to D-Bus method callers (GetDongleInfo,
+    // GetInitData, GetNodes). Each is fed by a retained MessageBus
+    // event so a late D-Bus client gets the latest value without the
+    // backend reaching into the producing module.
+    std::mutex stateMutex;
     MessageBus::DongleInfo lastDongleInfo;
-    std::mutex initDataMutex;
     MessageBus::InitData lastInitData;
+    std::vector<MessageBus::NodeInfo> lastNodes;
 };
 
 DBusBackend::DBusBackend()
@@ -180,7 +93,7 @@ DBusBackend::DBusBackend()
 DBusBackend::~DBusBackend()
 {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall): static dispatch of own stop() is intended for cleanup
-    stop();
+    DBusBackend::stop();
 }
 
 // NOLINTBEGIN(readability-function-cognitive-complexity): flat D-Bus method/signal registration list
@@ -205,144 +118,118 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
         .onInterface(IFACE_NAME)
         .implementedAs(
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const uint8_t& mode,
-               const uint8_t& flags,
-               const uint8_t& sessionId,
-               const std::vector<uint8_t>& nwiHomeId,
-               const std::vector<uint8_t>& authHomeId)
+            [](const std::uint8_t& mode,
+               const std::uint8_t& flags,
+               const std::uint8_t& sessionId,
+               const std::vector<std::uint8_t>& nwiHomeId,
+               const std::vector<std::uint8_t>& authHomeId) -> void
             {
-                HostApi::AddNodeRequest req{};
-                req.mode              = mode;
-                req.power             = bitSet(flags, FLAG_POWER_BIT);
-                req.nwi               = bitSet(flags, FLAG_NWI_BIT);
-                req.protocolLongRange = bitSet(flags, FLAG_PROTOCOL_BIT);
-                req.skipFlNeighbors   = bitSet(flags, FLAG_SFLND_BIT);
-                req.sessionId         = sessionId;
-                req.includeHomeIds    = !nwiHomeId.empty() || !authHomeId.empty();
-                req.nwiHomeId         = homeIdFromVector(nwiHomeId);
-                req.authHomeId        = homeIdFromVector(authHomeId);
-                HostApi::pushRequest(req);
+                MessageBus::publish(
+                    MessageBus::AddNodeCommand{.mode              = mode,
+                                               .power             = bitSet(flags, FLAG_POWER_BIT),
+                                               .nwi               = bitSet(flags, FLAG_NWI_BIT),
+                                               .protocolLongRange = bitSet(flags, FLAG_PROTOCOL_BIT),
+                                               .skipFlNeighbors   = bitSet(flags, FLAG_SFLND_BIT),
+                                               .sessionId         = sessionId,
+                                               .includeHomeIds    = !nwiHomeId.empty() || !authHomeId.empty(),
+                                               .nwiHomeId         = homeIdFromVector(nwiHomeId),
+                                               .authHomeId        = homeIdFromVector(authHomeId)});
             });
 
     obj.registerMethod("StopAddNode")
         .onInterface(IFACE_NAME)
         .implementedAs(
-            [](const uint8_t& sessionId)
+            [](const std::uint8_t& sessionId) -> void
             {
-                HostApi::AddNodeRequest req{};
-                req.mode      = HostApi::ADD_MODE_STOP;
-                req.sessionId = sessionId;
-                HostApi::pushRequest(req);
+                MessageBus::publish(
+                    MessageBus::AddNodeCommand{.mode = MessageBus::AddNodeCommand::MODE_STOP, .sessionId = sessionId});
             });
 
     obj.registerMethod("RemoveNode")
         .onInterface(IFACE_NAME)
         .implementedAs(
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const uint8_t& mode, const uint8_t& flags, const uint8_t& sessionId)
+            [](const std::uint8_t& mode, const std::uint8_t& flags, const std::uint8_t& sessionId) -> void
             {
-                HostApi::RemoveNodeRequest req{};
-                req.mode      = mode;
-                req.power     = bitSet(flags, FLAG_POWER_BIT);
-                req.nwe       = bitSet(flags, FLAG_NWE_BIT);
-                req.sessionId = sessionId;
-                HostApi::pushRequest(req);
+                MessageBus::publish(MessageBus::RemoveNodeCommand{.mode      = mode,
+                                                                  .power     = bitSet(flags, FLAG_POWER_BIT),
+                                                                  .nwe       = bitSet(flags, FLAG_NWE_BIT),
+                                                                  .sessionId = sessionId});
             });
 
     obj.registerMethod("StopRemoveNode")
         .onInterface(IFACE_NAME)
         .implementedAs(
-            [](const uint8_t& sessionId)
+            [](const std::uint8_t& sessionId) -> void
             {
-                HostApi::RemoveNodeRequest req{};
-                req.mode      = HostApi::REMOVE_MODE_STOP;
-                req.sessionId = sessionId;
-                HostApi::pushRequest(req);
+                MessageBus::publish(MessageBus::RemoveNodeCommand{.mode      = MessageBus::RemoveNodeCommand::MODE_STOP,
+                                                                  .sessionId = sessionId});
             });
 
     obj.registerMethod("SetSwitchBinary")
         .onInterface(IFACE_NAME)
         .implementedAs(
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const uint8_t& nodeId, const bool& turnOn, const uint8_t& callbackId)
+            [](const std::uint8_t& nodeId, const bool& turnOn, const std::uint8_t& callbackId) -> void
             {
-                HostApi::SendDataRequest req{};
-                req.nodeId     = nodeId;
-                req.data       = BinarySwitch::encodeSet(turnOn);
-                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-                req.callbackId = callbackId;
-                HostApi::pushRequest(req);
+                MessageBus::publish(
+                    MessageBus::SetSwitchBinaryCommand{.nodeId = nodeId, .turnOn = turnOn, .callbackId = callbackId});
             });
 
     obj.registerMethod("SetAssociation")
         .onInterface(IFACE_NAME)
         .implementedAs(
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const uint8_t& nodeId,
-               const uint8_t& groupId,
-               const std::vector<uint8_t>& members,
-               const uint8_t& callbackId)
+            [](const std::uint8_t& nodeId,
+               const std::uint8_t& groupId,
+               const std::vector<std::uint8_t>& members,
+               const std::uint8_t& callbackId) -> void
             {
-                HostApi::SendDataRequest req{};
-                req.nodeId     = nodeId;
-                req.data       = Association::encodeSet(groupId, std::span<const std::uint8_t>(members));
-                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-                req.callbackId = callbackId;
-                HostApi::pushRequest(req);
+                MessageBus::publish(MessageBus::SetAssociationCommand{
+                    .nodeId = nodeId, .groupId = groupId, .members = members, .callbackId = callbackId});
             });
 
     obj.registerMethod("RemoveAssociation")
         .onInterface(IFACE_NAME)
         .implementedAs(
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const uint8_t& nodeId,
-               const uint8_t& groupId,
-               const std::vector<uint8_t>& members,
-               const uint8_t& callbackId)
+            [](const std::uint8_t& nodeId,
+               const std::uint8_t& groupId,
+               const std::vector<std::uint8_t>& members,
+               const std::uint8_t& callbackId) -> void
             {
-                HostApi::SendDataRequest req{};
-                req.nodeId     = nodeId;
-                req.data       = Association::encodeRemove(groupId, std::span<const std::uint8_t>(members));
-                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-                req.callbackId = callbackId;
-                HostApi::pushRequest(req);
+                MessageBus::publish(MessageBus::RemoveAssociationCommand{
+                    .nodeId = nodeId, .groupId = groupId, .members = members, .callbackId = callbackId});
             });
 
     obj.registerMethod("GetAssociation")
         .onInterface(IFACE_NAME)
         .implementedAs(
             // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const uint8_t& nodeId, const uint8_t& groupId, const uint8_t& callbackId)
+            [](const std::uint8_t& nodeId, const std::uint8_t& groupId, const std::uint8_t& callbackId) -> void
             {
-                HostApi::SendDataRequest req{};
-                req.nodeId     = nodeId;
-                req.data       = Association::encodeGet(groupId);
-                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-                req.callbackId = callbackId;
-                HostApi::pushRequest(req);
+                MessageBus::publish(
+                    MessageBus::GetAssociationCommand{.nodeId = nodeId, .groupId = groupId, .callbackId = callbackId});
             });
 
     obj.registerMethod("GetAssociationGroupings")
         .onInterface(IFACE_NAME)
         .implementedAs(
-            [](const uint8_t& nodeId, const uint8_t& callbackId)
-            {
-                HostApi::SendDataRequest req{};
-                req.nodeId     = nodeId;
-                req.data       = Association::encodeGroupingsGet();
-                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-                req.callbackId = callbackId;
-                HostApi::pushRequest(req);
+            [](const std::uint8_t& nodeId, const std::uint8_t& callbackId) -> void {
+                MessageBus::publish(
+                    MessageBus::GetAssociationGroupingsCommand{.nodeId = nodeId, .callbackId = callbackId});
             });
 
     using NodeTuple = sdbus::Struct<uint8_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>;
     obj.registerMethod("GetNodes")
         .onInterface(IFACE_NAME)
         .implementedAs(
-            []() -> std::vector<NodeTuple>
+            [this]() -> std::vector<NodeTuple>
             {
                 std::vector<NodeTuple> result;
-                for (const auto& info : NodeRegistry::snapshot())
+                std::scoped_lock const lock(impl->stateMutex);
+                result.reserve(impl->lastNodes.size());
+                for (const auto& info : impl->lastNodes)
                 {
                     result.emplace_back(
                         info.nodeId, info.basicType, info.genericType, info.specificType, info.commandClasses);
@@ -350,26 +237,27 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                 return result;
             });
 
-    using DongleInfoTuple = sdbus::Struct<std::string, uint8_t, std::vector<uint8_t>, uint8_t>;
+    using DongleInfoTuple = sdbus::Struct<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>;
     obj.registerMethod("GetDongleInfo")
         .onInterface(IFACE_NAME)
         .implementedAs(
             [this]() -> DongleInfoTuple
             {
-                std::scoped_lock const lock(impl->dongleInfoMutex);
+                std::scoped_lock const lock(impl->stateMutex);
                 return DongleInfoTuple{impl->lastDongleInfo.libraryVersion,
                                        impl->lastDongleInfo.libraryType,
                                        impl->lastDongleInfo.homeId,
                                        impl->lastDongleInfo.controllerNodeId};
             });
 
-    using InitDataTuple = sdbus::Struct<uint8_t, uint8_t, std::vector<uint8_t>, uint8_t, uint8_t>;
+    using InitDataTuple =
+        sdbus::Struct<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t, std::uint8_t>;
     obj.registerMethod("GetInitData")
         .onInterface(IFACE_NAME)
         .implementedAs(
             [this]() -> InitDataTuple
             {
-                std::scoped_lock const lock(impl->initDataMutex);
+                std::scoped_lock const lock(impl->stateMutex);
                 return InitDataTuple{impl->lastInitData.serialApiVersion,
                                      impl->lastInitData.capabilities,
                                      impl->lastInitData.nodeIds,
@@ -379,12 +267,24 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
 
     obj.registerSignal(SIGNAL_INCLUSION_STATUS)
         .onInterface(IFACE_NAME)
-        .withParameters<uint8_t, uint8_t, uint16_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>(
+        .withParameters<std::uint8_t,
+                        std::uint8_t,
+                        std::uint16_t,
+                        std::uint8_t,
+                        std::uint8_t,
+                        std::uint8_t,
+                        std::vector<std::uint8_t>>(
             "sessionId", "status", "nodeId", "basicType", "genericType", "specificType", "commandClasses");
 
     obj.registerSignal(SIGNAL_EXCLUSION_STATUS)
         .onInterface(IFACE_NAME)
-        .withParameters<uint8_t, uint8_t, uint16_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>(
+        .withParameters<std::uint8_t,
+                        std::uint8_t,
+                        std::uint16_t,
+                        std::uint8_t,
+                        std::uint8_t,
+                        std::uint8_t,
+                        std::vector<std::uint8_t>>(
             "sessionId", "status", "nodeId", "basicType", "genericType", "specificType", "commandClasses");
 
     obj.registerSignal(SIGNAL_DONGLE_STATUS)
@@ -393,39 +293,26 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
 
     obj.registerSignal(SIGNAL_DONGLE_INFO)
         .onInterface(IFACE_NAME)
-        .withParameters<std::string, uint8_t, std::vector<uint8_t>, uint8_t>(
+        .withParameters<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>(
             "libraryVersion", "libraryType", "homeId", "controllerNodeId");
 
     obj.registerSignal(SIGNAL_INIT_DATA)
         .onInterface(IFACE_NAME)
-        .withParameters<uint8_t, uint8_t, std::vector<uint8_t>, uint8_t, uint8_t>(
+        .withParameters<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t, std::uint8_t>(
             "serialApiVersion", "capabilities", "nodeIds", "chipType", "chipVersion");
 
     obj.registerSignal(SIGNAL_SEND_DATA_STATUS)
         .onInterface(IFACE_NAME)
-        .withParameters<uint8_t, uint8_t>("callbackId", "txStatus");
+        .withParameters<std::uint8_t, std::uint8_t>("callbackId", "txStatus");
 
     obj.registerSignal(SIGNAL_APPLICATION_COMMAND)
         .onInterface(IFACE_NAME)
-        .withParameters<uint8_t, uint8_t, std::vector<uint8_t>>("rxStatus", "sourceNodeId", "ccData");
-
-    obj.registerSignal(SIGNAL_SWITCH_BINARY_REPORT)
-        .onInterface(IFACE_NAME)
-        .withParameters<uint8_t, uint8_t>("sourceNodeId", "state");
-
-    obj.registerSignal(SIGNAL_ASSOCIATION_REPORT)
-        .onInterface(IFACE_NAME)
-        .withParameters<uint8_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>(
-            "sourceNodeId", "groupId", "maxSupported", "reportsToFollow", "members");
-
-    obj.registerSignal(SIGNAL_ASSOCIATION_GROUPINGS_REPORT)
-        .onInterface(IFACE_NAME)
-        .withParameters<uint8_t, uint8_t>("sourceNodeId", "supportedGroupings");
+        .withParameters<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>>("rxStatus", "sourceNodeId", "ccData");
 
     obj.finishRegistration();
 
-    impl->dongleSubscription = MessageBus::subscribe(
-        [this](const MessageBus::DongleStatus& status)
+    impl->dongleStatusSub = MessageBus::subscribe<MessageBus::DongleStatus>(
+        [this](const MessageBus::DongleStatus& status) -> void
         {
             if (!impl || !impl->connected.load() || !impl->object)
             {
@@ -444,119 +331,223 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
             }
         });
 
-    impl->applicationCommandSubscription = MessageBus::subscribe(
-        [this](const MessageBus::ApplicationCommand& event)
-        {
-            if (!impl || !impl->connected.load() || !impl->object)
-            {
-                return;
-            }
-            emitApplicationCommand(*impl->object, event);
-        });
-
-    impl->dongleInfoSubscription = MessageBus::subscribe(
-        [this](const MessageBus::DongleInfo& info)
+    impl->dongleInfoSub = MessageBus::subscribe<MessageBus::DongleInfo>(
+        [this](const MessageBus::DongleInfo& info) -> void
         {
             {
-                std::scoped_lock const lock(impl->dongleInfoMutex);
+                std::scoped_lock const lock(impl->stateMutex);
                 impl->lastDongleInfo = info;
             }
             if (!impl || !impl->connected.load() || !impl->object)
             {
                 return;
             }
-            emitDongleInfo(*impl->object, info);
+            try
+            {
+                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_DONGLE_INFO);
+                signal << info.libraryVersion;
+                signal << info.libraryType;
+                signal << info.homeId;
+                signal << info.controllerNodeId;
+                impl->object->emitSignal(signal);
+            }
+            catch (const sdbus::Error& err)
+            {
+                std::cerr << "[DBusBackend] failed to emit DongleInfo: " << err.what() << '\n';
+            }
         });
 
-    impl->initDataSubscription = MessageBus::subscribe(
-        [this](const MessageBus::InitData& info)
+    impl->initDataSub = MessageBus::subscribe<MessageBus::InitData>(
+        [this](const MessageBus::InitData& info) -> void
         {
             {
-                std::scoped_lock const lock(impl->initDataMutex);
+                std::scoped_lock const lock(impl->stateMutex);
                 impl->lastInitData = info;
             }
             if (!impl || !impl->connected.load() || !impl->object)
             {
                 return;
             }
-            emitInitData(*impl->object, info);
+            try
+            {
+                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_INIT_DATA);
+                signal << info.serialApiVersion;
+                signal << info.capabilities;
+                signal << info.nodeIds;
+                signal << info.chipType;
+                signal << info.chipVersion;
+                impl->object->emitSignal(signal);
+            }
+            catch (const sdbus::Error& err)
+            {
+                std::cerr << "[DBusBackend] failed to emit InitData: " << err.what() << '\n';
+            }
+        });
+
+    impl->nodeListSub = MessageBus::subscribe<MessageBus::NodeListChanged>(
+        [this](const MessageBus::NodeListChanged& event) -> void
+        {
+            std::scoped_lock const lock(impl->stateMutex);
+            impl->lastNodes = event.nodes;
+        });
+
+    impl->applicationCommandSub = MessageBus::subscribe<MessageBus::ApplicationCommand>(
+        [this](const MessageBus::ApplicationCommand& event) -> void
+        {
+            if (!impl || !impl->connected.load() || !impl->object)
+            {
+                return;
+            }
+            try
+            {
+                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_APPLICATION_COMMAND);
+                signal << event.rxStatus;
+                signal << event.sourceNodeId;
+                signal << event.ccData;
+                impl->object->emitSignal(signal);
+            }
+            catch (const sdbus::Error& err)
+            {
+                std::cerr << "[DBusBackend] failed to emit ApplicationCommand: " << err.what() << '\n';
+            }
+        });
+
+    impl->inclusionSub = MessageBus::subscribe<MessageBus::NodeInclusionStatus>(
+        [this](const MessageBus::NodeInclusionStatus& event) -> void
+        {
+            if (!impl || !impl->connected.load() || !impl->object)
+            {
+                return;
+            }
+            try
+            {
+                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_INCLUSION_STATUS);
+                signal << event.sessionId;
+                signal << event.status;
+                signal << event.nodeId;
+                signal << event.basicDeviceType;
+                signal << event.genericDeviceType;
+                signal << event.specificDeviceType;
+                signal << event.commandClasses;
+                impl->object->emitSignal(signal);
+            }
+            catch (const sdbus::Error& err)
+            {
+                std::cerr << "[DBusBackend] failed to emit NodeInclusionStatus: " << err.what() << '\n';
+            }
+        });
+
+    impl->exclusionSub = MessageBus::subscribe<MessageBus::NodeExclusionStatus>(
+        [this](const MessageBus::NodeExclusionStatus& event) -> void
+        {
+            if (!impl || !impl->connected.load() || !impl->object)
+            {
+                return;
+            }
+            try
+            {
+                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_EXCLUSION_STATUS);
+                signal << event.sessionId;
+                signal << event.status;
+                signal << event.nodeId;
+                signal << event.basicDeviceType;
+                signal << event.genericDeviceType;
+                signal << event.specificDeviceType;
+                signal << event.commandClasses;
+                impl->object->emitSignal(signal);
+            }
+            catch (const sdbus::Error& err)
+            {
+                std::cerr << "[DBusBackend] failed to emit NodeExclusionStatus: " << err.what() << '\n';
+            }
+        });
+
+    impl->sendDataSub = MessageBus::subscribe<MessageBus::SendDataCallback>(
+        [this](const MessageBus::SendDataCallback& event) -> void
+        {
+            if (!impl || !impl->connected.load() || !impl->object)
+            {
+                return;
+            }
+            try
+            {
+                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_SEND_DATA_STATUS);
+                signal << event.callbackId;
+                signal << event.txStatus;
+                impl->object->emitSignal(signal);
+            }
+            catch (const sdbus::Error& err)
+            {
+                std::cerr << "[DBusBackend] failed to emit SendDataStatus: " << err.what() << '\n';
+            }
         });
 
     impl->connection->enterEventLoopAsync();
     std::cout << "[DBusBackend] listening on system bus as " << BUS_NAME << '\n';
 
+    // Idle until the daemon is told to stop. The bus does the work —
+    // command requests come in via D-Bus method handlers (publishing
+    // commands onto MessageBus), and outgoing signals are emitted from
+    // MessageBus subscribers above. This loop just keeps the thread
+    // alive and observable to running.
     while (running.load())
     {
-        auto callback = HostApi::popCallback(running, CALLBACK_POLL_MS);
-        if (!callback.has_value())
-        {
-            continue;
-        }
-        try
-        {
-            std::visit(
-                [&obj](auto const& concrete)
-                {
-                    using T = std::decay_t<decltype(concrete)>;
-                    if constexpr (std::is_same_v<T, HostApi::NodeStatusCallback>)
-                    {
-                        const char* signalName = concrete.commandId == HostApi::CMD_REMOVE_NODE_FROM_NETWORK
-                                                     ? SIGNAL_EXCLUSION_STATUS
-                                                     : SIGNAL_INCLUSION_STATUS;
-                        auto signal            = obj.createSignal(IFACE_NAME, signalName);
-                        signal << concrete.sessionId;
-                        signal << concrete.status;
-                        signal << concrete.nodeId;
-                        signal << concrete.basicDeviceType;
-                        signal << concrete.genericDeviceType;
-                        signal << concrete.specificDeviceType;
-                        signal << concrete.commandClasses;
-                        obj.emitSignal(signal);
-                    }
-                    else if constexpr (std::is_same_v<T, HostApi::SendDataCallback>)
-                    {
-                        auto signal = obj.createSignal(IFACE_NAME, SIGNAL_SEND_DATA_STATUS);
-                        signal << concrete.callbackId;
-                        signal << concrete.txStatus;
-                        obj.emitSignal(signal);
-                    }
-                },
-                *callback);
-        }
-        catch (const sdbus::Error& err)
-        {
-            std::cerr << "[DBusBackend] failed to emit signal: " << err.what() << '\n';
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(IDLE_POLL_MS));
     }
 
     impl->connection->leaveEventLoop();
     impl->connected = false;
 }
+
 // NOLINTEND(readability-function-cognitive-complexity)
 
 auto DBusBackend::stop() -> void
 {
-    if (impl && impl->applicationCommandSubscription != 0)
+    if (!impl)
     {
-        MessageBus::unsubscribe(impl->applicationCommandSubscription);
-        impl->applicationCommandSubscription = 0;
+        return;
     }
-    if (impl && impl->initDataSubscription != 0)
+    if (impl->sendDataSub != 0)
     {
-        MessageBus::unsubscribe(impl->initDataSubscription);
-        impl->initDataSubscription = 0;
+        MessageBus::unsubscribe(impl->sendDataSub);
+        impl->sendDataSub = 0;
     }
-    if (impl && impl->dongleInfoSubscription != 0)
+    if (impl->exclusionSub != 0)
     {
-        MessageBus::unsubscribe(impl->dongleInfoSubscription);
-        impl->dongleInfoSubscription = 0;
+        MessageBus::unsubscribe(impl->exclusionSub);
+        impl->exclusionSub = 0;
     }
-    if (impl && impl->dongleSubscription != 0)
+    if (impl->inclusionSub != 0)
     {
-        MessageBus::unsubscribe(impl->dongleSubscription);
-        impl->dongleSubscription = 0;
+        MessageBus::unsubscribe(impl->inclusionSub);
+        impl->inclusionSub = 0;
     }
-    if (impl && impl->connected.load() && impl->connection)
+    if (impl->applicationCommandSub != 0)
+    {
+        MessageBus::unsubscribe(impl->applicationCommandSub);
+        impl->applicationCommandSub = 0;
+    }
+    if (impl->nodeListSub != 0)
+    {
+        MessageBus::unsubscribe(impl->nodeListSub);
+        impl->nodeListSub = 0;
+    }
+    if (impl->initDataSub != 0)
+    {
+        MessageBus::unsubscribe(impl->initDataSub);
+        impl->initDataSub = 0;
+    }
+    if (impl->dongleInfoSub != 0)
+    {
+        MessageBus::unsubscribe(impl->dongleInfoSub);
+        impl->dongleInfoSub = 0;
+    }
+    if (impl->dongleStatusSub != 0)
+    {
+        MessageBus::unsubscribe(impl->dongleStatusSub);
+        impl->dongleStatusSub = 0;
+    }
+    if (impl->connected.load() && impl->connection)
     {
         try
         {
@@ -568,6 +559,5 @@ auto DBusBackend::stop() -> void
         }
         impl->connected = false;
     }
-    HostApi::wakeAllCallbacks();
 }
 }  // namespace ExternalApi

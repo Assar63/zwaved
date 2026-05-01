@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+#
+# scripts/check-format
+#
+# Run clang-format and clang-tidy against the C/C++ files staged for
+# the next commit. Used in two contexts:
+#
+#   1. As the project's git pre-commit hook
+#      (.git/hooks/pre-commit symlinks to this file). git invokes the
+#      script with no arguments; failure blocks the commit.
+#
+#   2. From the shell, manually:
+#         scripts/check-format          # check only
+#         scripts/check-format --fix    # clang-format -i, re-stage,
+#                                       # then re-check
+#
+# `--fix` is a convenience for the manual flow — it applies the
+# formatter to the *staged* files and `git add`s them back so the
+# fixes go into the same commit. It is silently ignored when the
+# script runs as a git hook (auto-mutating staged files in the middle
+# of a commit attempt is surprising, even if technically harmless).
+#
+# `clang-tidy` is *not* auto-fixed by `--fix`. Tidy diagnostics
+# usually need eyeballing; the dedicated `fix-tidy` CMake target is
+# the right tool when you really want it.
+
+set -euo pipefail
+
+readonly cpp_file_regex='\.([ch]pp|[ch]xx|cc|hh|h|c)$'
+
+# Git sets GIT_INDEX_FILE for any hook invoked as part of a commit
+# operation (the path of the index the hook is supposed to operate
+# on). Its presence is a reliable "I was invoked by git" signal.
+called_from_git=false
+if [[ -n "${GIT_INDEX_FILE:-}" ]]; then
+    called_from_git=true
+fi
+
+fix=false
+for arg in "$@"; do
+    case "$arg" in
+        --fix)
+            fix=true
+            ;;
+        -h | --help)
+            sed -n '2,/^[^#]/p' "$0" | sed -e 's/^# \?//' -e '$d'
+            exit 0
+            ;;
+        *)
+            echo "scripts/check-format: unknown argument '$arg'" >&2
+            exit 2
+            ;;
+    esac
+done
+
+if "$fix" && "$called_from_git"; then
+    echo "scripts/check-format: --fix is only valid when run manually; ignoring"
+    fix=false
+fi
+
+if ! command -v clang-format >/dev/null 2>&1; then
+    echo "error: clang-format is not installed or not in PATH"
+    exit 1
+fi
+
+if ! command -v clang-tidy >/dev/null 2>&1; then
+    echo "error: clang-tidy is not installed or not in PATH"
+    exit 1
+fi
+
+changed_files="$(
+    git diff --cached --name-only --diff-filter=ACMR |
+        grep -E "${cpp_file_regex}" || true
+)"
+
+if [[ -z "${changed_files}" ]]; then
+    exit 0
+fi
+
+# Apply clang-format -i to every staged file before checking, when
+# requested. Re-stage the formatted result so a developer who runs
+# `scripts/check-format --fix` gets the fixes into their pending
+# commit without an extra `git add`.
+if "$fix"; then
+    echo "Applying clang-format -i to staged files..."
+    while IFS= read -r file; do
+        [[ -f "${file}" ]] || continue
+        clang-format -i "${file}"
+        git add -- "${file}"
+    done <<<"${changed_files}"
+fi
+
+format_failed=0
+tidy_failed=0
+
+echo "Running clang-format check..."
+
+while IFS= read -r file; do
+    [[ -f "${file}" ]] || continue
+
+    if ! clang-format --dry-run --Werror "${file}" >/dev/null; then
+        echo "clang-format failed: ${file}"
+        format_failed=1
+    fi
+done <<<"${changed_files}"
+
+echo "Running clang-tidy check..."
+
+# Locate a build directory with compile_commands.json so clang-tidy can
+# resolve C++26 features and third-party headers (sdbus-c++, eventpp, ...).
+tidy_build_dir=""
+for candidate in cmake-build-gnu cmake-build-llvm cmake-build-gnu-tidy cmake-build-llvm-tidy; do
+    if [[ -f "${candidate}/compile_commands.json" ]]; then
+        tidy_build_dir="${candidate}"
+        break
+    fi
+done
+
+if [[ -z "${tidy_build_dir}" ]]; then
+    echo "error: no compile_commands.json found under cmake-build-*; configure a preset first (e.g. cmake --preset gnu)"
+    exit 1
+fi
+
+while IFS= read -r file; do
+    [[ -f "${file}" ]] || continue
+
+    case "${file}" in
+        *.cpp | *.cxx | *.cc | *.c)
+            if ! clang-tidy "${file}" --quiet -p "${tidy_build_dir}" >/dev/null; then
+                echo "clang-tidy failed: ${file}"
+                tidy_failed=1
+            fi
+            ;;
+    esac
+done <<<"${changed_files}"
+
+if [[ "${format_failed}" -ne 0 || "${tidy_failed}" -ne 0 ]]; then
+    echo
+    if "$called_from_git"; then
+        # Git is about to abort the commit on a non-zero exit; the
+        # message tells the operator what to do next.
+        echo "Commit blocked."
+        echo "Re-run \`scripts/check-format --fix\` to apply clang-format,"
+        echo "fix any clang-tidy diagnostics by hand, and stage the changes again."
+    else
+        # Manual run: no commit machinery to block, just report.
+        echo "Format/tidy check failed."
+        if ! "$fix"; then
+            echo "Hint: re-run with \`--fix\` to apply clang-format automatically."
+        fi
+    fi
+    exit 1
+fi
+
+if ! "$called_from_git"; then
+    echo "OK — staged files pass clang-format and clang-tidy."
+fi
+exit 0

@@ -392,7 +392,7 @@ zwaved/
 │   └── llvm-toolchain.cmake
 ├── .clang-format
 ├── .clang-tidy
-├── gitscripts/
+├── scripts/
 │   └── pre-commit                  # clang-format + clang-tidy gate
 ├── .gitignore
 └── cmake-build-*                   # Build directories (generated)
@@ -671,8 +671,10 @@ clang-tidy --fix main.cpp -- -I.
 
 #### Pre-commit Hook
 
-The project includes a Git pre-commit hook script at: 
-```bash gitscripts/pre-commit``` 
+The project includes a Git pre-commit hook script at:
+```bash
+scripts/check-format
+```
 
 The hook checks staged new and modified C/C++ files before commit using:
 
@@ -683,24 +685,42 @@ It blocks the commit if formatting or static analysis errors are found.
 
 ##### Enable the Pre-commit Hook
 
-From the project root, make the script executable: 
-```bash chmod +x gitscripts/pre-commit```
+From the project root, make the script executable and symlink it into
+Git's hooks directory:
 
-Then link it into Git's hooks directory: 
-```bash ln -sf ../../gitscripts/pre-commit .git/hooks/pre-commit``` 
+```bash
+chmod +x scripts/check-format
+ln -sfn ../../scripts/check-format .git/hooks/pre-commit
+```
 
 ##### Run the Hook Manually
 
-You can also run the hook manually before committing:
-```bash ./gitscripts/pre-commit```
+You can run the same checks against currently-staged files at any time:
+
+```bash
+scripts/check-format
+```
+
+The script auto-detects whether it was invoked by `git commit` (via the
+`GIT_INDEX_FILE` env var that git sets for hooks) and tailors its exit
+message accordingly.
 
 ##### Fix Formatting Issues
 
-If the hook reports formatting errors, run:
-```bash clang-format -i src//*.cpp src//.hpp src/**/.h``` 
+If the hook reports formatting errors, the easiest fix is to re-run the
+script with `--fix` — it applies `clang-format -i` to every staged
+file and `git add`s the result back, so the formatting fixes go into
+the same commit:
 
-Then stage the fixed files again:
-```bash git add <fixed-files>```
+```bash
+scripts/check-format --fix
+```
+
+`--fix` is intentionally a manual-only flag — when the script runs
+inside the git pre-commit hook the flag is silently ignored, so
+auto-mutating the index in the middle of a commit attempt never
+surprises you. `clang-tidy` diagnostics are not auto-fixed; use
+`cmake --build cmake-build-gnu --target fix-tidy` for those.
 
 ##### Fix clang-tidy Issues
 

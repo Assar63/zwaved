@@ -32,7 +32,7 @@ Runtime behaviour that doesn't affect which code is linked lives in `${ZWAVED_CO
 
 ## Code Quality
 
-Both tools must pass before commits are accepted (enforced by the pre-commit hook in `gitscripts/pre-commit`).
+Both tools must pass before commits are accepted (enforced by the pre-commit hook in `scripts/check-format`).
 
 ```bash
 # Check formatting (no changes)
@@ -53,11 +53,11 @@ The `check` and `fix-tidy` targets read `compile_commands.json` from the build d
 ### Pre-commit hook setup
 
 ```bash
-chmod +x gitscripts/pre-commit
-ln -sf ../../gitscripts/pre-commit .git/hooks/pre-commit
+chmod +x scripts/check-format
+ln -sfn ../../scripts/check-format .git/hooks/pre-commit
 ```
 
-The hook checks only staged C/C++ files with `clang-format` and `clang-tidy`. All `clang-tidy` warnings are treated as errors (`WarningsAsErrors: '*'`).
+The hook checks only staged C/C++ files with `clang-format` and `clang-tidy`. All `clang-tidy` warnings are treated as errors (`WarningsAsErrors: '*'`). The same script can be run manually (`scripts/check-format`) or with `--fix` to apply `clang-format -i` to staged files and re-stage them. The script detects git-hook context via the `GIT_INDEX_FILE` env var (which git sets for any hook that touches the index) and ignores `--fix` in that context — auto-mutating the index mid-commit is surprising even when harmless.
 
 ## Architecture
 

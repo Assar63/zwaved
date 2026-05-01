@@ -101,6 +101,22 @@ auto SerialPort::open(const std::string& path) -> bool
     return true;
 }
 
+auto SerialPort::adoptFd(const int newFd, std::string label) -> void
+{
+    close();
+
+    // Match the non-blocking semantics `open()` sets up via the
+    // O_NONBLOCK open flag — readBytes() / writeAll() rely on
+    // EAGAIN behaviour to drive their poll-based timeouts.
+    if (const int flags = fcntl(newFd, F_GETFL, 0); flags >= 0)
+    {
+        fcntl(newFd, F_SETFL, flags | O_NONBLOCK);  // NOLINT(*-vararg)
+    }
+
+    descriptor = newFd;
+    devicePath = std::move(label);
+}
+
 auto SerialPort::close() -> void
 {
     if (descriptor != INVALID_FD)

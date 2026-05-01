@@ -25,6 +25,18 @@ class SerialPort
     /// Returns true on success, false on any failure (errno preserved).
     [[nodiscard]] auto open(const std::string& path) -> bool;
 
+    /// Adopt an already-open file descriptor — used by unit tests that
+    /// want to drive `FrameTransport` over a `socketpair(2)` instead
+    /// of a real serial line. Closes any currently held fd, sets
+    /// `O_NONBLOCK` on the new one (matches what `open()` configures
+    /// so the poll-based read/write paths behave the same), and uses
+    /// `label` as the value returned by `path()`. No termios
+    /// configuration is run — sockets and pipes don't accept
+    /// `tcsetattr`, and the caller is responsible for whatever the
+    /// fd needs to look like before it gets here. Ownership transfers:
+    /// the destructor will `close(2)` it.
+    auto adoptFd(int newFd, std::string label) -> void;
+
     /// Close the underlying fd if open.
     auto close() -> void;
 

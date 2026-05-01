@@ -21,6 +21,10 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 - **libudev** development files (`libudev-dev`) — USB device monitoring
 - **sdbus-c++** development files (`libsdbus-c++-dev`) — D-Bus interface; pulls in `libsystemd-dev` transitively
 - **SQLite3** development files (`libsqlite3-dev`) — node-registry persistence
+- **eventpp** (header-only) — in-process publish/subscribe bus; not packaged on most distros, install from source
+
+See the [Dependencies](#dependencies) section below for what each
+library does, where it's used, and how CMake discovers it.
 
 ## Installation
 
@@ -39,7 +43,95 @@ sudo apt install -y clang-20 llvm-20
 
 # CMake + runtime libs
 sudo apt install -y cmake libudev-dev libsdbus-c++-dev libsqlite3-dev
+
+# eventpp is header-only and not packaged on most distros; install from source.
+git clone --depth 1 https://github.com/wqking/eventpp.git
+cmake -S eventpp -B eventpp/build
+sudo cmake --install eventpp/build
 ```
+
+## Dependencies
+
+Four third-party libraries are linked or included by zwaved. The CMake
+build resolves each one out-of-tree — no copies are vendored — so the
+host system (or, for cross builds, the sysroot) must provide them.
+
+### `libudev` — USB hot-plug detection
+
+Tracks the Aeotec Z-Stick Gen5 (VID `0658`, PID `0200`) coming and
+going on the USB bus. `MonitorThread` opens a udev monitor socket and
+`select()`s on it with a 1-second timeout so the watch loop stays
+stoppable; on a `device-add` / `device-remove` event it publishes a
+`MessageBus::DongleStatus` carrying the discovered TTY path (or empty
+on disconnect). The protocol thread blocks on this status until a path
+arrives.
+
+- **Package (Debian/Ubuntu):** `libudev-dev`
+- **Cross-builds:** part of `systemd` / `eudev`; available in Yocto
+  meta-oe and OpenWRT
+- **CMake discovery:** `pkg_check_modules(LIBUDEV REQUIRED IMPORTED_TARGET libudev)` →
+  link target `PkgConfig::LIBUDEV`
+- **Used by:** `src/zwave-dongle/MonitorThread.cpp`
+
+### `sdbus-c++` — D-Bus interface
+
+Implements the external API surface. The daemon owns the system bus
+name `com.tiunda.ZWaved`, exports an object at `/com/tiunda/ZWaved`,
+and exposes ~13 methods + ~11 signals on the
+`com.tiunda.ZWaved1` interface (see [MANUAL.md](MANUAL.md)).
+sdbus-c++ pulls in `libsystemd` transitively for the underlying
+sd-bus bindings.
+
+- **Package (Debian/Ubuntu):** `libsdbus-c++-dev`
+- **Cross-builds:** Yocto meta-oe `sdbus-c++` recipe; pulls in
+  `systemd` (or `elogind` on systems without systemd)
+- **CMake discovery:** `pkg_check_modules(SDBUS_CPP REQUIRED IMPORTED_TARGET sdbus-c++)` —
+  only resolved when `ZWAVED_EXTERNAL_API` includes `dbus`
+- **Used by:** `src/external-api/DBusBackend.{hpp,cpp}` and the
+  `utils/zwave-terminal/` companion client
+- **Runtime policy:** the system-bus policy XML at
+  `dbus/com.tiunda.ZWaved.conf` must be installed under
+  `/etc/dbus-1/system.d/` so non-root callers can reach the service
+  (see [MANUAL.md](MANUAL.md) §1)
+
+### `sqlite3` — node-registry persistence
+
+Backs `NodeRegistry` so the included-node list survives daemon
+restarts. Rows are keyed by `(home_id, node_id)`, so the same database
+can hold rows for multiple Z-Wave networks; switching dongles loads a
+fresh in-memory cache for the new network without disturbing the
+previous one's stored rows. The database file lives at
+`${ZWAVED_STATE_DIR:-/var/lib/zwaved}/nodes.db` and the directory is
+created on first use. Schema version is tracked via
+`PRAGMA user_version`; persistence is best-effort — if the path can't
+be opened, the daemon logs a warning and falls back to in-memory only.
+
+- **Package (Debian/Ubuntu):** `libsqlite3-dev`
+- **Cross-builds:** ubiquitous; available out-of-the-box on Yocto and
+  OpenWRT
+- **CMake discovery:** `pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)` →
+  link target `PkgConfig::SQLITE3`
+- **Used by:** `src/node-registry/NodeRegistry.cpp`
+
+### `eventpp` — in-process publish/subscribe bus
+
+Header-only library backing `MessageBus` — the single seam between the
+dongle monitor, protocol thread, registry, and external-API backends.
+zwaved wraps `eventpp::CallbackList` behind a small templated facade
+(`subscribe<T>` / `publish<T>` per event type), so the eventpp header
+does not appear in any public include and the backing library is
+swappable without touching call sites.
+
+- **Package:** not packaged on most distros; `find_package(eventpp REQUIRED)`
+  expects it from the system or cross-sysroot. Install from source
+  (see Dependencies install step above) or via a Yocto meta-oe
+  recipe.
+- **Upstream:** [https://github.com/wqking/eventpp](https://github.com/wqking/eventpp)
+  (header-only, MIT)
+- **CMake discovery:** `find_package(eventpp REQUIRED)` — header-only,
+  no link target needed (the headers are pulled in transitively where
+  the wrapper consumes them)
+- **Used by:** `src/message-bus/MessageBus.cpp`
 
 ## Compilation
 

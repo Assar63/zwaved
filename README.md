@@ -19,7 +19,7 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 - **POSIX-compliant system** (Linux)
 - **C++26 standard support**
 - **libudev** development files (`libudev-dev`) — USB device monitoring
-- **sdbus-c++** development files (`libsdbus-c++-dev`) — D-Bus interface; pulls in `libsystemd-dev` transitively
+- **sdbus-c++** 2.x — D-Bus interface; install from source (the Debian/Ubuntu package is still on 1.x). Requires `libsystemd-dev` for the underlying sd-bus
 - **SQLite3** development files (`libsqlite3-dev`) — node-registry persistence
 - **eventpp** (header-only) — in-process publish/subscribe bus; not packaged on most distros, install from source
 
@@ -42,7 +42,16 @@ sudo apt install -y g++-15 gcc-15
 sudo apt install -y clang-20 llvm-20
 
 # CMake + runtime libs
-sudo apt install -y cmake libudev-dev libsdbus-c++-dev libsqlite3-dev
+sudo apt install -y cmake libudev-dev libsqlite3-dev libsystemd-dev
+
+# sdbus-c++. The Ubuntu/Debian package `libsdbus-c++-dev` ships an older
+# 1.x release; the daemon is built and tested against 2.x. Install from
+# source. Requires libsystemd-dev (already pulled in above) for sd-bus.
+git clone --depth 1 https://github.com/Kistler-Group/sdbus-cpp.git
+cmake -S sdbus-cpp -B sdbus-cpp/build -DSDBUSCPP_BUILD_CODEGEN=OFF -DSDBUSCPP_BUILD_TESTS=OFF
+cmake --build sdbus-cpp/build
+sudo cmake --install sdbus-cpp/build
+sudo ldconfig
 
 # eventpp is header-only and not packaged on most distros; install from source.
 git clone --depth 1 https://github.com/wqking/eventpp.git
@@ -82,9 +91,14 @@ and exposes ~13 methods + ~11 signals on the
 sdbus-c++ pulls in `libsystemd` transitively for the underlying
 sd-bus bindings.
 
-- **Package (Debian/Ubuntu):** `libsdbus-c++-dev`
-- **Cross-builds:** Yocto meta-oe `sdbus-c++` recipe; pulls in
-  `systemd` (or `elogind` on systems without systemd)
+- **Package (Debian/Ubuntu):** the distro `libsdbus-c++-dev` ships an
+  older 1.x release; zwaved is built and tested against 2.x, so it
+  must be installed from source on Debian/Ubuntu (see install steps
+  above). `libsystemd-dev` is still needed for the underlying sd-bus
+  and is the only piece left to apt
+- **Cross-builds:** Yocto meta-oe `sdbus-c++` recipe (currently 2.x);
+  pulls in `systemd` (or `elogind` on systems without systemd)
+- **Upstream:** [https://github.com/Kistler-Group/sdbus-cpp](https://github.com/Kistler-Group/sdbus-cpp)
 - **CMake discovery:** `pkg_check_modules(SDBUS_CPP REQUIRED IMPORTED_TARGET sdbus-c++)` —
   only resolved when `ZWAVED_EXTERNAL_API` includes `dbus`
 - **Used by:** `src/external-api/DBusBackend.{hpp,cpp}` and the

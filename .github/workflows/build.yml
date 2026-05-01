@@ -1,0 +1,119 @@
+name: build
+
+# Runs on every push and pull-request. The Dockerfile is the single
+# source of truth for "how zwaved is built" — `docker build` runs the
+# full configure / build / ctest cycle, so a broken commit fails CI
+# the same way it fails a developer's `docker build .` locally.
+#
+# When a `v*` tag is pushed, an additional job builds the same
+# Dockerfile under `docker buildx`, tags the resulting image with the
+# tag name and `latest`, and pushes it to GitHub Container Registry
+# (ghcr.io / "Packages" in the UI).
+
+on:
+  push:
+    branches: [master]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [master]
+  # Manual trigger for debugging the workflow itself.
+  workflow_dispatch:
+
+# Cancel in-flight runs when a new push lands on the same branch /
+# tag — saves CI minutes on rapid pushes.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===================================================================
+  # build-and-test — runs on every push / PR. Builds the Dockerfile to
+  # exercise the full configure / compile / test pipeline. The
+  # resulting image stays on the runner; only the publish job (below)
+  # pushes anywhere.
+  # ===================================================================
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # `git describe --tags --dirty --always` needs the full
+          # history + tags to produce a meaningful version string.
+          fetch-depth: 0
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & test (Dockerfile build stage)
+        # Stop at the `build` stage — runs the same `cmake --preset
+        # gnu && cmake --build && ctest` pipeline as a developer does
+        # locally, just inside the pinned container. Failure here
+        # reports as a failed CI step.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: build
+          push: false
+          load: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ===================================================================
+  # publish-image — only runs on `v*` tags. Builds the full Dockerfile
+  # (build + runtime stages), tags as `<repo>:<tag>` and `<repo>:latest`,
+  # and pushes to ghcr.io.
+  # ===================================================================
+  publish-image:
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # `packages: write` is required for actions/login + push to
+      # ghcr.io under the GITHUB_TOKEN. Without it the push 403s.
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # Strip the leading `v` from the tag so `v0.1.0` →
+          # `<repo>:0.1.0`. Also publishes `<repo>:latest` for
+          # convenience — older tags stay accessible by their
+          # explicit version.
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Stamp the image's runtime stage with the actual version
+          # (the leading `v` stripped) so `docker inspect` reports
+          # the same string the daemon's --version does.
+          build-args: |
+            ZWAVED_VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

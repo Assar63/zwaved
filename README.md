@@ -354,6 +354,39 @@ builds keep the value pinned to whatever was current the last time
 configure ran. (Future enhancement: a custom target with
 `BYPRODUCTS` that re-evaluates `git describe` on every build.)
 
+## Continuous Integration
+
+`.github/workflows/build.yml` runs on every push and pull-request.
+The `Dockerfile` is the single source of truth for "how zwaved is
+built": CI runs `docker build` against the same file a developer
+uses locally, which means a broken commit fails CI the same way it
+fails a `docker build .` on your machine. The workflow stops at the
+Dockerfile's `build` stage (the toolchain stage that runs
+`ctest --output-on-failure`), so the artifact CI produces is "this
+commit compiles and its tests pass", not a publishable image.
+
+When a `v*.*.*` tag is pushed (e.g. `git tag v0.1.0 && git push --tags`),
+an additional `publish-image` job kicks in. It builds the full
+Dockerfile (including the slim runtime stage), tags the result as
+`ghcr.io/<owner>/<repo>:0.1.0` and `…:latest`, and pushes to
+**GitHub Packages** (ghcr.io). The image's `--version` output and
+`org.opencontainers.image.version` label reflect the tag.
+
+Pulling and running:
+
+```bash
+docker pull ghcr.io/<owner>/<repo>:0.1.0
+docker run --rm ghcr.io/<owner>/<repo>:0.1.0 --version
+# zwaved 0.1.0 (v0.1.0)
+```
+
+Caveat: a real production deployment normally prefers running the
+binary directly under systemd on the host — the daemon needs access
+to the host's D-Bus and `/dev/ttyACM*`, which is awkward through a
+container without `--privileged`, `--device=/dev/ttyACM0`, and a
+host D-Bus bind-mount. The published image is most useful as a
+build-output artifact and a way to inspect a known-good build.
+
 ## Logging
 
 zwaved runs an asynchronous logger on a dedicated `ZWaveLog` thread.

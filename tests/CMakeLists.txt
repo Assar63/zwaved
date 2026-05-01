@@ -53,3 +53,18 @@ target_include_directories(Association_test PRIVATE "${SRC_DIR}/application")
 target_link_libraries(Association_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Association_test)
 gtest_discover_tests(Association_test)
+
+# ---- FrameTransport -------------------------------------------------
+# Exercises the real poll() / read() / write() syscalls — drives the
+# transport over one end of a socketpair via SerialPort::adoptFd from
+# the other side.
+add_executable(FrameTransport_test
+    FrameTransport_test.cpp
+    "${SRC_DIR}/FrameTransport.cpp"
+    "${SRC_DIR}/SerialPort.cpp"
+    "${SRC_DIR}/ZwaveDataFrame.cpp"
+)
+target_include_directories(FrameTransport_test PRIVATE "${SRC_DIR}")
+target_link_libraries(FrameTransport_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(FrameTransport_test)
+gtest_discover_tests(FrameTransport_test)

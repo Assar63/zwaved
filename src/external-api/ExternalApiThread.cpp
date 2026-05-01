@@ -17,12 +17,41 @@ namespace
 {
 constexpr int IDLE_SLEEP_MS = 200;
 
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct ExternalApiState
 {
     std::thread thread;
     std::atomic<bool> running{false};
     std::unique_ptr<ExternalApi::IBackend> backend;
+
+    // The C++ runtime tears static-storage objects down via __cxa_atexit
+    // *before* it runs __attribute__((destructor)) functions, so the
+    // join must happen here — otherwise ~thread() fires while the
+    // worker is still joinable and calls std::terminate. Construction
+    // order (driven by __attribute__((constructor)) priority) means the
+    // four modules' static state destructors fire in the same priority
+    // order an explicit destructor function would have given us.
+    ~ExternalApiState()
+    {
+        running = false;
+        if (backend)
+        {
+            backend->stop();
+        }
+        if (thread.joinable())
+        {
+            thread.join();
+        }
+        std::cout << "External API thread shutdown complete\n";
+    }
+
+    ExternalApiState()                                               = default;
+    ExternalApiState(const ExternalApiState&)                        = delete;
+    auto operator=(const ExternalApiState&) -> ExternalApiState&     = delete;
+    ExternalApiState(ExternalApiState&&) noexcept                    = delete;
+    auto operator=(ExternalApiState&&) noexcept -> ExternalApiState& = delete;
 };
+// NOLINTEND(misc-non-private-member-variables-in-classes)
 
 auto state() -> ExternalApiState&
 {
@@ -55,19 +84,10 @@ __attribute__((constructor(CONFIG_ZWAVE_EXTERNAL_API_PRIO))) auto startExternalA
     state().thread  = std::thread(externalApiThread);
 }
 
-__attribute__((destructor(CONFIG_ZWAVE_EXTERNAL_API_PRIO))) auto stopExternalApiThread() -> void
-{
-    state().running = false;
-    if (state().backend)
-    {
-        state().backend->stop();
-    }
-    if (state().thread.joinable())
-    {
-        state().thread.join();
-    }
-    std::cout << "External API thread shutdown complete\n";
-}
+// Note: shutdown work lives in ExternalApiState's destructor (above) —
+// running it from __attribute__((destructor)) here is too late, the
+// C++ runtime has already destroyed the static state by the time the
+// fini-array entries run.
 }  // namespace
 
 namespace ExternalApi

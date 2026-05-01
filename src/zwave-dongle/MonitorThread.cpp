@@ -14,11 +14,34 @@
 
 namespace
 {
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct ZwaveMonitorState
 {
     std::thread thread;
     std::atomic<bool> running{false};
+
+    // Static-state destructor handles teardown — the C++ runtime tears
+    // static-storage objects down via __cxa_atexit *before* it runs
+    // __attribute__((destructor)) functions, so the join must happen
+    // here. Otherwise ~thread() fires while the worker is still
+    // joinable and calls std::terminate.
+    ~ZwaveMonitorState()
+    {
+        running = false;
+        if (thread.joinable())
+        {
+            thread.join();
+        }
+        std::cout << "Z-Wave device monitor thread shutdown complete\n";
+    }
+
+    ZwaveMonitorState()                                                = default;
+    ZwaveMonitorState(const ZwaveMonitorState&)                        = delete;
+    auto operator=(const ZwaveMonitorState&) -> ZwaveMonitorState&     = delete;
+    ZwaveMonitorState(ZwaveMonitorState&&) noexcept                    = delete;
+    auto operator=(ZwaveMonitorState&&) noexcept -> ZwaveMonitorState& = delete;
 };
+// NOLINTEND(misc-non-private-member-variables-in-classes)
 
 auto state() -> ZwaveMonitorState&
 {
@@ -283,13 +306,5 @@ __attribute__((constructor(CONFIG_ZWAVE_DONGLE_PRIO))) auto startZWaveMonitorThr
     state().thread  = std::thread(zwaveMonitorThread);
 }
 
-__attribute__((destructor(CONFIG_ZWAVE_DONGLE_PRIO))) auto stopZWaveMonitorThread() -> void
-{
-    state().running = false;
-    if (state().thread.joinable())
-    {
-        state().thread.join();
-    }
-    std::cout << "Z-Wave device monitor thread shutdown complete\n";
-}
+// Shutdown lives in ZwaveMonitorState's destructor (see comment there).
 }  // namespace

@@ -77,6 +77,7 @@ using Request = std::variant<HostApi::AddNodeRequest,
                              HostApi::RemoveFailedNodeRequest,
                              HostApi::SendDataRequest>;
 
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct ZwaveProtocolState
 {
     std::thread thread;
@@ -127,7 +128,29 @@ struct ZwaveProtocolState
     MessageBus::SubscriptionId removeAssociationSubscription{0};
     MessageBus::SubscriptionId getAssociationSubscription{0};
     MessageBus::SubscriptionId getAssociationGroupingsSubscription{0};
+
+    // Static-state destructor handles teardown — see the comment in
+    // ExternalApiThread.cpp for why we can't rely on
+    // __attribute__((destructor)) here.
+    ~ZwaveProtocolState()
+    {
+        running = false;
+        pathCv.notify_all();
+        queueCv.notify_all();
+        if (thread.joinable())
+        {
+            thread.join();
+        }
+        std::cout << "Z-Wave communication thread shutdown complete\n";
+    }
+
+    ZwaveProtocolState()                                                 = default;
+    ZwaveProtocolState(const ZwaveProtocolState&)                        = delete;
+    auto operator=(const ZwaveProtocolState&) -> ZwaveProtocolState&     = delete;
+    ZwaveProtocolState(ZwaveProtocolState&&) noexcept                    = delete;
+    auto operator=(ZwaveProtocolState&&) noexcept -> ZwaveProtocolState& = delete;
 };
+// NOLINTEND(misc-non-private-member-variables-in-classes)
 
 auto state() -> ZwaveProtocolState&
 {
@@ -786,16 +809,5 @@ __attribute__((constructor(CONFIG_ZWAVE_PROTOCOL_PRIO))) auto startZWaveThread()
     state().running = true;
     state().thread  = std::thread(zwaveCommunicationThread);
 }
-
-__attribute__((destructor(CONFIG_ZWAVE_PROTOCOL_PRIO))) auto stopZWaveThread() -> void
-{
-    state().running = false;
-    state().pathCv.notify_all();
-    state().queueCv.notify_all();
-    if (state().thread.joinable())
-    {
-        state().thread.join();
-    }
-    std::cout << "Z-Wave communication thread shutdown complete\n";
-}
+// Shutdown lives in ZwaveProtocolState's destructor (see comment there).
 }  // namespace

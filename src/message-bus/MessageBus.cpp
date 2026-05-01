@@ -72,6 +72,11 @@ template <typename T> auto MessageBus::publish(const T& value) -> void
     topicRef.callbacks(value);
 }
 
+auto MessageBus::touch() -> void
+{
+    static_cast<void>(bus());
+}
+
 auto MessageBus::unsubscribe(SubscriptionId subscriptionId) -> void
 {
     std::function<void()> remover;

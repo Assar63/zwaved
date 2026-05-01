@@ -1,5 +1,6 @@
 #include "Logger.hpp"
 
+#include "../message-bus/MessageBus.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 
 #include <algorithm>
@@ -57,6 +58,13 @@ struct StreamCapture
     std::string buffer;  // partial-line accumulator, owned by the reader thread
 };
 
+// Forward decls for the destructor below; defined further down where
+// the syslog capture machinery lives.
+#ifdef ZWAVED_LOGGER_SYSLOG
+auto joinCapture(StreamCapture& capture) -> void;
+#endif
+
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct LoggerState
 {
     std::thread thread;
@@ -70,7 +78,39 @@ struct LoggerState
     StreamCapture stdoutCapture;
     StreamCapture stderrCapture;
 #endif
+
+    // Static-state destructor. Must run before the std::thread member
+    // is destroyed — see the long-form note in ExternalApiThread.cpp.
+    // Logger is constructed first (priority 101) so its atexit fires
+    // *last*; by that point Protocol/Monitor/ExternalApi have already
+    // joined their workers, so no producer is still calling Logger::log.
+    ~LoggerState()
+    {
+#ifdef ZWAVED_LOGGER_SYSLOG
+        // Drain the captures *before* the consumer thread, so any
+        // trailing partial line each reader flushes still lands in the
+        // queue while the consumer is alive to drain it.
+        joinCapture(stdoutCapture);
+        joinCapture(stderrCapture);
+#endif
+        {
+            std::scoped_lock const lock(mutex);
+            running = false;
+        }
+        cv.notify_all();
+        if (thread.joinable())
+        {
+            thread.join();
+        }
+    }
+
+    LoggerState()                                          = default;
+    LoggerState(const LoggerState&)                        = delete;
+    auto operator=(const LoggerState&) -> LoggerState&     = delete;
+    LoggerState(LoggerState&&) noexcept                    = delete;
+    auto operator=(LoggerState&&) noexcept -> LoggerState& = delete;
 };
+// NOLINTEND(misc-non-private-member-variables-in-classes)
 
 auto state() -> LoggerState&
 {
@@ -350,6 +390,12 @@ namespace
 {
 __attribute__((constructor(CONFIG_LOGGER_PRIO))) auto startLogger() -> void
 {
+    // Touch the MessageBus singleton first so its atexit handler is
+    // registered before any module's. LIFO destruction then guarantees
+    // the bus outlives every state that may call unsubscribe(...) from
+    // a joining-thread destructor.
+    MessageBus::touch();
+
     state().running = true;
     state().thread  = std::thread(loggerThread);
 #ifdef ZWAVED_LOGGER_SYSLOG
@@ -359,24 +405,5 @@ __attribute__((constructor(CONFIG_LOGGER_PRIO))) auto startLogger() -> void
     Logger::claimStandardStreams();
 #endif
 }
-
-__attribute__((destructor(CONFIG_LOGGER_PRIO))) auto stopLogger() -> void
-{
-#ifdef ZWAVED_LOGGER_SYSLOG
-    // Tear down the captures *before* the consumer thread, so any
-    // trailing line each reader flushes still lands in the queue while
-    // the consumer is alive to drain it.
-    joinCapture(state().stdoutCapture);
-    joinCapture(state().stderrCapture);
-#endif
-    {
-        std::scoped_lock const lock(state().mutex);
-        state().running = false;
-    }
-    state().cv.notify_all();
-    if (state().thread.joinable())
-    {
-        state().thread.join();
-    }
-}
+// Shutdown lives in LoggerState's destructor (see comment there).
 }  // namespace

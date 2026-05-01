@@ -256,6 +256,15 @@ template <typename T> [[nodiscard]] auto subscribe(std::function<void(const T&)>
 template <typename T> auto publish(const T& value) -> void;
 
 auto unsubscribe(SubscriptionId subscriptionId) -> void;
+
+/// Force-construct the bus's internal singleton state. Each module that
+/// uses MessageBus has its own static singleton whose destructor must
+/// outlive the bus — calling `touch()` from the earliest constructor
+/// (Logger, priority 101) registers the bus's atexit handler before any
+/// module's, so by LIFO destruction the bus is the **last** static
+/// teardown to run and joining-thread destructors can still safely
+/// call `unsubscribe(...)`.
+auto touch() -> void;
 }  // namespace MessageBus
 
 #endif  // ZWAVED_MESSAGE_BUS_HPP

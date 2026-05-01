@@ -18,6 +18,10 @@ add_subdirectory(external-api)
 
 target_link_libraries(zwaved PRIVATE PkgConfig::LIBUDEV)
 
+# Generated Version.hpp lives in the build tree alongside the rest of
+# CMake's output; expose it on the daemon's include path.
+target_include_directories(zwaved PRIVATE "${CMAKE_BINARY_DIR}/generated")
+
 # Set output directory to root build directory
 set_target_properties(zwaved PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"

@@ -1,6 +1,7 @@
 #include "DBusBackend.hpp"
 
 #include "../message-bus/MessageBus.hpp"
+#include "Version.hpp"
 
 #include <array>
 #include <atomic>
@@ -273,6 +274,12 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                                      impl->lastInitData.chipType,
                                      impl->lastInitData.chipVersion};
             });
+
+    using DaemonVersionTuple = sdbus::Struct<std::string, std::string>;
+    obj.registerMethod("GetVersion")
+        .onInterface(IFACE_NAME)
+        .implementedAs([]() -> DaemonVersionTuple
+                       { return DaemonVersionTuple{Version::SEMVER, Version::GIT_DESCRIBE}; });
 
     obj.registerSignal(SIGNAL_INCLUSION_STATUS)
         .onInterface(IFACE_NAME)

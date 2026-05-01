@@ -1,7 +1,37 @@
 cmake_minimum_required(VERSION 3.20)
-project(zwaved CXX)
+project(zwaved VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 26)
+
+# Capture a build-tree signal alongside PROJECT_VERSION:
+# `git describe --tags --dirty --always` gives "v0.1.0",
+# "v0.1.0-12-gabcdef0", or "v0.1.0-12-gabcdef0-dirty" depending on
+# how far the working tree is from the most recent tag. Re-evaluated
+# on reconfigure — for live dirty-state tracking, wire a custom
+# target with BYPRODUCTS instead.
+find_package(Git QUIET)
+set(ZWAVED_GIT_DESCRIBE "unknown")
+if(Git_FOUND)
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" describe --tags --dirty --always
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE _zwaved_git_describe
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE _zwaved_git_rc
+    )
+    if(_zwaved_git_rc EQUAL 0 AND NOT "${_zwaved_git_describe}" STREQUAL "")
+        set(ZWAVED_GIT_DESCRIBE "${_zwaved_git_describe}")
+    endif()
+endif()
+
+# Generated header, consumed via #include "Version.hpp" — the path is
+# wired into the daemon's include directories in src/CMakeLists.txt.
+configure_file(
+    "${CMAKE_SOURCE_DIR}/src/Version.hpp.in"
+    "${CMAKE_BINARY_DIR}/generated/Version.hpp"
+    @ONLY
+)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUDEV REQUIRED IMPORTED_TARGET libudev)

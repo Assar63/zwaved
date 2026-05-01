@@ -248,7 +248,7 @@ zwaved exposes the Z-Wave Host API on the **system bus**:
 - **Bus name:** `com.tiunda.ZWaved`
 - **Object:** `/com/tiunda/ZWaved`
 - **Interface:** `com.tiunda.ZWaved1`
-- **Methods:** `AddNode(y y y ay ay)`, `StopAddNode(y)`, `RemoveNode(y y y)`, `StopRemoveNode(y)`, `RemoveFailedNode(y y)`, `SetSwitchBinary(y b y)`, `GetNodes() → a(yyyyay)`, `GetDongleInfo() → (s y ay y)`, `GetInitData() → (y y ay y y)`, `SetAssociation(y y ay y)`, `RemoveAssociation(y y ay y)`, `GetAssociation(y y y)`, `GetAssociationGroupings(y y)`
+- **Methods:** `AddNode(y y y ay ay)`, `StopAddNode(y)`, `RemoveNode(y y y)`, `StopRemoveNode(y)`, `RemoveFailedNode(y y)`, `SetSwitchBinary(y b y)`, `GetNodes() → a(yyyyay)`, `GetDongleInfo() → (s y ay y)`, `GetInitData() → (y y ay y y)`, `SetAssociation(y y ay y)`, `RemoveAssociation(y y ay y)`, `GetAssociation(y y y)`, `GetAssociationGroupings(y y)`, `GetVersion() → (s s)`
 - **Signals:** `NodeInclusionStatus(y y q y y y ay)`, `NodeExclusionStatus(y y q y y y ay)`, `DongleStatus(b s)`, `DongleInfo(s y ay y)`, `InitData(y y ay y y)`, `SendDataStatus(y y)`, `ApplicationCommand(y y ay)`, `SwitchBinaryReport(y y)`, `AssociationReport(y y y y ay)`, `AssociationGroupingsReport(y y)`, `RemoveFailedNodeStatus(y y y y)`
 
 Install the system bus policy once per host:
@@ -313,6 +313,46 @@ What stays in **CMake** (not config-file): the logger sink kind
 (`ZWAVED_BUILD_UTILS`). Anything that affects which code is *linked*
 is build-time; anything that affects observable behavior at *runtime*
 moves to the config file.
+
+## Versioning
+
+The daemon carries its version through two values that show up in
+the same places (CLI, log, D-Bus method) and that originate at
+configure time:
+
+- **`SEMVER`** — `0.1.0`, set in the root `CMakeLists.txt` via
+  `project(zwaved VERSION 0.1.0 LANGUAGES CXX)`. Bumped manually
+  when a release is cut.
+- **`GIT_DESCRIBE`** — the result of `git describe --tags --dirty
+  --always` at configure time. Looks like `v0.1.0` on a clean
+  release tag, `v0.1.0-12-gabcdef0` 12 commits past v0.1.0, or
+  `v0.1.0-12-gabcdef0-dirty` with uncommitted changes.
+
+CMake fills both into `src/Version.hpp.in` and emits the resulting
+`Version.hpp` under the build tree (`cmake-build-*/generated/`).
+
+The version is exposed three ways:
+
+```bash
+# CLI flag — short-circuits before main() runs the loop:
+./cmake-build-gnu/zwaved --version
+# zwaved 0.1.0 (v0.1.0-12-gabcdef0-dirty)
+
+# Logger startup line — written by main() before the wait loop:
+# zwaved 0.1.0 (v0.1.0-12-gabcdef0-dirty) starting
+
+# D-Bus method:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetVersion
+# (ss) "0.1.0" "v0.1.0-12-gabcdef0-dirty"
+```
+
+The version is captured at *configure* time, not build time. Run
+`cmake --preset gnu` (or just `cmake .` in the build dir) to refresh
+the git-describe value after committing or tagging — incremental
+builds keep the value pinned to whatever was current the last time
+configure ran. (Future enhancement: a custom target with
+`BYPRODUCTS` that re-evaluates `git describe` on every build.)
 
 ## Logging
 

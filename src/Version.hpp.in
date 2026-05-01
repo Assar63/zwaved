@@ -1,0 +1,29 @@
+#ifndef ZWAVED_VERSION_HPP
+#define ZWAVED_VERSION_HPP
+
+// Generated from src/Version.hpp.in by CMake — do not edit the
+// generated file in cmake-build-*/generated/Version.hpp directly.
+// The two strings below are populated at configure time:
+//
+//   SEMVER         from `project(zwaved VERSION x.y.z)` in the root
+//                  CMakeLists.txt — bumped manually when a release
+//                  is cut.
+//   GIT_DESCRIBE   from `git describe --tags --dirty --always` —
+//                  the build-tree's position relative to the most
+//                  recent tag, with a `-dirty` suffix when the
+//                  working tree differs from HEAD.
+//
+// Examples of GIT_DESCRIBE:
+//   "v0.1.0"                    — clean, on a release tag.
+//   "v0.1.0-12-gabcdef0"        — 12 commits past v0.1.0.
+//   "v0.1.0-12-gabcdef0-dirty"  — same, with uncommitted changes.
+//   "abcdef0"                   — no tags exist yet; just the SHA.
+//   "unknown"                   — git unavailable at configure time.
+
+namespace Version
+{
+constexpr const char* SEMVER       = "@PROJECT_VERSION@";
+constexpr const char* GIT_DESCRIBE = "@ZWAVED_GIT_DESCRIBE@";
+}  // namespace Version
+
+#endif  // ZWAVED_VERSION_HPP

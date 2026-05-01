@@ -23,6 +23,7 @@ companion `zwave-terminal` client, and packaging.
 - [ ] **Network status** — current health, ongoing operations, errors.
 - [ ] **Network reset** — wipe and reinitialize the network.
 - [x] **Remove failed node** — `RemoveFailedNode` over D-Bus drives `FUNC_ID_ZW_REMOVE_FAILED_NODE_ID` (0x61); response + callback emitted as `RemoveFailedNodeStatus` and the registry trims on success.
+- [x] **Auto-lifeline on inclusion** — when a freshly-included node advertises `COMMAND_CLASS_ZWAVEPLUS_INFO` + `COMMAND_CLASS_ASSOCIATION` in its supported list, the protocol thread queues `SetAssociation(group=1, members=[controllerNodeId])` itself at the terminal step of inclusion.
 
 ### Command classes
 

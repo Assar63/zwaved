@@ -61,10 +61,10 @@ busctl --system monitor com.tiunda.ZWaved
 Independently of any method call, `zwaved` broadcasts `DongleStatus(b s)`
 whenever the Z-Wave dongle is plugged in or unplugged:
 
-| Parameter | Type | Meaning |
-|-----------|------|---------|
-| `connected` | `b` (BOOLEAN) | `true` when the TTY has been discovered; `false` on detach |
-| `ttyPath` | `s` (STRING) | TTY path (e.g. `/dev/ttyACM0`) when connected; empty otherwise |
+| Parameter   | Type          | Meaning                                                        |
+|-------------|---------------|----------------------------------------------------------------|
+| `connected` | `b` (BOOLEAN) | `true` when the TTY has been discovered; `false` on detach     |
+| `ttyPath`   | `s` (STRING)  | TTY path (e.g. `/dev/ttyACM0`) when connected; empty otherwise |
 
 The signal appears in the same `busctl --system monitor` stream as the
 inclusion/exclusion signals. It is fire-and-forget — a client that
@@ -74,21 +74,21 @@ or wait for the next hot-plug to determine current state.
 
 ## 2. Method reference
 
-| Method | Signature | Purpose |
-|--------|-----------|---------|
-| `AddNode` | `y y y ay ay` (mode, flags, sessionId, nwiHomeId, authHomeId) | Start an inclusion of any/SmartStart variant |
-| `StopAddNode` | `y` (sessionId) | Send Mode `0x05` to stop an in-progress inclusion |
-| `RemoveNode` | `y y y` (mode, flags, sessionId) | Start an exclusion |
-| `StopRemoveNode` | `y` (sessionId) | Send Mode `0x05` to stop an in-progress exclusion |
-| `RemoveFailedNode` | `y y` (nodeId, sessionId) | Drive `FUNC_ID_ZW_REMOVE_FAILED_NODE_ID` (0x61) for a node that has stopped responding; emits `RemoveFailedNodeStatus` for both the immediate response and the final outcome |
-| `SetSwitchBinary` | `y b y` (nodeId, on, callbackId) | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)` |
-| `GetNodes` | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes) | Return the in-memory list of currently-included nodes |
-| `GetDongleInfo` | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId) | Return the dongle introspection captured when the serial port opened |
-| `GetInitData` | `→ (y y ay y y)` (serialApiVersion, capabilities, nodeIds, chipType, chipVersion) | Return the SERIAL_API_GET_INIT_DATA response captured at startup; `nodeIds` is the expanded node bitmap |
-| `SetAssociation` | `y y ay y` (nodeId, groupId, members, callbackId) | Add `members` to `groupId` on `nodeId`'s association table (CC 0x85 cmd 0x01) |
-| `RemoveAssociation` | `y y ay y` (nodeId, groupId, members, callbackId) | Remove `members` from `groupId` (empty `members` means *all*) |
-| `GetAssociation` | `y y y` (nodeId, groupId, callbackId) | Query the current members of `groupId`; result arrives as `AssociationReport` |
-| `GetAssociationGroupings` | `y y` (nodeId, callbackId) | Query how many association groups `nodeId` exposes; result arrives as `AssociationGroupingsReport` |
+| Method                    | Signature                                                                         | Purpose                                                                                                                                                                      |
+|---------------------------|-----------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `AddNode`                 | `y y y ay ay` (mode, flags, sessionId, nwiHomeId, authHomeId)                     | Start an inclusion of any/SmartStart variant                                                                                                                                 |
+| `StopAddNode`             | `y` (sessionId)                                                                   | Send Mode `0x05` to stop an in-progress inclusion                                                                                                                            |
+| `RemoveNode`              | `y y y` (mode, flags, sessionId)                                                  | Start an exclusion                                                                                                                                                           |
+| `StopRemoveNode`          | `y` (sessionId)                                                                   | Send Mode `0x05` to stop an in-progress exclusion                                                                                                                            |
+| `RemoveFailedNode`        | `y y` (nodeId, sessionId)                                                         | Drive `FUNC_ID_ZW_REMOVE_FAILED_NODE_ID` (0x61) for a node that has stopped responding; emits `RemoveFailedNodeStatus` for both the immediate response and the final outcome |
+| `SetSwitchBinary`         | `y b y` (nodeId, on, callbackId)                                                  | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)`                                                                   |
+| `GetNodes`                | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes)                | Return the in-memory list of currently-included nodes                                                                                                                        |
+| `GetDongleInfo`           | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId)            | Return the dongle introspection captured when the serial port opened                                                                                                         |
+| `GetInitData`             | `→ (y y ay y y)` (serialApiVersion, capabilities, nodeIds, chipType, chipVersion) | Return the SERIAL_API_GET_INIT_DATA response captured at startup; `nodeIds` is the expanded node bitmap                                                                      |
+| `SetAssociation`          | `y y ay y` (nodeId, groupId, members, callbackId)                                 | Add `members` to `groupId` on `nodeId`'s association table (CC 0x85 cmd 0x01)                                                                                                |
+| `RemoveAssociation`       | `y y ay y` (nodeId, groupId, members, callbackId)                                 | Remove `members` from `groupId` (empty `members` means *all*)                                                                                                                |
+| `GetAssociation`          | `y y y` (nodeId, groupId, callbackId)                                             | Query the current members of `groupId`; result arrives as `AssociationReport`                                                                                                |
+| `GetAssociationGroupings` | `y y` (nodeId, callbackId)                                                        | Query how many association groups `nodeId` exposes; result arrives as `AssociationGroupingsReport`                                                                           |
 
 `y` = `BYTE` (uint8), `q` = `UINT16`, `ay` = array of bytes.
 
@@ -113,13 +113,13 @@ After issuing the call, **press the inclusion button on the new node**.
 Watch the monitor terminal for `NodeInclusionStatus` signals. The expected
 status progression is:
 
-| Status | Meaning |
-|--------|---------|
-| `0x01` | Network Inclusion Started (controller is listening) |
-| `0x02` | Node found |
-| `0x03` | Inclusion ongoing — End Node |
-| `0x04` | Inclusion ongoing — Controller Node |
-| `0x05` | Protocol part complete; neighbor discovery |
+| Status | Meaning                                                    |
+|--------|------------------------------------------------------------|
+| `0x01` | Network Inclusion Started (controller is listening)        |
+| `0x02` | Node found                                                 |
+| `0x03` | Inclusion ongoing — End Node                               |
+| `0x04` | Inclusion ongoing — Controller Node                        |
+| `0x05` | Protocol part complete; neighbor discovery                 |
 | `0x06` | Inclusion completed — call `StopAddNode` to return to idle |
 
 Once you see `0x06`, stop the controller:
@@ -182,12 +182,12 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 `mode=1`, `flags=0`, `sessionId=43`. **Press the exclusion button on
 the target device.** Expected `NodeExclusionStatus` progression:
 
-| Status | Meaning |
-|--------|---------|
-| `0x01` | Network Exclusion Started |
-| `0x02` | Node found |
-| `0x03` | Exclusion ongoing — End Node |
-| `0x04` | Exclusion ongoing — Controller Node |
+| Status | Meaning                                     |
+|--------|---------------------------------------------|
+| `0x01` | Network Exclusion Started                   |
+| `0x02` | Node found                                  |
+| `0x03` | Exclusion ongoing — End Node                |
+| `0x04` | Exclusion ongoing — Controller Node         |
 | `0x06` | Exclusion completed — call `StopRemoveNode` |
 
 Then:
@@ -212,10 +212,10 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 `nodeId=11`, `sessionId=7`. Two `RemoveFailedNodeStatus(y y y y)`
 signals follow, both echoing the same `nodeId` / `sessionId`:
 
-| `phase` | Meaning | `status` decoded against |
-|---------|---------|--------------------------|
-| `0` | Response — whether the dongle accepted the request | `STARTED=0x00`, `NOT_PRIMARY=0x02`, `NO_CALLBACK=0x04`, `NODE_NOT_FOUND=0x08`, `BUSY=0x10`, `FAIL=0x20` |
-| `1` | Result — final outcome (only emitted if response was `STARTED`) | `NODE_OK=0x00` (the node responded — not a failed node), `REMOVED=0x01`, `NOT_REMOVED=0x02` |
+| `phase` | Meaning                                                         | `status` decoded against                                                                                |
+|---------|-----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| `0`     | Response — whether the dongle accepted the request              | `STARTED=0x00`, `NOT_PRIMARY=0x02`, `NO_CALLBACK=0x04`, `NODE_NOT_FOUND=0x08`, `BUSY=0x10`, `FAIL=0x20` |
+| `1`     | Result — final outcome (only emitted if response was `STARTED`) | `NODE_OK=0x00` (the node responded — not a failed node), `REMOVED=0x01`, `NOT_REMOVED=0x02`             |
 
 A `phase=1, status=0x01` (REMOVED) success automatically trims the node
 from the registry; subsequent `GetNodes` calls will not include it.
@@ -236,13 +236,13 @@ from the `mode` argument; you set the optional bits via `flags`.
 
 ### `AddNode` flags
 
-| Bit | Name | Meaning |
-|-----|------|---------|
-| 7   | Power     | Use high power for inclusion |
-| 6   | NWI       | Network Wide Inclusion |
-| 5   | Protocol  | `1` = Z-Wave Long Range, `0` = Z-Wave classic |
-| 4   | SFLND     | Skip FL nodes during neighbor discovery |
-| 3..0 | Mode    | Echoed from the `mode` argument by zwaved |
+| Bit  | Name     | Meaning                                       |
+|------|----------|-----------------------------------------------|
+| 7    | Power    | Use high power for inclusion                  |
+| 6    | NWI      | Network Wide Inclusion                        |
+| 5    | Protocol | `1` = Z-Wave Long Range, `0` = Z-Wave classic |
+| 4    | SFLND    | Skip FL nodes during neighbor discovery       |
+| 3..0 | Mode     | Echoed from the `mode` argument by zwaved     |
 
 Examples:
 
@@ -252,12 +252,12 @@ Examples:
 
 ### `RemoveNode` flags
 
-| Bit | Name | Meaning |
-|-----|------|---------|
-| 7   | Power | Use high power for exclusion |
-| 6   | NWE   | Network Wide Exclusion |
-| 5   | Reserved | Must be 0 |
-| 3..0 | Mode | Echoed from `mode` |
+| Bit  | Name     | Meaning                      |
+|------|----------|------------------------------|
+| 7    | Power    | Use high power for exclusion |
+| 6    | NWE      | Network Wide Exclusion       |
+| 5    | Reserved | Must be 0                    |
+| 3..0 | Mode     | Echoed from `mode`           |
 
 ## 9. Status-byte reference
 
@@ -265,17 +265,17 @@ Both inclusion and exclusion use the same low values for the early
 states; the diverging meanings of higher values are summarized here.
 Source: spec Tables 4.124 and 4.134.
 
-| Status | Inclusion meaning | Exclusion meaning |
-|--------|-------------------|-------------------|
-| `0x01` | Network Inclusion Started | Network Exclusion Started |
-| `0x02` | Node found | Node found |
-| `0x03` | Inclusion ongoing — End Node | Exclusion ongoing — End Node |
-| `0x04` | Inclusion ongoing — Controller Node | Exclusion ongoing — Controller Node |
-| `0x05` | Inclusion complete (protocol part) | Reserved |
-| `0x06` | Inclusion completed | Exclusion completed |
-| `0x07` | Inclusion failed | Exclusion failed |
-| `0x0B` | Neighbors Discovery skipping FL nodes done | — |
-| `0x23` | Not primary controller | Not primary controller |
+| Status | Inclusion meaning                          | Exclusion meaning                   |
+|--------|--------------------------------------------|-------------------------------------|
+| `0x01` | Network Inclusion Started                  | Network Exclusion Started           |
+| `0x02` | Node found                                 | Node found                          |
+| `0x03` | Inclusion ongoing — End Node               | Exclusion ongoing — End Node        |
+| `0x04` | Inclusion ongoing — Controller Node        | Exclusion ongoing — Controller Node |
+| `0x05` | Inclusion complete (protocol part)         | Reserved                            |
+| `0x06` | Inclusion completed                        | Exclusion completed                 |
+| `0x07` | Inclusion failed                           | Exclusion failed                    |
+| `0x0B` | Neighbors Discovery skipping FL nodes done | —                                   |
+| `0x23` | Not primary controller                     | Not primary controller              |
 
 ## 10. Troubleshooting
 
@@ -320,14 +320,14 @@ SendDataStatus y y 7 0
 The first byte is the echoed `callbackId`, the second is the
 `txStatus`:
 
-| `txStatus` | Meaning |
-|---|---|
-| `0x00` | Transmit complete OK (node ACK'd) |
-| `0x01` | No ACK from destination |
-| `0x02` | Transmit failed |
-| `0x03` | Routing not idle |
-| `0x04` | No route to destination |
-| `0x05` | Verified delivery |
+| `txStatus` | Meaning                           |
+|------------|-----------------------------------|
+| `0x00`     | Transmit complete OK (node ACK'd) |
+| `0x01`     | No ACK from destination           |
+| `0x02`     | Transmit failed                   |
+| `0x03`     | Routing not idle                  |
+| `0x04`     | No route to destination           |
+| `0x05`     | Verified delivery                 |
 
 A `0x01` (no ACK) usually means the node is asleep or out of range.
 A `0x02` typically means the dongle accepted the request but
@@ -424,6 +424,27 @@ should accumulate `members` across reports until they see zero.
 `SendDataStatus` arrives separately for each Set/Remove/Get/Groupings
 call (echoing the `callbackId` you passed); a successful Get/Groupings
 will be followed shortly after by the matching Report signal.
+
+### Auto-lifeline on inclusion
+
+Z-Wave Plus nodes ship with their lifeline (group 1) empty and expect
+the including controller to populate it. The daemon does this
+automatically: when an inclusion completes and the node's *supported*
+CC list (the bytes before `0xEF` `COMMAND_CLASS_MARK`) contains both
+`0x5E` (`COMMAND_CLASS_ZWAVEPLUS_INFO`) and `0x85`
+(`COMMAND_CLASS_ASSOCIATION`), zwaved queues a
+`SetAssociation(nodeId, group=1, members=[controllerNodeId])` of its
+own at the end of the inclusion sequence. No client action is needed.
+
+The auto-lifeline `SetAssociation` is sent with `callbackId=0`, so it
+does not produce a `SendDataStatus` signal; the operator-visible
+artefact is the daemon log line
+`[ProtocolThread] auto-lifeline: SetAssociation node=N group=1 controller=C`.
+Re-running the auto-lifeline on an already-populated group is a no-op
+on the wire (Association SET is idempotent for already-listed members),
+so re-inclusion of the same device is safe. Non-Z-Wave-Plus nodes (no
+0x5E in the supported list) are left untouched — set them up with the
+explicit `[L]` terminal action or `SetAssociation` D-Bus method.
 
 ## 15. Existing-network discovery (`InitData`)
 

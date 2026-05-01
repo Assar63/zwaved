@@ -9,6 +9,7 @@
 #include "application/Association.hpp"
 #include "application/BinarySwitch.hpp"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -22,6 +23,7 @@
 #include <thread>
 #include <type_traits>
 #include <variant>
+#include <vector>
 
 #include <sys/prctl.h>
 
@@ -53,6 +55,16 @@ constexpr int SEND_DATA_CALLBACK_TIMEOUT_MS = 5000;
 // callback, so we just sleep long enough for a typical Z-Wave transmit
 // to clear before issuing the next SendData.
 constexpr int SEND_DATA_NO_CALLBACK_DELAY_MS = 300;
+
+// CC wire constants used for the Z-Wave Plus auto-lifeline hook.
+// COMMAND_CLASS_MARK separates the supported list (CCs the node will
+// answer) from the controlled list (CCs it will emit) inside an
+// inclusion's NodeInfo. We only count the supported half — a node that
+// merely *emits* Association traffic isn't one we can SET on.
+constexpr std::uint8_t CC_ZWAVEPLUS_INFO = 0x5E;
+constexpr std::uint8_t CC_ASSOCIATION    = 0x85;
+constexpr std::uint8_t CC_MARK           = 0xEF;
+constexpr std::uint8_t LIFELINE_GROUP_ID = 1;
 
 /// Internal protocol-thread request variant. Bus-command subscribers
 /// translate semantic events into one of these and push to the queue;
@@ -92,6 +104,18 @@ struct ZwaveProtocolState
     // originating nodeId. Only one removal is in flight at a time
     // because the same request queue serializes them.
     std::optional<HostApi::RemoveFailedNodeRequest> activeFailedNodeRemoval;
+
+    // Cached from FUNC_ID_MEMORY_GET_ID introspection — needed as the
+    // member byte for the Z-Wave Plus auto-lifeline SetAssociation.
+    std::optional<std::uint8_t> controllerNodeId;
+
+    // If a freshly-included node advertised CC_ZWAVEPLUS_INFO and
+    // CC_ASSOCIATION in its supported list, the protocol thread queues
+    // a SetAssociation(group=1, members=[controllerNodeId]) once the
+    // inclusion reaches its terminal status. The pending nodeId is
+    // captured here on the first callback that carries node info, then
+    // dispatched (and cleared) on the terminal callback.
+    std::optional<std::uint8_t> pendingLifelineNodeId;
 
     // Bus subscription IDs, released on shutdown.
     MessageBus::SubscriptionId dongleSubscription{0};
@@ -138,6 +162,34 @@ auto clearRequests() -> void
 {
     std::scoped_lock const lock(state().queueMutex);
     state().queue.clear();
+}
+
+/// True if `commandClasses` (as captured during inclusion) advertises
+/// both Z-Wave Plus Info and Association in its *supported* half — the
+/// portion before the COMMAND_CLASS_MARK separator. Z-Wave Plus devices
+/// ship with an empty lifeline group (group 1) and expect the including
+/// controller to populate it; this predicate is the gate for the
+/// auto-lifeline hook.
+auto needsAutoLifeline(const std::vector<std::uint8_t>& commandClasses) -> bool
+{
+    bool hasPlus  = false;
+    bool hasAssoc = false;
+    for (const auto cls : commandClasses)
+    {
+        if (cls == CC_MARK)
+        {
+            break;
+        }
+        if (cls == CC_ZWAVEPLUS_INFO)
+        {
+            hasPlus = true;
+        }
+        else if (cls == CC_ASSOCIATION)
+        {
+            hasAssoc = true;
+        }
+    }
+    return hasPlus && hasAssoc;
 }
 
 auto onDongleStatus(const MessageBus::DongleStatus& status) -> void
@@ -457,6 +509,10 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
                                    .genericType    = nodeCb->genericDeviceType,
                                    .specificType   = nodeCb->specificDeviceType,
                                    .commandClasses = nodeCb->commandClasses});
+                if (needsAutoLifeline(nodeCb->commandClasses))
+                {
+                    state().pendingLifelineNodeId = static_cast<std::uint8_t>(nodeCb->nodeId);
+                }
             }
         }
         // Exclusion: only nodeId is needed; trigger on a session-ending status.
@@ -468,6 +524,26 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
 
         if (HostApi::isTerminalStatus(nodeCb->commandId, nodeCb->status))
         {
+            // Z-Wave Plus auto-lifeline: queue the SetAssociation now that
+            // inclusion has reached its terminal step, so the node is
+            // ready to answer application-layer commands. Goes through the
+            // same request queue as any user-issued request, so it serializes
+            // naturally with anything else the dongle is already routing.
+            if (const auto pendingNode = state().pendingLifelineNodeId, controller = state().controllerNodeId;
+                nodeCb->commandId == HostApi::CMD_ADD_NODE_TO_NETWORK && pendingNode.has_value() &&
+                controller.has_value())
+            {
+                const std::array<std::uint8_t, 1> members{*controller};
+                HostApi::SendDataRequest req{};
+                req.nodeId     = *pendingNode;
+                req.data       = Association::encodeSet(LIFELINE_GROUP_ID, std::span<const std::uint8_t>(members));
+                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+                req.callbackId = 0;  // fire-and-forget; SendDataStatus would only be noise
+                pushRequest(req);
+                std::cout << "[ProtocolThread] auto-lifeline: SetAssociation node=" << static_cast<int>(*pendingNode)
+                          << " group=1 controller=" << static_cast<int>(*controller) << '\n';
+            }
+            state().pendingLifelineNodeId.reset();
             tracker.end();
         }
     }
@@ -677,6 +753,7 @@ auto zwaveCommunicationThread() -> void
             std::cout << "[ProtocolThread] dongle " << info.libraryVersion << " (lib type "
                       << static_cast<int>(info.libraryType) << ", controller node "
                       << static_cast<int>(info.controllerNodeId) << ")\n";
+            state().controllerNodeId = info.controllerNodeId;
             // Bind the registry to this network *before* seeding from
             // init-data, so seeded entries land in the right home_id.
             NodeRegistry::setHomeId(info.homeId);
@@ -697,6 +774,7 @@ auto zwaveCommunicationThread() -> void
 
         clearRequests();
         state().activeFailedNodeRemoval.reset();
+        state().pendingLifelineNodeId.reset();
         runConnectedSession(port);
     }
 

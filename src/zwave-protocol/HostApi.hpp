@@ -20,6 +20,7 @@ constexpr uint8_t CMD_GET_VERSION              = 0x15;
 constexpr uint8_t CMD_MEMORY_GET_ID            = 0x20;
 constexpr uint8_t CMD_ADD_NODE_TO_NETWORK      = 0x4A;
 constexpr uint8_t CMD_REMOVE_NODE_FROM_NETWORK = 0x4B;
+constexpr uint8_t CMD_REMOVE_FAILED_NODE_ID    = 0x61;
 
 // FUNC_ID_GET_VERSION library types (response byte 12).
 constexpr uint8_t LIBRARY_TYPE_STATIC_CONTROLLER = 1;
@@ -143,6 +144,45 @@ struct ApplicationCommand
     std::vector<uint8_t> ccData;
 };
 
+/// Initial-frame parameters for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61).
+/// Removes an unresponsive node from the controller's failed-node list.
+/// The dongle answers synchronously with a Response frame (whether the
+/// removal could start) and, if it could, later with a Callback frame
+/// carrying the operation outcome.
+struct RemoveFailedNodeRequest
+{
+    uint8_t nodeId      = 0;
+    SessionId sessionId = 0;
+};
+
+/// Decoded RESPONSE frame for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61) —
+/// indicates whether the dongle accepted the removal request. Final
+/// outcome arrives separately as a callback (RemoveFailedNodeCallback).
+struct RemoveFailedNodeResponse
+{
+    static constexpr uint8_t STATUS_STARTED        = 0x00;
+    static constexpr uint8_t STATUS_NOT_PRIMARY    = 0x02;
+    static constexpr uint8_t STATUS_NO_CALLBACK    = 0x04;
+    static constexpr uint8_t STATUS_NODE_NOT_FOUND = 0x08;
+    static constexpr uint8_t STATUS_PROCESS_BUSY   = 0x10;
+    static constexpr uint8_t STATUS_REMOVE_FAIL    = 0x20;
+
+    uint8_t status = STATUS_REMOVE_FAIL;
+};
+
+/// Decoded CALLBACK frame for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61) —
+/// emitted only if the response carried STATUS_STARTED. Reports the
+/// final outcome of the removal.
+struct RemoveFailedNodeCallback
+{
+    static constexpr uint8_t STATUS_NODE_OK     = 0x00;
+    static constexpr uint8_t STATUS_REMOVED     = 0x01;
+    static constexpr uint8_t STATUS_NOT_REMOVED = 0x02;
+
+    SessionId sessionId = 0;
+    uint8_t status      = STATUS_NOT_REMOVED;
+};
+
 /// Decoded callback payload for either Add (0x4A) or Remove (0x4B).
 struct NodeStatusCallback
 {
@@ -158,6 +198,7 @@ struct NodeStatusCallback
 
 [[nodiscard]] auto encodeAddNode(const AddNodeRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeRemoveNode(const RemoveNodeRequest& request) -> ZwaveDataFrame;
+[[nodiscard]] auto encodeRemoveFailedNode(const RemoveFailedNodeRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeSendData(const SendDataRequest& request) -> ZwaveDataFrame;
 
 /// Decode a FUNC_ID_ZW_SEND_DATA (0x13) callback. Returns std::nullopt
@@ -186,6 +227,14 @@ struct NodeStatusCallback
 /// not a recognized callback or the payload is too short.
 [[nodiscard]] auto decodeNodeCallback(const ZwaveDataFrame& frame,
                                       bool nodeId16Bit = false) -> std::optional<NodeStatusCallback>;
+
+/// Decode the RESPONSE frame for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61).
+[[nodiscard]] auto decodeRemoveFailedNodeResponse(const ZwaveDataFrame& frame)
+    -> std::optional<RemoveFailedNodeResponse>;
+
+/// Decode the CALLBACK frame for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61).
+[[nodiscard]] auto decodeRemoveFailedNodeCallback(const ZwaveDataFrame& frame)
+    -> std::optional<RemoveFailedNodeCallback>;
 }  // namespace HostApi
 
 #endif  // ZWAVED_HOST_API_HPP

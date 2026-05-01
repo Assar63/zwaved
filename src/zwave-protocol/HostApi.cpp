@@ -111,6 +111,19 @@ auto HostApi::encodeRemoveNode(const RemoveNodeRequest& request) -> ZwaveDataFra
     return frame;
 }
 
+auto HostApi::encodeRemoveFailedNode(const RemoveFailedNodeRequest& request) -> ZwaveDataFrame
+{
+    ZwaveDataFrame frame;
+    frame.setHeader(ZwaveDataFrame::FrameType::REQUEST, CMD_REMOVE_FAILED_NODE_ID);
+
+    std::vector<uint8_t> payload;
+    payload.reserve(2);
+    payload.push_back(request.nodeId);
+    payload.push_back(request.sessionId);
+    frame.setPayload(payload.data(), payload.size());
+    return frame;
+}
+
 auto HostApi::encodeSendData(const SendDataRequest& request) -> ZwaveDataFrame
 {
     ZwaveDataFrame frame;
@@ -267,6 +280,43 @@ auto HostApi::decodeMemoryId(const ZwaveDataFrame& frame) -> std::optional<Memor
         out.homeId.at(idx) = payload[idx];
     }
     out.controllerNodeId = payload[HOMEID_LEN];
+    return out;
+}
+
+auto HostApi::decodeRemoveFailedNodeResponse(const ZwaveDataFrame& frame) -> std::optional<RemoveFailedNodeResponse>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_REMOVE_FAILED_NODE_ID ||
+        frame.getType() != ZwaveDataFrame::FrameType::RESPONSE)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload  = frame.getPayload();
+    std::size_t const total = frame.getPayloadSize();
+    if (payload == nullptr || total < 1)
+    {
+        return std::nullopt;
+    }
+    RemoveFailedNodeResponse out;
+    out.status = payload[0];
+    return out;
+}
+
+auto HostApi::decodeRemoveFailedNodeCallback(const ZwaveDataFrame& frame) -> std::optional<RemoveFailedNodeCallback>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_REMOVE_FAILED_NODE_ID ||
+        frame.getType() != ZwaveDataFrame::FrameType::REQUEST)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload  = frame.getPayload();
+    std::size_t const total = frame.getPayloadSize();
+    if (payload == nullptr || total < 2)
+    {
+        return std::nullopt;
+    }
+    RemoveFailedNodeCallback out;
+    out.sessionId = payload[0];
+    out.status    = payload[1];
     return out;
 }
 

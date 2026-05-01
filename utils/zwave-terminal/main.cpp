@@ -282,6 +282,7 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [g] Get association group count");
     mvprintw(row++, 0, "  [L] Set lifeline (controller -> group 1)");
     mvprintw(row++, 0, "  [l] List included nodes");
+    mvprintw(row++, 0, "  [f] Remove failed node (prompts for node id)");
     mvprintw(row++, 0, "  [i] Dongle info");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));
     mvprintw(row++, 0, "  [q] Quit");
@@ -349,6 +350,19 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 stream << "SendDataStatus callback=" << static_cast<unsigned>(callbackId) << " status=0x" << std::hex
                        << std::setw(2) << std::setfill('0') << static_cast<unsigned>(txStatus) << " ("
                        << formatTxStatus(txStatus) << ")";
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("RemoveFailedNodeStatus")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t nodeId, std::uint8_t sessionId, std::uint8_t phase, std::uint8_t status) -> void
+            {
+                std::ostringstream stream;
+                stream << "RemoveFailedNodeStatus node=" << static_cast<unsigned>(nodeId)
+                       << " session=" << static_cast<unsigned>(sessionId) << (phase == 0 ? " response=" : " result=")
+                       << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(status);
                 logLine(stream.str());
             });
 
@@ -790,6 +804,29 @@ auto handleSetLifeline(sdbus::IProxy& proxy, std::uint8_t& callbackCounter) -> v
     }
 }
 
+auto handleRemoveFailedNode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptByte("Failed node ID (1-232):", NODE_ID_MIN, NODE_ID_MAX);
+    if (!nodeId.has_value())
+    {
+        logLine("RemoveFailedNode: cancelled or invalid node id");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("RemoveFailedNode").onInterface(IFACE_NAME).withArguments(*nodeId, sessionCounter);
+        std::ostringstream stream;
+        stream << "RemoveFailedNode node=" << static_cast<unsigned>(*nodeId)
+               << " session=" << static_cast<unsigned>(sessionCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"RemoveFailedNode failed: "} + err.what());
+    }
+}
+
 auto handleListNodes(sdbus::IProxy& proxy) -> void
 {
     using NodeTuple = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t, std::vector<std::uint8_t>>;
@@ -924,6 +961,10 @@ auto main() -> int
             else if (key == 'l' || key == 'L')
             {
                 handleListNodes(*proxy);
+            }
+            else if (key == 'f' || key == 'F')
+            {
+                handleRemoveFailedNode(*proxy, sessionCounter);
             }
             else if (key == 'i' || key == 'I')
             {

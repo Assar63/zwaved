@@ -22,6 +22,7 @@ companion `zwave-terminal` client, and packaging.
 - [ ] **Network info** — aggregate view (node count, statuses, activity).
 - [ ] **Network status** — current health, ongoing operations, errors.
 - [ ] **Network reset** — wipe and reinitialize the network.
+- [x] **Remove failed node** — `RemoveFailedNode` over D-Bus drives `FUNC_ID_ZW_REMOVE_FAILED_NODE_ID` (0x61); response + callback emitted as `RemoveFailedNodeStatus` and the registry trims on success.
 
 ### Command classes
 
@@ -84,6 +85,7 @@ companion `zwave-terminal` client, and packaging.
 ### Control
 
 - [x] **Binary Switch control** — `[3] ON` / `[4] OFF` prompt for node ID and issue `SetSwitchBinary`; activity pane logs `SendDataStatus` decode and unsolicited `SwitchBinaryReport`.
+- [x] **Remove failed node** — `[f]` prompts for a node ID and issues `RemoveFailedNode`; activity pane decodes the `RemoveFailedNodeStatus` response + result phases.
 - [ ] **Node control: other CCs** — multilevel switch, thermostat, door lock, etc.
 - [ ] **Scene control** — trigger predefined multi-node scenes.
 

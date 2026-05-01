@@ -128,6 +128,24 @@ struct SendDataCallback
     std::uint8_t txStatus   = 0;
 };
 
+/// Progress signal for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61). Emitted
+/// twice for a typical removal: first with phase = PHASE_RESPONSE
+/// carrying the dongle's accept/reject (status uses the response-status
+/// table), then — only if the response was STARTED — with
+/// phase = PHASE_CALLBACK carrying the final outcome (status uses the
+/// operation-status table). Synchronous-fail responses (NOT_PRIMARY,
+/// NODE_NOT_FOUND, BUSY, FAIL) emit only the first.
+struct RemoveFailedNodeStatus
+{
+    static constexpr std::uint8_t PHASE_RESPONSE = 0;
+    static constexpr std::uint8_t PHASE_CALLBACK = 1;
+
+    std::uint8_t nodeId    = 0;
+    std::uint8_t sessionId = 0;
+    std::uint8_t phase     = PHASE_RESPONSE;
+    std::uint8_t status    = 0;  // interpretation depends on phase
+};
+
 // ---- Command events (external transports → protocol thread) -------
 
 /// Initiate or stop FUNC_ID_ZW_ADD_NODE_TO_NETWORK (0x4A). Mirrors the
@@ -161,6 +179,15 @@ struct RemoveNodeCommand
     std::uint8_t mode      = MODE_ANY_NODE;
     bool power             = false;
     bool nwe               = false;
+    std::uint8_t sessionId = 0;
+};
+
+/// Drive FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61). The target node must
+/// already be on the controller's failed-node list (i.e. it has stopped
+/// responding) — the dongle answers with NODE_NOT_FOUND otherwise.
+struct RemoveFailedNodeCommand
+{
+    std::uint8_t nodeId    = 0;
     std::uint8_t sessionId = 0;
 };
 

@@ -60,7 +60,10 @@ constexpr int SEND_DATA_NO_CALLBACK_DELAY_MS = 300;
 /// link via FrameTransport. Not exposed beyond this translation unit —
 /// external transports speak in MessageBus events, not host-API wire
 /// shapes.
-using Request = std::variant<HostApi::AddNodeRequest, HostApi::RemoveNodeRequest, HostApi::SendDataRequest>;
+using Request = std::variant<HostApi::AddNodeRequest,
+                             HostApi::RemoveNodeRequest,
+                             HostApi::RemoveFailedNodeRequest,
+                             HostApi::SendDataRequest>;
 
 struct ZwaveProtocolState
 {
@@ -83,10 +86,18 @@ struct ZwaveProtocolState
     std::condition_variable queueCv;
     std::deque<Request> queue;
 
+    // Tracks the currently-dispatched Remove Failed Node request so the
+    // (response, callback) frame pair — neither of which carries nodeId
+    // on the wire alongside sessionId — can be reported with the
+    // originating nodeId. Only one removal is in flight at a time
+    // because the same request queue serializes them.
+    std::optional<HostApi::RemoveFailedNodeRequest> activeFailedNodeRemoval;
+
     // Bus subscription IDs, released on shutdown.
     MessageBus::SubscriptionId dongleSubscription{0};
     MessageBus::SubscriptionId addNodeSubscription{0};
     MessageBus::SubscriptionId removeNodeSubscription{0};
+    MessageBus::SubscriptionId removeFailedNodeSubscription{0};
     MessageBus::SubscriptionId switchBinarySubscription{0};
     MessageBus::SubscriptionId setAssociationSubscription{0};
     MessageBus::SubscriptionId removeAssociationSubscription{0};
@@ -166,6 +177,14 @@ auto onRemoveNodeCommand(const MessageBus::RemoveNodeCommand& cmd) -> void
     req.mode      = cmd.mode;
     req.power     = cmd.power;
     req.nwe       = cmd.nwe;
+    req.sessionId = cmd.sessionId;
+    pushRequest(req);
+}
+
+auto onRemoveFailedNodeCommand(const MessageBus::RemoveFailedNodeCommand& cmd) -> void
+{
+    HostApi::RemoveFailedNodeRequest req{};
+    req.nodeId    = cmd.nodeId;
     req.sessionId = cmd.sessionId;
     pushRequest(req);
 }
@@ -359,6 +378,46 @@ auto introspectDongle(SerialPort& port) -> IntrospectionResult
     return result;
 }
 
+/// Handle the response/callback frame pair for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID.
+/// Returns true if the frame matched either decoder (response or callback)
+/// and was consumed; false otherwise.
+auto handleRemoveFailedNodeFrame(const ZwaveDataFrame& frame) -> bool
+{
+    if (const auto resp = HostApi::decodeRemoveFailedNodeResponse(frame); resp.has_value())
+    {
+        const auto pending = state().activeFailedNodeRemoval;
+        MessageBus::publish(MessageBus::RemoveFailedNodeStatus{
+            .nodeId    = pending.has_value() ? pending->nodeId : static_cast<std::uint8_t>(0),
+            .sessionId = pending.has_value() ? pending->sessionId : static_cast<std::uint8_t>(0),
+            .phase     = MessageBus::RemoveFailedNodeStatus::PHASE_RESPONSE,
+            .status    = resp->status});
+        if (resp->status != HostApi::RemoveFailedNodeResponse::STATUS_STARTED)
+        {
+            // Synchronous failure: no callback will follow, so close
+            // out the in-flight slot now.
+            state().activeFailedNodeRemoval.reset();
+        }
+        return true;
+    }
+    if (const auto callback = HostApi::decodeRemoveFailedNodeCallback(frame); callback.has_value())
+    {
+        const auto pending = state().activeFailedNodeRemoval;
+        const auto nodeId  = pending.has_value() ? pending->nodeId : static_cast<std::uint8_t>(0);
+        MessageBus::publish(
+            MessageBus::RemoveFailedNodeStatus{.nodeId    = nodeId,
+                                               .sessionId = callback->sessionId,
+                                               .phase     = MessageBus::RemoveFailedNodeStatus::PHASE_CALLBACK,
+                                               .status    = callback->status});
+        if (callback->status == HostApi::RemoveFailedNodeCallback::STATUS_REMOVED && nodeId != 0)
+        {
+            NodeRegistry::remove(nodeId);
+        }
+        state().activeFailedNodeRemoval.reset();
+        return true;
+    }
+    return false;
+}
+
 auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame& frame) -> void
 {
     if (const auto sendDataCb = HostApi::decodeSendDataCallback(frame); sendDataCb.has_value())
@@ -371,6 +430,10 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
     {
         MessageBus::publish(MessageBus::ApplicationCommand{
             .rxStatus = appCmd->rxStatus, .sourceNodeId = appCmd->sourceNodeId, .ccData = appCmd->ccData});
+        return;
+    }
+    if (handleRemoveFailedNodeFrame(frame))
+    {
         return;
     }
     if (const auto nodeCb = HostApi::decodeNodeCallback(frame); nodeCb.has_value())
@@ -444,6 +507,23 @@ auto dispatchRequest(FrameTransport& transport,
                 {
                     std::cerr << "[ProtocolThread] RemoveNode send failed (session "
                               << static_cast<int>(concrete.sessionId) << ")\n";
+                }
+            }
+            else if constexpr (std::is_same_v<T, HostApi::RemoveFailedNodeRequest>)
+            {
+                state().activeFailedNodeRemoval = concrete;
+                ZwaveDataFrame const frame      = HostApi::encodeRemoveFailedNode(concrete);
+                if (!transport.sendRequest(frame))
+                {
+                    std::cerr << "[ProtocolThread] RemoveFailedNode send failed (node "
+                              << static_cast<int>(concrete.nodeId) << ", session "
+                              << static_cast<int>(concrete.sessionId) << ")\n";
+                    state().activeFailedNodeRemoval.reset();
+                    MessageBus::publish(MessageBus::RemoveFailedNodeStatus{
+                        .nodeId    = concrete.nodeId,
+                        .sessionId = concrete.sessionId,
+                        .phase     = MessageBus::RemoveFailedNodeStatus::PHASE_RESPONSE,
+                        .status    = HostApi::RemoveFailedNodeResponse::STATUS_REMOVE_FAIL});
                 }
             }
             else if constexpr (std::is_same_v<T, HostApi::SendDataRequest>)
@@ -529,9 +609,11 @@ auto runConnectedSession(SerialPort& port) -> void
 
 auto subscribeBus() -> void
 {
-    state().dongleSubscription         = MessageBus::subscribe<MessageBus::DongleStatus>(onDongleStatus);
-    state().addNodeSubscription        = MessageBus::subscribe<MessageBus::AddNodeCommand>(onAddNodeCommand);
-    state().removeNodeSubscription     = MessageBus::subscribe<MessageBus::RemoveNodeCommand>(onRemoveNodeCommand);
+    state().dongleSubscription     = MessageBus::subscribe<MessageBus::DongleStatus>(onDongleStatus);
+    state().addNodeSubscription    = MessageBus::subscribe<MessageBus::AddNodeCommand>(onAddNodeCommand);
+    state().removeNodeSubscription = MessageBus::subscribe<MessageBus::RemoveNodeCommand>(onRemoveNodeCommand);
+    state().removeFailedNodeSubscription =
+        MessageBus::subscribe<MessageBus::RemoveFailedNodeCommand>(onRemoveFailedNodeCommand);
     state().switchBinarySubscription   = MessageBus::subscribe<MessageBus::SetSwitchBinaryCommand>(onSetSwitchBinary);
     state().setAssociationSubscription = MessageBus::subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
     state().removeAssociationSubscription =
@@ -548,6 +630,7 @@ auto unsubscribeBus() -> void
     MessageBus::unsubscribe(state().removeAssociationSubscription);
     MessageBus::unsubscribe(state().setAssociationSubscription);
     MessageBus::unsubscribe(state().switchBinarySubscription);
+    MessageBus::unsubscribe(state().removeFailedNodeSubscription);
     MessageBus::unsubscribe(state().removeNodeSubscription);
     MessageBus::unsubscribe(state().addNodeSubscription);
     MessageBus::unsubscribe(state().dongleSubscription);
@@ -556,6 +639,7 @@ auto unsubscribeBus() -> void
     state().removeAssociationSubscription       = 0;
     state().setAssociationSubscription          = 0;
     state().switchBinarySubscription            = 0;
+    state().removeFailedNodeSubscription        = 0;
     state().removeNodeSubscription              = 0;
     state().addNodeSubscription                 = 0;
     state().dongleSubscription                  = 0;
@@ -612,6 +696,7 @@ auto zwaveCommunicationThread() -> void
         }
 
         clearRequests();
+        state().activeFailedNodeRemoval.reset();
         runConnectedSession(port);
     }
 

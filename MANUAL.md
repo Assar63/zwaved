@@ -38,14 +38,14 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list twelve methods (`AddNode`, `StopAddNode`,
-`RemoveNode`, `StopRemoveNode`, `SetSwitchBinary`, `GetNodes`,
-`GetDongleInfo`, `GetInitData`, `SetAssociation`, `RemoveAssociation`,
-`GetAssociation`, `GetAssociationGroupings`) and ten signals
-(`NodeInclusionStatus`, `NodeExclusionStatus`, `DongleStatus`,
-`DongleInfo`, `InitData`, `SendDataStatus`, `ApplicationCommand`,
-`SwitchBinaryReport`, `AssociationReport`,
-`AssociationGroupingsReport`).
+The introspection should list thirteen methods (`AddNode`, `StopAddNode`,
+`RemoveNode`, `StopRemoveNode`, `RemoveFailedNode`, `SetSwitchBinary`,
+`GetNodes`, `GetDongleInfo`, `GetInitData`, `SetAssociation`,
+`RemoveAssociation`, `GetAssociation`, `GetAssociationGroupings`) and
+eleven signals (`NodeInclusionStatus`, `NodeExclusionStatus`,
+`DongleStatus`, `DongleInfo`, `InitData`, `SendDataStatus`,
+`ApplicationCommand`, `SwitchBinaryReport`, `AssociationReport`,
+`AssociationGroupingsReport`, `RemoveFailedNodeStatus`).
 
 ### Always monitor signals in another terminal
 
@@ -80,6 +80,7 @@ or wait for the next hot-plug to determine current state.
 | `StopAddNode` | `y` (sessionId) | Send Mode `0x05` to stop an in-progress inclusion |
 | `RemoveNode` | `y y y` (mode, flags, sessionId) | Start an exclusion |
 | `StopRemoveNode` | `y` (sessionId) | Send Mode `0x05` to stop an in-progress exclusion |
+| `RemoveFailedNode` | `y y` (nodeId, sessionId) | Drive `FUNC_ID_ZW_REMOVE_FAILED_NODE_ID` (0x61) for a node that has stopped responding; emits `RemoveFailedNodeStatus` for both the immediate response and the final outcome |
 | `SetSwitchBinary` | `y b y` (nodeId, on, callbackId) | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)` |
 | `GetNodes` | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes) | Return the in-memory list of currently-included nodes |
 | `GetDongleInfo` | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId) | Return the dongle introspection captured when the serial port opened |
@@ -195,6 +196,37 @@ Then:
 busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
     com.tiunda.ZWaved1 StopRemoveNode y 43
 ```
+
+## 7b. Removing a failed node
+
+When a node stops responding, the controller adds it to its internal
+failed-node list. Use `RemoveFailedNode` to evict it from the routing
+table without needing the node to participate in a normal exclusion
+(which would require the node to be alive).
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 RemoveFailedNode yy 11 7
+```
+
+`nodeId=11`, `sessionId=7`. Two `RemoveFailedNodeStatus(y y y y)`
+signals follow, both echoing the same `nodeId` / `sessionId`:
+
+| `phase` | Meaning | `status` decoded against |
+|---------|---------|--------------------------|
+| `0` | Response — whether the dongle accepted the request | `STARTED=0x00`, `NOT_PRIMARY=0x02`, `NO_CALLBACK=0x04`, `NODE_NOT_FOUND=0x08`, `BUSY=0x10`, `FAIL=0x20` |
+| `1` | Result — final outcome (only emitted if response was `STARTED`) | `NODE_OK=0x00` (the node responded — not a failed node), `REMOVED=0x01`, `NOT_REMOVED=0x02` |
+
+A `phase=1, status=0x01` (REMOVED) success automatically trims the node
+from the registry; subsequent `GetNodes` calls will not include it.
+
+The dongle answers `NODE_NOT_FOUND` (`phase=0, status=0x08`) if the node
+is not on its failed-node list — typically because the node is still
+responding or has never been included. To force a node onto the failed
+list, send a regular `SetSwitchBinary` (or any SendData) addressed to
+the unresponsive node and watch for a `SendDataStatus` with `txStatus
+= 0x01` (NO_ACK); the dongle promotes the node to "failed" after a few
+such failures.
 
 ## 8. Flag-byte cheat sheet
 

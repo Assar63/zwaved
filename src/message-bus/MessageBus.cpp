@@ -109,10 +109,14 @@ template auto subscribe<NodeExclusionStatus>(std::function<void(const NodeExclus
 template auto publish<NodeExclusionStatus>(const NodeExclusionStatus&) -> void;
 template auto subscribe<SendDataCallback>(std::function<void(const SendDataCallback&)>) -> SubscriptionId;
 template auto publish<SendDataCallback>(const SendDataCallback&) -> void;
+template auto subscribe<RemoveFailedNodeStatus>(std::function<void(const RemoveFailedNodeStatus&)>) -> SubscriptionId;
+template auto publish<RemoveFailedNodeStatus>(const RemoveFailedNodeStatus&) -> void;
 template auto subscribe<AddNodeCommand>(std::function<void(const AddNodeCommand&)>) -> SubscriptionId;
 template auto publish<AddNodeCommand>(const AddNodeCommand&) -> void;
 template auto subscribe<RemoveNodeCommand>(std::function<void(const RemoveNodeCommand&)>) -> SubscriptionId;
 template auto publish<RemoveNodeCommand>(const RemoveNodeCommand&) -> void;
+template auto subscribe<RemoveFailedNodeCommand>(std::function<void(const RemoveFailedNodeCommand&)>) -> SubscriptionId;
+template auto publish<RemoveFailedNodeCommand>(const RemoveFailedNodeCommand&) -> void;
 template auto subscribe<SetSwitchBinaryCommand>(std::function<void(const SetSwitchBinaryCommand&)>) -> SubscriptionId;
 template auto publish<SetSwitchBinaryCommand>(const SetSwitchBinaryCommand&) -> void;
 template auto subscribe<SetAssociationCommand>(std::function<void(const SetAssociationCommand&)>) -> SubscriptionId;

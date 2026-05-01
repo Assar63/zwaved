@@ -26,13 +26,14 @@ constexpr const char* BUS_NAME    = "com.tiunda.ZWaved";
 constexpr const char* OBJECT_PATH = "/com/tiunda/ZWaved";
 constexpr const char* IFACE_NAME  = "com.tiunda.ZWaved1";
 
-constexpr const char* SIGNAL_INCLUSION_STATUS    = "NodeInclusionStatus";
-constexpr const char* SIGNAL_EXCLUSION_STATUS    = "NodeExclusionStatus";
-constexpr const char* SIGNAL_DONGLE_STATUS       = "DongleStatus";
-constexpr const char* SIGNAL_DONGLE_INFO         = "DongleInfo";
-constexpr const char* SIGNAL_INIT_DATA           = "InitData";
-constexpr const char* SIGNAL_SEND_DATA_STATUS    = "SendDataStatus";
-constexpr const char* SIGNAL_APPLICATION_COMMAND = "ApplicationCommand";
+constexpr const char* SIGNAL_INCLUSION_STATUS          = "NodeInclusionStatus";
+constexpr const char* SIGNAL_EXCLUSION_STATUS          = "NodeExclusionStatus";
+constexpr const char* SIGNAL_DONGLE_STATUS             = "DongleStatus";
+constexpr const char* SIGNAL_DONGLE_INFO               = "DongleInfo";
+constexpr const char* SIGNAL_INIT_DATA                 = "InitData";
+constexpr const char* SIGNAL_SEND_DATA_STATUS          = "SendDataStatus";
+constexpr const char* SIGNAL_APPLICATION_COMMAND       = "ApplicationCommand";
+constexpr const char* SIGNAL_REMOVE_FAILED_NODE_STATUS = "RemoveFailedNodeStatus";
 
 constexpr int IDLE_POLL_MS = 200;
 
@@ -74,6 +75,7 @@ struct DBusBackend::Impl
     MessageBus::SubscriptionId inclusionSub{0};
     MessageBus::SubscriptionId exclusionSub{0};
     MessageBus::SubscriptionId sendDataSub{0};
+    MessageBus::SubscriptionId removeFailedNodeSub{0};
 
     // Cached state replayed to D-Bus method callers (GetDongleInfo,
     // GetInitData, GetNodes). Each is fed by a retained MessageBus
@@ -220,6 +222,13 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                     MessageBus::GetAssociationGroupingsCommand{.nodeId = nodeId, .callbackId = callbackId});
             });
 
+    obj.registerMethod("RemoveFailedNode")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [](const std::uint8_t& nodeId, const std::uint8_t& sessionId) -> void
+            { MessageBus::publish(MessageBus::RemoveFailedNodeCommand{.nodeId = nodeId, .sessionId = sessionId}); });
+
     using NodeTuple = sdbus::Struct<uint8_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>;
     obj.registerMethod("GetNodes")
         .onInterface(IFACE_NAME)
@@ -308,6 +317,11 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     obj.registerSignal(SIGNAL_APPLICATION_COMMAND)
         .onInterface(IFACE_NAME)
         .withParameters<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>>("rxStatus", "sourceNodeId", "ccData");
+
+    obj.registerSignal(SIGNAL_REMOVE_FAILED_NODE_STATUS)
+        .onInterface(IFACE_NAME)
+        .withParameters<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t>(
+            "nodeId", "sessionId", "phase", "status");
 
     obj.finishRegistration();
 
@@ -482,6 +496,28 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
             }
         });
 
+    impl->removeFailedNodeSub = MessageBus::subscribe<MessageBus::RemoveFailedNodeStatus>(
+        [this](const MessageBus::RemoveFailedNodeStatus& event) -> void
+        {
+            if (!impl || !impl->connected.load() || !impl->object)
+            {
+                return;
+            }
+            try
+            {
+                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_REMOVE_FAILED_NODE_STATUS);
+                signal << event.nodeId;
+                signal << event.sessionId;
+                signal << event.phase;
+                signal << event.status;
+                impl->object->emitSignal(signal);
+            }
+            catch (const sdbus::Error& err)
+            {
+                std::cerr << "[DBusBackend] failed to emit RemoveFailedNodeStatus: " << err.what() << '\n';
+            }
+        });
+
     impl->connection->enterEventLoopAsync();
     std::cout << "[DBusBackend] listening on system bus as " << BUS_NAME << '\n';
 
@@ -506,6 +542,11 @@ auto DBusBackend::stop() -> void
     if (!impl)
     {
         return;
+    }
+    if (impl->removeFailedNodeSub != 0)
+    {
+        MessageBus::unsubscribe(impl->removeFailedNodeSub);
+        impl->removeFailedNodeSub = 0;
     }
     if (impl->sendDataSub != 0)
     {

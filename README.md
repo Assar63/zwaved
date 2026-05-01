@@ -248,7 +248,7 @@ zwaved exposes the Z-Wave Host API on the **system bus**:
 - **Bus name:** `com.tiunda.ZWaved`
 - **Object:** `/com/tiunda/ZWaved`
 - **Interface:** `com.tiunda.ZWaved1`
-- **Methods:** `AddNode(y y y ay ay)`, `StopAddNode(y)`, `RemoveNode(y y y)`, `StopRemoveNode(y)`, `RemoveFailedNode(y y)`, `SetSwitchBinary(y b y)`, `GetNodes() → a(yyyyay)`, `GetDongleInfo() → (s y ay y)`, `GetInitData() → (y y ay y y)`, `SetAssociation(y y ay y)`, `RemoveAssociation(y y ay y)`, `GetAssociation(y y y)`, `GetAssociationGroupings(y y)`, `GetVersion() → (s s)`
+- **Methods:** `AddNode(y y y ay ay)`, `StopAddNode(y)`, `RemoveNode(y y y)`, `StopRemoveNode(y)`, `RemoveFailedNode(y y)`, `SetSwitchBinary(y b y)`, `GetNodes() → a(yyyyay)`, `GetDongleInfo() → (s y ay y)`, `GetInitData() → (y y ay y y)`, `SetAssociation(y y ay y)`, `RemoveAssociation(y y ay y)`, `GetAssociation(y y y)`, `GetAssociationGroupings(y y)`, `GetVersion() → (s s)`, `GetNetworkStatus() → (bssyubyyt)`
 - **Signals:** `NodeInclusionStatus(y y q y y y ay)`, `NodeExclusionStatus(y y q y y y ay)`, `DongleStatus(b s)`, `DongleInfo(s y ay y)`, `InitData(y y ay y y)`, `SendDataStatus(y y)`, `ApplicationCommand(y y ay)`, `SwitchBinaryReport(y y)`, `AssociationReport(y y y y ay)`, `AssociationGroupingsReport(y y)`, `RemoveFailedNodeStatus(y y y y)`
 
 Install the system bus policy once per host:

@@ -91,6 +91,16 @@ constexpr int GROUP_ID_MAX = 255;
 // Conventional Z-Wave lifeline association group.
 constexpr std::uint8_t LIFELINE_GROUP = 1;
 
+// FUNC_ID values used to decode `GetNetworkStatus`'s sessionCommandId
+// field — kept identical to HostApi::CMD_*; we don't include HostApi
+// here, the terminal is purely a D-Bus client.
+constexpr std::uint8_t CMD_ADD_NODE    = 0x4A;
+constexpr std::uint8_t CMD_REMOVE_NODE = 0x4B;
+
+// Uptime formatting.
+constexpr std::uint64_t SECONDS_PER_HOUR   = 3600;
+constexpr std::uint64_t SECONDS_PER_MINUTE = 60;
+
 // Max characters of node-id input read from the bottom-row prompt
 // (3 digits + null terminator, with slack).
 constexpr std::size_t NODE_ID_INPUT_BUFFER = 8;
@@ -282,6 +292,7 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [g] Get association group count");
     mvprintw(row++, 0, "  [L] Set lifeline (controller -> group 1)");
     mvprintw(row++, 0, "  [l] List included nodes");
+    mvprintw(row++, 0, "  [n] Network status");
     mvprintw(row++, 0, "  [f] Remove failed node (prompts for node id)");
     mvprintw(row++, 0, "  [i] Dongle info");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));
@@ -646,6 +657,76 @@ auto formatCcList(const std::vector<std::uint8_t>& ccs) -> std::string
     return "supports=" + formatCcRange(ccs.begin(), mark) + " controls=" + formatCcRange(mark + 1, ccs.end());
 }
 
+auto handleNetworkStatus(sdbus::IProxy& proxy) -> void
+{
+    using NetworkStatusTuple = sdbus::Struct<bool,
+                                             std::string,
+                                             std::string,
+                                             std::uint8_t,
+                                             std::uint32_t,
+                                             bool,
+                                             std::uint8_t,
+                                             std::uint8_t,
+                                             std::uint64_t>;
+    NetworkStatusTuple status;
+    try
+    {
+        proxy.callMethod("GetNetworkStatus").onInterface(IFACE_NAME).storeResultsTo(status);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetNetworkStatus failed: "} + err.what());
+        return;
+    }
+    const auto dongleConnected  = std::get<0>(status);
+    const auto& ttyPath         = std::get<1>(status);
+    const auto& homeId          = std::get<2>(status);
+    const auto controllerNodeId = std::get<3>(status);
+    const auto nodeCount        = std::get<4>(status);
+    const auto sessionActive    = std::get<5>(status);
+    const auto sessionCommandId = std::get<6>(status);
+    const auto sessionId        = std::get<7>(status);
+    const auto uptimeSeconds    = std::get<8>(status);
+
+    logLine("Network status:");
+    logLine(std::string("  dongle: ") + (dongleConnected ? "connected " + ttyPath : "disconnected"));
+    if (!homeId.empty())
+    {
+        std::ostringstream stream;
+        stream << "  home id: " << homeId << " (controller node " << static_cast<unsigned>(controllerNodeId) << ")";
+        logLine(stream.str());
+    }
+    else
+    {
+        logLine("  home id: (not yet introspected)");
+    }
+    logLine("  nodes: " + std::to_string(nodeCount));
+    if (sessionActive)
+    {
+        const char* operation = "?";
+        if (sessionCommandId == CMD_ADD_NODE)
+        {
+            operation = "inclusion";
+        }
+        else if (sessionCommandId == CMD_REMOVE_NODE)
+        {
+            operation = "exclusion";
+        }
+        logLine(std::string("  active session: ") + operation + " #" +
+                std::to_string(static_cast<unsigned>(sessionId)));
+    }
+    else
+    {
+        logLine("  active session: none");
+    }
+    const auto hours   = uptimeSeconds / SECONDS_PER_HOUR;
+    const auto minutes = (uptimeSeconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
+    const auto seconds = uptimeSeconds % SECONDS_PER_MINUTE;
+    std::ostringstream upStream;
+    upStream << "  uptime: " << hours << "h " << minutes << "m " << seconds << "s";
+    logLine(upStream.str());
+}
+
 auto handleDongleInfo(sdbus::IProxy& proxy) -> void
 {
     using DongleInfoTuple = sdbus::Struct<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>;
@@ -961,6 +1042,10 @@ auto main() -> int
             else if (key == 'l' || key == 'L')
             {
                 handleListNodes(*proxy);
+            }
+            else if (key == 'n' || key == 'N')
+            {
+                handleNetworkStatus(*proxy);
             }
             else if (key == 'f' || key == 'F')
             {

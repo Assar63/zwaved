@@ -574,6 +574,7 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
             }
             state().pendingLifelineNodeId.reset();
             tracker.end();
+            MessageBus::publish(MessageBus::SessionStatus{.active = false, .commandId = 0, .sessionId = 0});
         }
     }
 }
@@ -594,6 +595,9 @@ auto dispatchRequest(FrameTransport& transport,
                 if (concrete.mode != HostApi::ADD_MODE_STOP && concrete.mode != HostApi::ADD_MODE_STOP_REPLICATION)
                 {
                     tracker.begin(HostApi::CMD_ADD_NODE_TO_NETWORK, concrete.sessionId);
+                    MessageBus::publish(MessageBus::SessionStatus{.active    = true,
+                                                                  .commandId = HostApi::CMD_ADD_NODE_TO_NETWORK,
+                                                                  .sessionId = concrete.sessionId});
                 }
                 if (!transport.sendRequest(frame))
                 {
@@ -607,6 +611,9 @@ auto dispatchRequest(FrameTransport& transport,
                 if (concrete.mode != HostApi::REMOVE_MODE_STOP)
                 {
                     tracker.begin(HostApi::CMD_REMOVE_NODE_FROM_NETWORK, concrete.sessionId);
+                    MessageBus::publish(MessageBus::SessionStatus{.active    = true,
+                                                                  .commandId = HostApi::CMD_REMOVE_NODE_FROM_NETWORK,
+                                                                  .sessionId = concrete.sessionId});
                 }
                 if (!transport.sendRequest(frame))
                 {
@@ -760,6 +767,10 @@ auto zwaveCommunicationThread() -> void
     prctl(PR_SET_NAME, "ZWaveProto", 0, 0, 0);  // NOLINT(misc-include-cleaner): PR_SET_NAME from <sys/prctl.h>
 
     subscribeBus();
+    // Seed the retained SessionStatus with "no session in flight" so
+    // subscribers (DBusBackend's GetNetworkStatus path) get a value
+    // immediately on subscribe, even before the first inclusion.
+    MessageBus::publish(MessageBus::SessionStatus{});
 
     while (state().running)
     {

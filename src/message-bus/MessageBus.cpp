@@ -122,6 +122,8 @@ template auto subscribe<NodeExclusionStatus>(std::function<void(const NodeExclus
 template auto publish<NodeExclusionStatus>(const NodeExclusionStatus&) -> void;
 template auto subscribe<SendDataCallback>(std::function<void(const SendDataCallback&)>) -> SubscriptionId;
 template auto publish<SendDataCallback>(const SendDataCallback&) -> void;
+template auto subscribe<SessionStatus>(std::function<void(const SessionStatus&)>) -> SubscriptionId;
+template auto publish<SessionStatus>(const SessionStatus&) -> void;
 template auto subscribe<RemoveFailedNodeStatus>(std::function<void(const RemoveFailedNodeStatus&)>) -> SubscriptionId;
 template auto publish<RemoveFailedNodeStatus>(const RemoveFailedNodeStatus&) -> void;
 template auto subscribe<AddNodeCommand>(std::function<void(const AddNodeCommand&)>) -> SubscriptionId;

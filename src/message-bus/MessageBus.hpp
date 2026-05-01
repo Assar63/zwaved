@@ -38,7 +38,7 @@ using SubscriptionId = std::uint64_t;
 /// Lifecycle state of the Z-Wave dongle's serial attachment.
 struct DongleStatus
 {
-    bool connected;
+    bool connected = false;
     std::string ttyPath;  // Empty unless connected.
 };
 
@@ -176,6 +176,20 @@ struct SendDataCallback
     std::uint8_t txStatus   = 0;
 };
 
+/// Public mirror of the protocol thread's inclusion/exclusion session
+/// tracker. Republished whenever the tracker's begin / end is called,
+/// so external observers (DBusBackend's GetNetworkStatus) can answer
+/// "is a session in flight" without reaching into protocol internals.
+/// Retained — late subscribers see the latest value on subscribe;
+/// initial value (no session) is published explicitly when the
+/// protocol thread starts.
+struct SessionStatus
+{
+    bool active            = false;
+    std::uint8_t commandId = 0;  // HostApi::CMD_ADD_NODE_TO_NETWORK / CMD_REMOVE_NODE_FROM_NETWORK / 0
+    std::uint8_t sessionId = 0;
+};
+
 /// Progress signal for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61). Emitted
 /// twice for a typical removal: first with phase = PHASE_RESPONSE
 /// carrying the dongle's accept/reject (status uses the response-status
@@ -294,6 +308,9 @@ template <> struct IsRetained<InitData> : std::true_type
 {
 };
 template <> struct IsRetained<NodeListChanged> : std::true_type
+{
+};
+template <> struct IsRetained<SessionStatus> : std::true_type
 {
 };
 template <> struct IsRetained<LoggerConfig> : std::true_type

@@ -20,7 +20,7 @@ companion `zwave-terminal` client, and packaging.
 - [ ] **Per-node protocol info** — call `FUNC_ID_GET_NODE_PROTOCOL_INFO` (0x41) for each seeded node so the registry's device-class triple and CC list survive daemon restarts too (today seeded entries have those fields zeroed until the node is re-included).
 - [ ] **Node info** — detailed per-node view (capabilities, status, recent activity).
 - [ ] **Network info** — aggregate view (node count, statuses, activity).
-- [ ] **Network status** — current health, ongoing operations, errors.
+- [x] **Network status** — `GetNetworkStatus() → (b s s y u b y y t)` aggregates dongle connection, home ID, included-node count, in-flight session, and daemon uptime. Driven by a new retained `MessageBus::SessionStatus` event from `ProtocolThread` and the existing cached `DongleStatus` / `DongleInfo` / `NodeListChanged`. Errors continue to flow through Logger / journald — a structured error feed is a follow-up.
 - [ ] **Network reset** — wipe and reinitialize the network.
 - [x] **Remove failed node** — `RemoveFailedNode` over D-Bus drives `FUNC_ID_ZW_REMOVE_FAILED_NODE_ID` (0x61); response + callback emitted as `RemoveFailedNodeStatus` and the registry trims on success.
 - [x] **Auto-lifeline on inclusion** — when a freshly-included node advertises `COMMAND_CLASS_ZWAVEPLUS_INFO` + `COMMAND_CLASS_ASSOCIATION` in its supported list, the protocol thread queues `SetAssociation(group=1, members=[controllerNodeId])` itself at the terminal step of inclusion.
@@ -81,7 +81,7 @@ companion `zwave-terminal` client, and packaging.
 - [ ] **Node list (rich)** — dedicated window with live state column instead of a one-shot dump.
 - [ ] **Node info** — drill-down per node.
 - [ ] **Network info** — overview of the network.
-- [ ] **Network status** — health and error summary.
+- [x] **Network status** — `[n]` calls `GetNetworkStatus` and renders the aggregate (dongle, home ID, node count, active session, uptime).
 
 ### Control
 

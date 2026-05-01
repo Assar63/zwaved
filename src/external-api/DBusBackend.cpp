@@ -8,9 +8,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -77,15 +79,24 @@ struct DBusBackend::Impl
     MessageBus::SubscriptionId exclusionSub{0};
     MessageBus::SubscriptionId sendDataSub{0};
     MessageBus::SubscriptionId removeFailedNodeSub{0};
+    MessageBus::SubscriptionId sessionStatusSub{0};
 
     // Cached state replayed to D-Bus method callers (GetDongleInfo,
-    // GetInitData, GetNodes). Each is fed by a retained MessageBus
-    // event so a late D-Bus client gets the latest value without the
-    // backend reaching into the producing module.
+    // GetInitData, GetNodes, GetNetworkStatus). Each is fed by a
+    // retained MessageBus event so a late D-Bus client gets the
+    // latest value without the backend reaching into the producing
+    // module.
     std::mutex stateMutex;
+    MessageBus::DongleStatus lastDongleStatus;
     MessageBus::DongleInfo lastDongleInfo;
     MessageBus::InitData lastInitData;
     std::vector<MessageBus::NodeInfo> lastNodes;
+    MessageBus::SessionStatus lastSessionStatus;
+
+    // Captured the first time `run()` is called; powers the uptime
+    // field of GetNetworkStatus. steady_clock so it doesn't jump
+    // around if the wall clock is stepped.
+    std::chrono::steady_clock::time_point startTime;
 };
 
 DBusBackend::DBusBackend()
@@ -102,6 +113,7 @@ DBusBackend::~DBusBackend()
 // NOLINTBEGIN(readability-function-cognitive-complexity): flat D-Bus method/signal registration list
 auto DBusBackend::run(const std::atomic<bool>& running) -> void
 {
+    impl->startTime = std::chrono::steady_clock::now();
     try
     {
         impl->connection = sdbus::createSystemBusConnection(BUS_NAME);
@@ -281,6 +293,47 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
         .implementedAs([]() -> DaemonVersionTuple
                        { return DaemonVersionTuple{Version::SEMVER, Version::GIT_DESCRIBE}; });
 
+    using NetworkStatusTuple = sdbus::Struct<bool,
+                                             std::string,
+                                             std::string,
+                                             std::uint8_t,
+                                             std::uint32_t,
+                                             bool,
+                                             std::uint8_t,
+                                             std::uint8_t,
+                                             std::uint64_t>;
+    obj.registerMethod("GetNetworkStatus")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            [this]() -> NetworkStatusTuple
+            {
+                std::scoped_lock const lock(impl->stateMutex);
+
+                // Hex-format the home ID (4 bytes from MEMORY_GET_ID)
+                // for human readability — matches what NodeRegistry
+                // logs and what's keyed into the SQLite db.
+                std::ostringstream homeIdStream;
+                homeIdStream << std::hex << std::uppercase << std::setfill('0');
+                for (const auto byte : impl->lastDongleInfo.homeId)
+                {
+                    homeIdStream << std::setw(2) << static_cast<unsigned>(byte);
+                }
+
+                const auto uptime =
+                    std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - impl->startTime)
+                        .count();
+
+                return NetworkStatusTuple{impl->lastDongleStatus.connected,
+                                          impl->lastDongleStatus.ttyPath,
+                                          homeIdStream.str(),
+                                          impl->lastDongleInfo.controllerNodeId,
+                                          static_cast<std::uint32_t>(impl->lastNodes.size()),
+                                          impl->lastSessionStatus.active,
+                                          impl->lastSessionStatus.commandId,
+                                          impl->lastSessionStatus.sessionId,
+                                          static_cast<std::uint64_t>(uptime)};
+            });
+
     obj.registerSignal(SIGNAL_INCLUSION_STATUS)
         .onInterface(IFACE_NAME)
         .withParameters<std::uint8_t,
@@ -335,6 +388,10 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     impl->dongleStatusSub = MessageBus::subscribe<MessageBus::DongleStatus>(
         [this](const MessageBus::DongleStatus& status) -> void
         {
+            {
+                std::scoped_lock const lock(impl->stateMutex);
+                impl->lastDongleStatus = status;
+            }
             if (!impl || !impl->connected.load() || !impl->object)
             {
                 return;
@@ -350,6 +407,13 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
             {
                 std::cerr << "[DBusBackend] failed to emit DongleStatus: " << err.what() << '\n';
             }
+        });
+
+    impl->sessionStatusSub = MessageBus::subscribe<MessageBus::SessionStatus>(
+        [this](const MessageBus::SessionStatus& status) -> void
+        {
+            std::scoped_lock const lock(impl->stateMutex);
+            impl->lastSessionStatus = status;
         });
 
     impl->dongleInfoSub = MessageBus::subscribe<MessageBus::DongleInfo>(
@@ -554,6 +618,11 @@ auto DBusBackend::stop() -> void
     {
         MessageBus::unsubscribe(impl->removeFailedNodeSub);
         impl->removeFailedNodeSub = 0;
+    }
+    if (impl->sessionStatusSub != 0)
+    {
+        MessageBus::unsubscribe(impl->sessionStatusSub);
+        impl->sessionStatusSub = 0;
     }
     if (impl->sendDataSub != 0)
     {

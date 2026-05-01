@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
 #include <deque>
@@ -69,9 +70,11 @@ struct LoggerState
 {
     std::thread thread;
     std::atomic<bool> running{false};
+    std::atomic<Logger::Level> minLevel{Logger::Level::Info};
     std::mutex mutex;
     std::condition_variable cv;
     std::deque<LogEntry> queue;
+    MessageBus::SubscriptionId loggerConfigSub{0};
 
 #ifdef ZWAVED_LOGGER_SYSLOG
     std::once_flag claimFlag;
@@ -86,6 +89,11 @@ struct LoggerState
     // joined their workers, so no producer is still calling Logger::log.
     ~LoggerState()
     {
+        if (loggerConfigSub != 0)
+        {
+            MessageBus::unsubscribe(loggerConfigSub);
+            loggerConfigSub = 0;
+        }
 #ifdef ZWAVED_LOGGER_SYSLOG
         // Drain the captures *before* the consumer thread, so any
         // trailing partial line each reader flushes still lands in the
@@ -183,6 +191,14 @@ auto emit(const LogEntry& entry) -> void
 
 auto pushEntry(Logger::Level level, std::string message) -> void
 {
+    // Producer-side gate. The atomic load is relaxed because the
+    // exact level a single message sees doesn't have to be
+    // synchronized with anything else — eventual consistency is fine
+    // for log filtering.
+    if (static_cast<std::uint8_t>(level) < static_cast<std::uint8_t>(state().minLevel.load(std::memory_order_relaxed)))
+    {
+        return;
+    }
     {
         std::scoped_lock const lock(state().mutex);
         state().queue.push_back(
@@ -361,6 +377,11 @@ auto Logger::error(std::string message) -> void
     pushEntry(Level::Error, std::move(message));
 }
 
+auto Logger::setMinLevel(Level level) -> void
+{
+    state().minLevel.store(level, std::memory_order_relaxed);
+}
+
 auto Logger::claimStandardStreams() -> void
 {
 #ifdef ZWAVED_LOGGER_SYSLOG
@@ -398,6 +419,15 @@ __attribute__((constructor(CONFIG_LOGGER_PRIO))) auto startLogger() -> void
 
     state().running = true;
     state().thread  = std::thread(loggerThread);
+
+    // Subscribe to LoggerConfig now (priority 101). Config publishes at
+    // priority 102, *after* this constructor returns, so the subscriber
+    // is on the bus before the publish — the handler fires when Config
+    // calls publish() and updates the producer-side level gate.
+    state().loggerConfigSub = MessageBus::subscribe<MessageBus::LoggerConfig>(
+        [](const MessageBus::LoggerConfig& cfg) -> void
+        { Logger::setMinLevel(static_cast<Logger::Level>(cfg.minLevel)); });
+
 #ifdef ZWAVED_LOGGER_SYSLOG
     // With the syslog sink there is no looping risk and capturing
     // stdout/stderr is the whole point of running as a daemon — engage

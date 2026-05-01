@@ -28,6 +28,8 @@ The CMake cache option `ZWAVED_EXTERNAL_API` selects which external transports a
 
 The CMake cache option `ZWAVED_LOGGER_SINK` selects the logger backend. Accepted values: `stdout` (default — picked up by journald under systemd) or `syslog` (calls `syslog(3)` with `LOG_DAEMON`; for OpenWRT / non-systemd hosts).
 
+Runtime behaviour that doesn't affect which code is linked lives in `${ZWAVED_CONFIG:-/etc/zwaved/zwaved.conf}`, parsed by `src/config/Config.cpp`. The format is a minimal INI-flavoured key/value file (sections in `[brackets]`, `key = value`, `#` comments, repeated keys allowed for `dongles.accept`) and the parser is hand-rolled — no third-party dependency. Sections wired today: `[logger] min_level`, `[storage] state_dir`, `[dongles] accept = vid:pid:name` (one row per accepted dongle, replaces the hardcoded Aeotec VID/PID), `[behavior] auto_lifeline`. **The Config module doesn't expose a public accessor** — it parses the file at constructor priority 102 and **publishes four retained events on `MessageBus`** (`LoggerConfig`, `StorageConfig`, `DonglesConfig`, `BehaviorConfig`). Each consuming module subscribes from its own constructor and picks up the cached value via replay-on-subscribe. A fully-commented sample sits at `etc/zwaved.conf`. There is no SIGHUP reload — restart the daemon to pick up changes.
+
 ## Code Quality
 
 Both tools must pass before commits are accepted (enforced by the pre-commit hook in `gitscripts/pre-commit`).
@@ -64,9 +66,10 @@ The application is a Z-Wave communication daemon built around GCC/Clang's `__att
 | Priority | Component | File |
 |----------|-----------|------|
 | 101 | Logger — MPSC queue + dedicated `ZWaveLog` consumer thread; producers never block on I/O. Sink (stdout / syslog) picked at build time via `ZWAVED_LOGGER_SINK`. Comes up first so every later constructor / destructor can call `Logger::info(...)` | `src/logger/Logger.cpp` |
-| 102 | SignalHandler — registers SIGHUP/SIGTERM/SIGINT, sets `applicationRunning = true`. Logs registration via Logger (Logger is guaranteed up at this point); the actual signal handlers stay on `std::cout` because Logger takes a mutex which is not async-signal-safe | `src/SignalHandler.cpp` |
-| 201 | ZWave dongle monitor thread — uses `libudev` to detect USB insertion/removal and publishes the TTY path on `MessageBus` | `src/zwave-dongle/MonitorThread.cpp` |
-| 202 | ZWave protocol thread — opens the serial port, runs the host-API frame transport, dispatches Add/Remove/SendData requests | `src/zwave-protocol/ProtocolThread.cpp` |
+| 102 | Config — parses `${ZWAVED_CONFIG:-/etc/zwaved/zwaved.conf}` and publishes four retained events on `MessageBus` (`LoggerConfig`, `StorageConfig`, `DonglesConfig`, `BehaviorConfig`). Modules subscribe from their own constructors; the bus is the contract | `src/config/Config.cpp` |
+| 103 | SignalHandler — registers SIGHUP/SIGTERM/SIGINT, sets `applicationRunning = true`. Logs registration via Logger; runs after Config so Logger's `min_level` threshold is already in effect. The actual signal handlers stay on `std::cout` because Logger takes a mutex which is not async-signal-safe | `src/SignalHandler.cpp` |
+| 201 | ZWave dongle monitor thread — uses `libudev` to detect USB insertion/removal and publishes the TTY path on `MessageBus`. Subscribes to `DonglesConfig` to learn the accepted-dongle VID/PID list | `src/zwave-dongle/MonitorThread.cpp` |
+| 202 | ZWave protocol thread — opens the serial port, runs the host-API frame transport, dispatches Add/Remove/SendData requests. Subscribes to `BehaviorConfig` for the auto-lifeline toggle | `src/zwave-protocol/ProtocolThread.cpp` |
 | 203 | External API thread — runs the configured transport backend (D-Bus via sdbus-c++ today; ubus reserved) | `src/external-api/ExternalApiThread.cpp` |
 
 `main()` in `src/main.cpp` only loops on `applicationRunning` (declared in `SignalHandler.hpp`); all lifecycle is handled by constructor/destructor attributes.

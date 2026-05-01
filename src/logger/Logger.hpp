@@ -48,6 +48,12 @@ auto info(std::string message) -> void;
 auto warn(std::string message) -> void;
 auto error(std::string message) -> void;
 
+/// Set the minimum level a message must be at to actually queue.
+/// Anything below `level` is dropped at the producer side (no
+/// allocation, no queue churn). Default is `Level::Info`. Typically
+/// called once from `Config::load()` at startup; thread-safe.
+auto setMinLevel(Level level) -> void;
+
 /// Detach stdin from the controlling terminal and reroute stdout /
 /// stderr through Logger so any rogue printf, std::cout, std::cerr,
 /// library panic or assert trace ends up in the same pipeline as the

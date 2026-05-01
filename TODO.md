@@ -35,7 +35,7 @@ companion `zwave-terminal` client, and packaging.
 
 - [x] **SQLite-backed node registry** — `nodes.db` at `${ZWAVED_STATE_DIR:-/var/lib/zwaved}` keeps the included-node list across daemon restarts. Rows keyed by `(home_id, node_id)` so swapping dongles between networks is safe. Static info only.
 - [ ] Persist additional network metadata (per-node dynamic state, association groups, configuration parameters).
-- [ ] Configuration file for daemon settings.
+- [x] **Configuration file** — `src/config/` parses `${ZWAVED_CONFIG:-/etc/zwaved/zwaved.conf}` (TOML, via `tomlplusplus`). Sections wired today: `[logger] min_level`, `[storage] state_dir`, `[[dongles.accept]]` (replaces hardcoded VID/PID), `[behavior] auto_lifeline`. Sample at `etc/zwaved.conf`.
 
 ### Observability
 

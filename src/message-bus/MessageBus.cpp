@@ -106,6 +106,14 @@ template auto subscribe<InitData>(std::function<void(const InitData&)>) -> Subsc
 template auto publish<InitData>(const InitData&) -> void;
 template auto subscribe<NodeListChanged>(std::function<void(const NodeListChanged&)>) -> SubscriptionId;
 template auto publish<NodeListChanged>(const NodeListChanged&) -> void;
+template auto subscribe<LoggerConfig>(std::function<void(const LoggerConfig&)>) -> SubscriptionId;
+template auto publish<LoggerConfig>(const LoggerConfig&) -> void;
+template auto subscribe<DonglesConfig>(std::function<void(const DonglesConfig&)>) -> SubscriptionId;
+template auto publish<DonglesConfig>(const DonglesConfig&) -> void;
+template auto subscribe<StorageConfig>(std::function<void(const StorageConfig&)>) -> SubscriptionId;
+template auto publish<StorageConfig>(const StorageConfig&) -> void;
+template auto subscribe<BehaviorConfig>(std::function<void(const BehaviorConfig&)>) -> SubscriptionId;
+template auto publish<BehaviorConfig>(const BehaviorConfig&) -> void;
 template auto subscribe<ApplicationCommand>(std::function<void(const ApplicationCommand&)>) -> SubscriptionId;
 template auto publish<ApplicationCommand>(const ApplicationCommand&) -> void;
 template auto subscribe<NodeInclusionStatus>(std::function<void(const NodeInclusionStatus&)>) -> SubscriptionId;

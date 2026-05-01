@@ -84,6 +84,54 @@ struct NodeListChanged
     std::vector<NodeInfo> nodes;
 };
 
+// ---- Configuration events ----------------------------------------
+// Published once at startup by `Config::load()` (priority 102) after
+// reading /etc/zwaved/zwaved.conf. Each section becomes one retained
+// event; consumers subscribe from their own constructor and pick the
+// cached value up via replay-on-subscribe — there is no synchronous
+// `Config::snapshot()` accessor, the bus *is* the contract.
+
+/// Logger threshold. `minLevel` is encoded as the underlying integer
+/// of `Logger::Level` (Debug=0, Info=1, Warn=2, Error=3) so this
+/// header doesn't need to include logger/Logger.hpp.
+struct LoggerConfig
+{
+    std::uint8_t minLevel = 1;  // = Logger::Level::Info
+};
+
+/// One accepted USB dongle identity. VID/PID are 4-character lower-
+/// case hex strings, compared verbatim against udev's `idVendor` /
+/// `idProduct` sysattrs.
+struct AcceptedDongleConfig
+{
+    std::string vid;
+    std::string pid;
+    std::string name;
+};
+
+/// USB dongles the monitor thread will recognise. Defaults to a
+/// single entry for the Aeotec Z-Stick Gen5 (0658:0200).
+struct DonglesConfig
+{
+    std::vector<AcceptedDongleConfig> accept;
+};
+
+/// Storage paths. `stateDir` empty means "fall back to the legacy
+/// resolution: `$ZWAVED_STATE_DIR` env, then `/var/lib/zwaved`".
+struct StorageConfig
+{
+    std::string stateDir;
+};
+
+/// Daemon-wide feature toggles.
+struct BehaviorConfig
+{
+    /// When true (default), the protocol thread auto-populates the
+    /// lifeline group of a freshly-included Z-Wave Plus node with the
+    /// controller's nodeId. See ProtocolThread.cpp::needsAutoLifeline.
+    bool autoLifeline = true;
+};
+
 // ---- Transient protocol events ------------------------------------
 
 /// Unsolicited command-class frame received from a node, carried inside
@@ -246,6 +294,18 @@ template <> struct IsRetained<InitData> : std::true_type
 {
 };
 template <> struct IsRetained<NodeListChanged> : std::true_type
+{
+};
+template <> struct IsRetained<LoggerConfig> : std::true_type
+{
+};
+template <> struct IsRetained<DonglesConfig> : std::true_type
+{
+};
+template <> struct IsRetained<StorageConfig> : std::true_type
+{
+};
+template <> struct IsRetained<BehaviorConfig> : std::true_type
 {
 };
 

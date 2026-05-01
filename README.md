@@ -262,6 +262,57 @@ build into the binary — `dbus` (default), `ubus` (placeholder, not yet
 implemented), or `both`. A future ubus backend will plug into the same
 `IBackend` interface and mirror these method/signal names.
 
+## Configuration
+
+The daemon reads a minimal INI-flavoured config file at startup —
+parsed by hand inside `src/config/Config.cpp`, no third-party parser
+involved. Resolution order:
+
+1. `$ZWAVED_CONFIG` env var, if set.
+2. `/etc/zwaved/zwaved.conf`.
+3. Built-in defaults (a missing file is **not** an error — the daemon
+   logs `Config: no config file at … — publishing defaults` and
+   continues).
+
+The Config module doesn't expose a public accessor. It parses the
+file once and **publishes four retained events on `MessageBus`**:
+`LoggerConfig`, `StorageConfig`, `DonglesConfig`, `BehaviorConfig`.
+Each consuming module subscribes from its own constructor and picks
+up the cached value via the bus's replay-on-subscribe semantics —
+the bus *is* the contract. There is no SIGHUP-style reload; restart
+the daemon to pick up changes.
+
+### Example
+
+```ini
+[logger]
+min_level = info       ; debug | info | warn | error
+
+[storage]
+state_dir = /var/lib/zwaved
+
+[dongles]
+accept = 0658:0200:Aeotec Z-Stick Gen5
+# accept = 0658:0280:Aeotec Z-Stick 7
+
+[behavior]
+auto_lifeline = true   ; auto-populate group 1 on Z-Wave Plus inclusion
+```
+
+A fully-commented sample lives at [`etc/zwaved.conf`](etc/zwaved.conf).
+Install with:
+
+```bash
+sudo install -D -m 0644 etc/zwaved.conf /etc/zwaved/zwaved.conf
+```
+
+What stays in **CMake** (not config-file): the logger sink kind
+(`ZWAVED_LOGGER_SINK`), which transports are linked
+(`ZWAVED_EXTERNAL_API`), and whether the utils are built
+(`ZWAVED_BUILD_UTILS`). Anything that affects which code is *linked*
+is build-time; anything that affects observable behavior at *runtime*
+moves to the config file.
+
 ## Logging
 
 zwaved runs an asynchronous logger on a dedicated `ZWaveLog` thread.

@@ -65,6 +65,7 @@ constexpr int COL_GENERIC  = 2;
 constexpr int COL_SPECIFIC = 3;
 constexpr int COL_CCS      = 4;
 
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct State
 {
     std::mutex mutex;
@@ -72,7 +73,35 @@ struct State
     std::optional<std::string> currentHomeId;  // hex form, e.g. "E2A1B07C"
     sqlite3* db = nullptr;
     std::once_flag initFlag;
+
+    // Cached state directory from `MessageBus::StorageConfig`.
+    // Subscribed to during initIfNeeded() so the bus's
+    // replay-on-subscribe delivers the value synchronously before we
+    // open the database. Empty means "fall back to env / built-in".
+    std::string configuredStateDir;
+    MessageBus::SubscriptionId storageSub{0};
+
+    ~State()
+    {
+        if (storageSub != 0)
+        {
+            MessageBus::unsubscribe(storageSub);
+            storageSub = 0;
+        }
+        if (db != nullptr)
+        {
+            sqlite3_close(db);
+            db = nullptr;
+        }
+    }
+
+    State()                                    = default;
+    State(const State&)                        = delete;
+    auto operator=(const State&) -> State&     = delete;
+    State(State&&) noexcept                    = delete;
+    auto operator=(State&&) noexcept -> State& = delete;
 };
+// NOLINTEND(misc-non-private-member-variables-in-classes)
 
 auto state() -> State&
 {
@@ -82,6 +111,16 @@ auto state() -> State&
 
 auto resolveDbPath() -> std::filesystem::path
 {
+    // Resolution order:
+    //   1. config.toml [storage] state_dir, if non-empty (fed in via
+    //      MessageBus::StorageConfig — populated during initIfNeeded
+    //      via replay-on-subscribe).
+    //   2. ZWAVED_STATE_DIR env var, if set.
+    //   3. Built-in default (/var/lib/zwaved).
+    if (!state().configuredStateDir.empty())
+    {
+        return std::filesystem::path(state().configuredStateDir) / DB_FILENAME;
+    }
     // NOLINTNEXTLINE(concurrency-mt-unsafe): runs once during call_once-protected init
     const char* env       = std::getenv(STATE_DIR_ENV);
     const std::string dir = (env != nullptr && *env != '\0') ? env : DEFAULT_STATE_DIR;
@@ -185,34 +224,43 @@ auto loadNodesForHome(sqlite3* database, const std::string& homeId) -> std::map<
 
 auto initIfNeeded() -> void
 {
-    std::call_once(state().initFlag,
-                   []
-                   {
-                       const auto path = resolveDbPath();
-                       std::error_code errorCode;
-                       std::filesystem::create_directories(path.parent_path(), errorCode);
-                       if (errorCode)
-                       {
-                           std::cerr << "[NodeRegistry] cannot create state dir " << path.parent_path() << ": "
-                                     << errorCode.message() << " — falling back to in-memory only\n";
-                           return;
-                       }
-                       if (sqlite3_open(path.c_str(), &state().db) != SQLITE_OK)
-                       {
-                           std::cerr << "[NodeRegistry] cannot open " << path << ": " << sqlite3_errmsg(state().db)
-                                     << " — falling back to in-memory only\n";
-                           sqlite3_close(state().db);
-                           state().db = nullptr;
-                           return;
-                       }
-                       if (!migrateSchema(state().db))
-                       {
-                           sqlite3_close(state().db);
-                           state().db = nullptr;
-                           return;
-                       }
-                       std::cout << "[NodeRegistry] db ready at " << path << '\n';
-                   });
+    std::call_once(
+        state().initFlag,
+        []
+        {
+            // Subscribe synchronously so the bus's retained
+            // StorageConfig (published by Config at priority 102,
+            // long before the registry is first touched at runtime)
+            // populates `configuredStateDir` *before* we open the
+            // database below.
+            state().storageSub = MessageBus::subscribe<MessageBus::StorageConfig>(
+                [](const MessageBus::StorageConfig& cfg) -> void { state().configuredStateDir = cfg.stateDir; });
+
+            const auto path = resolveDbPath();
+            std::error_code errorCode;
+            std::filesystem::create_directories(path.parent_path(), errorCode);
+            if (errorCode)
+            {
+                std::cerr << "[NodeRegistry] cannot create state dir " << path.parent_path() << ": "
+                          << errorCode.message() << " — falling back to in-memory only\n";
+                return;
+            }
+            if (sqlite3_open(path.c_str(), &state().db) != SQLITE_OK)
+            {
+                std::cerr << "[NodeRegistry] cannot open " << path << ": " << sqlite3_errmsg(state().db)
+                          << " — falling back to in-memory only\n";
+                sqlite3_close(state().db);
+                state().db = nullptr;
+                return;
+            }
+            if (!migrateSchema(state().db))
+            {
+                sqlite3_close(state().db);
+                state().db = nullptr;
+                return;
+            }
+            std::cout << "[NodeRegistry] db ready at " << path << '\n';
+        });
 }
 
 auto persistAdd(const std::string& homeId, const NodeRegistry::NodeInfo& info) -> void

@@ -1,11 +1,13 @@
 #include "../message-bus/MessageBus.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <libudev.h>
 #include <sys/prctl.h>
@@ -20,6 +22,13 @@ struct ZwaveMonitorState
     std::thread thread;
     std::atomic<bool> running{false};
 
+    // DonglesConfig subscription — populates `accept` synchronously
+    // via replay-on-subscribe in startZWaveMonitorThread(). The bus
+    // delivers this once at startup; the list does not change at
+    // runtime.
+    std::vector<MessageBus::AcceptedDongleConfig> accept;
+    MessageBus::SubscriptionId donglesSub{0};
+
     // Static-state destructor handles teardown — the C++ runtime tears
     // static-storage objects down via __cxa_atexit *before* it runs
     // __attribute__((destructor)) functions, so the join must happen
@@ -27,6 +36,11 @@ struct ZwaveMonitorState
     // joinable and calls std::terminate.
     ~ZwaveMonitorState()
     {
+        if (donglesSub != 0)
+        {
+            MessageBus::unsubscribe(donglesSub);
+            donglesSub = 0;
+        }
         running = false;
         if (thread.joinable())
         {
@@ -49,14 +63,21 @@ auto state() -> ZwaveMonitorState&
     return instance;
 }
 
-auto* const ZWAVE_VID = "0658";
-auto* const ZWAVE_PID = "0200";
-
+/// True if the udev device's idVendor / idProduct sysattrs match an
+/// entry in the cached `[dongles] accept` list (delivered via
+/// `MessageBus::DonglesConfig`). Defaults to the Aeotec Z-Stick Gen5
+/// (0658:0200) when no config file is present.
 auto isZWaveDongle(udev_device* dev) -> bool
 {
     const auto* vid = udev_device_get_sysattr_value(dev, "idVendor");
     const auto* pid = udev_device_get_sysattr_value(dev, "idProduct");
-    return vid != nullptr && pid != nullptr && strcmp(vid, ZWAVE_VID) == 0 && strcmp(pid, ZWAVE_PID) == 0;
+    if (vid == nullptr || pid == nullptr)
+    {
+        return false;
+    }
+    return std::any_of(state().accept.begin(),
+                       state().accept.end(),
+                       [vid, pid](const auto& entry) { return entry.vid == vid && entry.pid == pid; });
 }
 
 auto findAttachedTtyNode(udev* udev, udev_device* usbDevice) -> std::string
@@ -110,34 +131,40 @@ auto findAttachedTtyNode(udev* udev, udev_device* usbDevice) -> std::string
     return {};
 }
 
+/// Walk the cached accept list and ask udev for an already-plugged
+/// device matching any of them. udev's match-sysattr is per-attribute,
+/// so we can only filter on one (vid, pid) at a time — re-enumerate
+/// per accepted entry and stop at the first hit.
 auto findAlreadyInsertedZWaveDongleSyspath(udev* udev) -> std::string
 {
-    udev_enumerate* enumerate = udev_enumerate_new(udev);
-    if (enumerate == nullptr)
+    for (const auto& accepted : state().accept)
     {
-        return {};
-    }
-
-    udev_enumerate_add_match_subsystem(enumerate, "usb");
-    udev_enumerate_add_match_sysattr(enumerate, "idVendor", ZWAVE_VID);
-    udev_enumerate_add_match_sysattr(enumerate, "idProduct", ZWAVE_PID);
-    udev_enumerate_scan_devices(enumerate);
-
-    udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
-    udev_list_entry* entry   = nullptr;
-
-    udev_list_entry_foreach(entry, devices)
-    {
-        const char* syspath = udev_list_entry_get_name(entry);
-        if (syspath != nullptr)
+        udev_enumerate* enumerate = udev_enumerate_new(udev);
+        if (enumerate == nullptr)
         {
-            std::string result = syspath;
-            udev_enumerate_unref(enumerate);
-            return result;
+            continue;
         }
-    }
 
-    udev_enumerate_unref(enumerate);
+        udev_enumerate_add_match_subsystem(enumerate, "usb");
+        udev_enumerate_add_match_sysattr(enumerate, "idVendor", accepted.vid.c_str());
+        udev_enumerate_add_match_sysattr(enumerate, "idProduct", accepted.pid.c_str());
+        udev_enumerate_scan_devices(enumerate);
+
+        udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
+        udev_list_entry* entry   = nullptr;
+
+        udev_list_entry_foreach(entry, devices)
+        {
+            const char* syspath = udev_list_entry_get_name(entry);
+            if (syspath != nullptr)
+            {
+                std::string result = syspath;
+                udev_enumerate_unref(enumerate);
+                return result;
+            }
+        }
+        udev_enumerate_unref(enumerate);
+    }
     return {};
 }
 
@@ -302,6 +329,13 @@ auto zwaveMonitorThread() -> void
 
 __attribute__((constructor(CONFIG_ZWAVE_DONGLE_PRIO))) auto startZWaveMonitorThread() -> void
 {
+    // Subscribe to the accepted-dongle list before the worker starts.
+    // Config has already published at priority 102, so the bus replays
+    // the cached value synchronously and `state().accept` is populated
+    // by the time `findAlreadyInsertedZWaveDongleSyspath()` runs.
+    state().donglesSub = MessageBus::subscribe<MessageBus::DonglesConfig>(
+        [](const MessageBus::DonglesConfig& cfg) -> void { state().accept = cfg.accept; });
+
     state().running = true;
     state().thread  = std::thread(zwaveMonitorThread);
 }

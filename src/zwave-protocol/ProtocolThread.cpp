@@ -128,6 +128,12 @@ struct ZwaveProtocolState
     MessageBus::SubscriptionId removeAssociationSubscription{0};
     MessageBus::SubscriptionId getAssociationSubscription{0};
     MessageBus::SubscriptionId getAssociationGroupingsSubscription{0};
+    MessageBus::SubscriptionId behaviorConfigSubscription{0};
+
+    // Cached `[behavior] auto_lifeline` toggle. Defaults to true to
+    // match the daemon's pre-config baseline; updated synchronously
+    // when the BehaviorConfig subscription fires (replay-on-subscribe).
+    std::atomic<bool> autoLifeline{true};
 
     // Static-state destructor handles teardown — see the comment in
     // ExternalApiThread.cpp for why we can't rely on
@@ -554,7 +560,7 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
             // naturally with anything else the dongle is already routing.
             if (const auto pendingNode = state().pendingLifelineNodeId, controller = state().controllerNodeId;
                 nodeCb->commandId == HostApi::CMD_ADD_NODE_TO_NETWORK && pendingNode.has_value() &&
-                controller.has_value())
+                controller.has_value() && state().autoLifeline.load(std::memory_order_relaxed))
             {
                 const std::array<std::uint8_t, 1> members{*controller};
                 HostApi::SendDataRequest req{};
@@ -720,10 +726,14 @@ auto subscribeBus() -> void
     state().getAssociationSubscription = MessageBus::subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);
     state().getAssociationGroupingsSubscription =
         MessageBus::subscribe<MessageBus::GetAssociationGroupingsCommand>(onGetAssociationGroupings);
+    state().behaviorConfigSubscription = MessageBus::subscribe<MessageBus::BehaviorConfig>(
+        [](const MessageBus::BehaviorConfig& cfg) -> void
+        { state().autoLifeline.store(cfg.autoLifeline, std::memory_order_relaxed); });
 }
 
 auto unsubscribeBus() -> void
 {
+    MessageBus::unsubscribe(state().behaviorConfigSubscription);
     MessageBus::unsubscribe(state().getAssociationGroupingsSubscription);
     MessageBus::unsubscribe(state().getAssociationSubscription);
     MessageBus::unsubscribe(state().removeAssociationSubscription);
@@ -742,6 +752,7 @@ auto unsubscribeBus() -> void
     state().removeNodeSubscription              = 0;
     state().addNodeSubscription                 = 0;
     state().dongleSubscription                  = 0;
+    state().behaviorConfigSubscription          = 0;
 }
 
 auto zwaveCommunicationThread() -> void

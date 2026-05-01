@@ -52,12 +52,11 @@ The `check` and `fix-tidy` targets read `compile_commands.json` from the build d
 
 ### Pre-commit hook setup
 
-```bash
-chmod +x scripts/check-format
-ln -sfn ../../scripts/check-format .git/hooks/pre-commit
-```
+After cloning, run `scripts/install-hooks` once. It points git's `core.hooksPath` at `scripts/git-hooks/`, where the hook scripts (currently `pre-commit`, a symlink to `scripts/check-format`) live in the repo itself rather than in `.git/hooks/`. Every clone — CLI, CLion, VSCode — runs the same hooks without anyone curating `.git/hooks/`, and future hooks (`commit-msg`, `pre-push`, …) just drop into `scripts/git-hooks/` and become live for everyone after a fresh `install-hooks` run.
 
 The hook checks only staged C/C++ files with `clang-format` and `clang-tidy`. All `clang-tidy` warnings are treated as errors (`WarningsAsErrors: '*'`). The same script can be run manually (`scripts/check-format`) or with `--fix` to apply `clang-format -i` to staged files and re-stage them. The script detects git-hook context via the `GIT_INDEX_FILE` env var (which git sets for any hook that touches the index) and ignores `--fix` in that context — auto-mutating the index mid-commit is surprising even when harmless.
+
+`.editorconfig` at the repo root pins universal indent / line-ending / trailing-whitespace settings for every modern editor, covering the files clang-format doesn't touch (CMake, Markdown, JSON, shell, makefiles).
 
 ## Architecture
 

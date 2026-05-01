@@ -517,6 +517,23 @@ set(CMAKE_CXX_STANDARD 26)  # Change to 20, 17, etc.
 
 ## Code Quality Tools
 
+### Editor / IDE setup
+
+Two repo-level files keep editors aligned without per-IDE configuration:
+
+- **`.editorconfig`** — universal indentation, line endings, trailing
+  whitespace, final newline. Read by CLion, VSCode, Vim/Neovim,
+  Emacs and most other modern editors. clang-format remains
+  authoritative for C/C++ files; this file covers what clang-format
+  doesn't touch (CMake, Markdown, JSON, shell, makefiles).
+- **`.clang-format`** — the actual C/C++ formatter spec (4-space
+  indent, 120-char lines, Allman braces, left-aligned pointers).
+
+For git hooks, run `scripts/install-hooks` once after cloning — it
+points `core.hooksPath` at `scripts/git-hooks/` so every clone runs
+the same hooks regardless of which editor or workflow you use. See
+the [Pre-commit Hook](#pre-commit-hook) subsection for details.
+
 ### Code Formatting with clang-format
 
 The project uses `.clang-format` to maintain consistent code style following C++26 standards with:
@@ -685,13 +702,24 @@ It blocks the commit if formatting or static analysis errors are found.
 
 ##### Enable the Pre-commit Hook
 
-From the project root, make the script executable and symlink it into
-Git's hooks directory:
+After cloning the repo, run the one-time setup script:
 
 ```bash
-chmod +x scripts/check-format
-ln -sfn ../../scripts/check-format .git/hooks/pre-commit
+scripts/install-hooks
 ```
+
+It points git's `core.hooksPath` at `scripts/git-hooks/`, where the
+hook scripts (currently just `pre-commit`, a symlink to
+`scripts/check-format`) live. From that point on every commit — from
+the CLI, CLion, VSCode, or anything else that respects `git config`
+— runs the same checks. The script is idempotent, and it cleans up
+any stale `.git/hooks/pre-commit` symlink left over from the
+pre-`core.hooksPath` workflow.
+
+The big win is that **future hooks land in the repo, not in
+`.git/hooks/`**. Add `commit-msg`, `pre-push`, etc. to
+`scripts/git-hooks/` and every clone gets them after a fresh
+`scripts/install-hooks` run.
 
 ##### Run the Hook Manually
 

@@ -1,0 +1,49 @@
+# https://editorconfig.org
+#
+# Cross-IDE consistency for this repo. clang-format is authoritative
+# for C/C++ files (see .clang-format); this file pins universal
+# defaults and covers what clang-format doesn't touch — CMake
+# scripts, Markdown, JSON, shell scripts, makefiles.
+#
+# CLion, VSCode, Vim/Neovim (with plugin), Emacs (with plugin), and
+# every other modern editor reads this without further configuration.
+
+root = true
+
+[*]
+charset                  = utf-8
+end_of_line              = lf
+insert_final_newline     = true
+trim_trailing_whitespace = true
+indent_style             = space
+indent_size              = 4
+
+# C/C++ — these match what .clang-format produces; the editorconfig
+# entry exists so editors without clang-format integration still get
+# sensible indentation while typing, before the formatter runs.
+[*.{c,cc,cpp,cxx,h,hh,hpp,hxx}]
+indent_style = space
+indent_size  = 4
+
+# CMake.
+[{CMakeLists.txt,*.cmake}]
+indent_style = space
+indent_size  = 4
+
+# JSON (CMakePresets.json, .vscode/*.json) — standard 2-space indent.
+[*.json]
+indent_size = 2
+
+# Makefiles require literal tabs for recipe lines; don't normalise.
+[Makefile]
+indent_style = tab
+
+# Markdown uses two trailing spaces to mark a hard line break; leave
+# them alone or those breaks turn into accidental joins.
+[*.md]
+trim_trailing_whitespace = false
+
+# Shell scripts.
+[*.sh]
+indent_style = space
+indent_size  = 4

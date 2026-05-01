@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#
+# scripts/install-hooks
+#
+# Point `git config core.hooksPath` at scripts/git-hooks so every
+# checkout — plain CLI, CLion, VSCode, anything — runs the same hooks
+# without anyone having to symlink files into .git/hooks/. Run once
+# per clone:
+#
+#     scripts/install-hooks
+#
+# Idempotent. Removes any stale .git/hooks/pre-commit symlink left
+# over from the pre-`core.hooksPath` workflow as a courtesy; git
+# ignores .git/hooks/ entirely once a custom hooks path is set, so
+# the cleanup isn't load-bearing — just tidy.
+
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+readonly hooks_dir="scripts/git-hooks"
+
+if [[ ! -d "$hooks_dir" ]]; then
+    echo "scripts/install-hooks: ${hooks_dir}/ is missing — wrong working tree?" >&2
+    exit 1
+fi
+
+git config core.hooksPath "$hooks_dir"
+
+echo "core.hooksPath = $(git config --get core.hooksPath)"
+
+if [[ -L .git/hooks/pre-commit ]]; then
+    target="$(readlink .git/hooks/pre-commit)"
+    case "$target" in
+        *gitscripts/pre-commit | *scripts/check-format)
+            rm .git/hooks/pre-commit
+            echo "removed stale .git/hooks/pre-commit -> ${target}"
+            ;;
+    esac
+fi
+
+echo "Hooks installed."
+echo "  Test it:   scripts/check-format"
+echo "  Auto-fix:  scripts/check-format --fix"

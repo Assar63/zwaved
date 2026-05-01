@@ -39,7 +39,7 @@ companion `zwave-terminal` client, and packaging.
 
 ### Observability
 
-- [ ] **Lock-free async logger** — thread-safe event/error logging that does not block producers.
+- [x] **Async logger** — `src/logger/` runs an MPSC queue + dedicated `ZWaveLog` consumer thread (constructor priority 101). Producers never block on I/O. Sink picked at build time via `ZWAVED_LOGGER_SINK`: `stdout` (default — captured by journald under systemd) or `syslog` (for OpenWRT / non-systemd hosts). Migration of existing `std::cout` / `std::cerr` call sites is incremental.
 
 ### Hardware
 

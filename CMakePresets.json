@@ -9,7 +9,10 @@
       "binaryDir": "cmake-build-llvm",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "ZWAVED_EXTERNAL_API": "dbus",
+        "ZWAVED_LOGGER_SINK": "stdout",
+        "ZWAVED_BUILD_UTILS": "ON"
       }
     },
     {
@@ -20,7 +23,10 @@
       "binaryDir": "cmake-build-gnu",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "ZWAVED_EXTERNAL_API": "dbus",
+        "ZWAVED_LOGGER_SINK": "stdout",
+        "ZWAVED_BUILD_UTILS": "ON"
       }
     },
     {

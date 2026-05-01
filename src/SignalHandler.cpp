@@ -1,5 +1,6 @@
 #include "SignalHandler.hpp"
 
+#include "logger/Logger.hpp"
 #include "zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 
 #include <atomic>
@@ -15,15 +16,25 @@ auto runningState() -> std::atomic<bool>&
     return instance;
 }
 
-// Signal handler for SIGHUP (hangup/reload signal)
+// The functions below run in *async-signal context* — the kernel
+// invokes them from inside whatever thread happened to be executing
+// when the signal arrived. POSIX restricts what's safe to call from
+// here to the async-signal-safe list: no mutexes, no malloc, no
+// std::ostream. That is why we deliberately do NOT use Logger from
+// inside these handlers (Logger::log takes a mutex). The std::cout
+// calls are a pragmatic compromise — strictly speaking they're not
+// async-signal-safe either, but in practice the daemon only ever
+// receives one signal at a time and we're about to exit anyway. The
+// real signal of "we're shutting down" goes through the atomic
+// runningState; the prints are advisory.
+
 auto handleSignalHUP(const int signum) -> void
 {
-    std::cout << "\n[SIGHUP] Received hangup signal (" << signum << ")" << '\n';
+    std::cout << "\n[SIGHUP] Received hangup signal (" << signum << ")\n";
     std::cout << "[SIGHUP] Reloading configuration...\n";
     // Configuration reload logic would go here
 }
 
-// Signal handler for SIGTERM (termination signal)
 auto handleSignalTERM(const int signum) -> void
 {
     std::cout << "\n[SIGTERM] Received termination signal (" << signum << ")\n";
@@ -31,7 +42,6 @@ auto handleSignalTERM(const int signum) -> void
     stopApplication();
 }
 
-// Signal handler for SIGINT (Ctrl+C)
 auto handleSignalINT(const int signum) -> void
 {
     std::cout << "\n[SIGINT] Received interrupt signal (" << signum << ")\n";
@@ -39,6 +49,9 @@ auto handleSignalINT(const int signum) -> void
     stopApplication();
 }
 
+// Constructor (priority 102) runs *after* the Logger constructor
+// (priority 101) per src/zwaved.h, so the queue and consumer thread
+// are guaranteed up before the first Logger::info call below.
 __attribute__((constructor(CONFIG_ZWAVE_STARTUP_PRIO))) auto constructor() -> void
 {
     // Register SIGHUP handler
@@ -47,7 +60,7 @@ __attribute__((constructor(CONFIG_ZWAVE_STARTUP_PRIO))) auto constructor() -> vo
     sigemptyset(&actionHup.sa_mask);
     actionHup.sa_flags = 0;
     sigaction(SIGHUP, &actionHup, nullptr);
-    std::cout << "[SignalHandler] Registered SIGHUP handler\n";
+    Logger::info("[SignalHandler] Registered SIGHUP handler");
 
     // Register SIGTERM handler
     struct sigaction actionTerm = {};
@@ -55,7 +68,7 @@ __attribute__((constructor(CONFIG_ZWAVE_STARTUP_PRIO))) auto constructor() -> vo
     sigemptyset(&actionTerm.sa_mask);
     actionTerm.sa_flags = 0;
     sigaction(SIGTERM, &actionTerm, nullptr);
-    std::cout << "[SignalHandler] Registered SIGTERM handler\n";
+    Logger::info("[SignalHandler] Registered SIGTERM handler");
 
     // Register SIGINT handler (Ctrl+C)
     struct sigaction actionInt = {};
@@ -63,7 +76,7 @@ __attribute__((constructor(CONFIG_ZWAVE_STARTUP_PRIO))) auto constructor() -> vo
     sigemptyset(&actionInt.sa_mask);
     actionInt.sa_flags = 0;
     sigaction(SIGINT, &actionInt, nullptr);
-    std::cout << "[SignalHandler] Registered SIGINT handler\n";
+    Logger::info("[SignalHandler] Registered SIGINT handler");
 
     runningState() = true;
 }

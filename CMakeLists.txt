@@ -30,8 +30,19 @@ if(ZWAVED_BUILD_DBUS)
     pkg_check_modules(SDBUS_CPP REQUIRED IMPORTED_TARGET sdbus-c++)
 endif()
 
+# Logger sink selector. `stdout` (default) writes to stdout — captured
+# by journald when zwaved runs under systemd. `syslog` calls syslog(3),
+# which is the right fit for OpenWRT / non-systemd hosts where logd or
+# rsyslog routes to /var/log/messages.
+set(ZWAVED_LOGGER_SINK "stdout" CACHE STRING "Logger sink (stdout, syslog)")
+set_property(CACHE ZWAVED_LOGGER_SINK PROPERTY STRINGS "stdout" "syslog")
+
 # Process source subdirectories
 add_subdirectory(src)
+
+if(ZWAVED_LOGGER_SINK STREQUAL "syslog")
+    target_compile_definitions(zwaved PRIVATE ZWAVED_LOGGER_SYSLOG=1)
+endif()
 
 option(ZWAVED_BUILD_UTILS "Build companion utility apps under utils/" ON)
 if(ZWAVED_BUILD_UTILS)

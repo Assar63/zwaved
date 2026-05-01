@@ -262,6 +262,31 @@ build into the binary — `dbus` (default), `ubus` (placeholder, not yet
 implemented), or `both`. A future ubus backend will plug into the same
 `IBackend` interface and mirror these method/signal names.
 
+## Logging
+
+zwaved runs an asynchronous logger on a dedicated `ZWaveLog` thread.
+Producers call `Logger::info(...)` / `Logger::warn(...)` /
+`Logger::error(...)` / `Logger::debug(...)` (declared in
+`src/logger/Logger.hpp`); the calls push onto an MPSC queue and return
+immediately, so a slow log sink never stalls the protocol or
+external-API threads.
+
+The sink is picked at build time via the `ZWAVED_LOGGER_SINK` CMake
+cache option:
+
+- `stdout` (default) — formatted lines `[ISO-8601 UTC] [LEVEL] message`
+  go to stdout. Under systemd the journal captures them automatically
+  (`journalctl -u zwaved`, persisted under `/var/log/journal/`).
+- `syslog` — calls `syslog(3)` with the `LOG_DAEMON` facility and
+  `zwaved` ident; severity maps from the logger level. Suitable for
+  OpenWRT / non-systemd deployments where logd or rsyslog routes to
+  `/var/log/messages`.
+
+```bash
+cmake --preset gnu -DZWAVED_LOGGER_SINK=syslog
+cmake --build cmake-build-gnu
+```
+
 For full operator usage (classic vs SmartStart inclusion, signal
 progression, flag-byte layout, status table, troubleshooting), see
 [MANUAL.md](MANUAL.md).

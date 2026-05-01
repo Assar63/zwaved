@@ -49,6 +49,13 @@ if(ZWAVED_BUILD_UTILS)
     add_subdirectory(utils)
 endif()
 
+option(ZWAVED_BUILD_TESTS "Build unit tests under tests/" ON)
+if(ZWAVED_BUILD_TESTS)
+    enable_testing()
+    find_package(GTest REQUIRED)
+    add_subdirectory(tests)
+endif()
+
 # Target: fix-tidy - Fix issues with clang-tidy
 add_custom_target(fix-tidy
     COMMAND clang-tidy --fix -p ${CMAKE_BINARY_DIR}

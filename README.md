@@ -22,6 +22,7 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 - **sdbus-c++** 2.x — D-Bus interface; install from source (the Debian/Ubuntu package is still on 1.x). Requires `libsystemd-dev` for the underlying sd-bus
 - **SQLite3** development files (`libsqlite3-dev`) — node-registry persistence
 - **eventpp** (header-only) — in-process publish/subscribe bus; not packaged on most distros, install from source
+- **GoogleTest** development files (`libgtest-dev`) — only needed when `ZWAVED_BUILD_TESTS=ON` (default)
 
 See the [Dependencies](#dependencies) section below for what each
 library does, where it's used, and how CMake discovers it.
@@ -42,7 +43,7 @@ sudo apt install -y g++-15 gcc-15
 sudo apt install -y clang-20 llvm-20
 
 # CMake + runtime libs
-sudo apt install -y cmake libudev-dev libsqlite3-dev libsystemd-dev
+sudo apt install -y cmake libudev-dev libsqlite3-dev libsystemd-dev libgtest-dev
 
 # sdbus-c++. The Ubuntu/Debian package `libsdbus-c++-dev` ships an older
 # 1.x release; the daemon is built and tested against 2.x. Install from
@@ -516,6 +517,35 @@ set(CMAKE_CXX_STANDARD 26)  # Change to 20, 17, etc.
 - Reconfigure: `cmake --preset gnu` or `cmake --preset llvm`
 
 ## Code Quality Tools
+
+### Tests
+
+Unit tests live under `tests/`, built when `ZWAVED_BUILD_TESTS=ON`
+(default). The test executables link only the source files directly
+under test — they don't drag in libudev / sdbus-c++ / sqlite3, so
+they build in seconds and run in milliseconds.
+
+```bash
+cmake --build cmake-build-gnu                       # builds tests too
+ctest --test-dir cmake-build-gnu --output-on-failure
+```
+
+Each test executable also runs standalone:
+
+```bash
+./cmake-build-gnu/tests/HostApi_test --gtest_filter='HostApi.EncodeAddNode*'
+```
+
+GoogleTest discovery (`gtest_discover_tests`) registers every
+`TEST()` with CTest at build time, so adding a new `TEST(...)` shows
+up in the suite without touching CMake.
+
+To skip the tests entirely (e.g. on a build host without
+`libgtest-dev`):
+
+```bash
+cmake --preset gnu -DZWAVED_BUILD_TESTS=OFF
+```
 
 ### Editor / IDE setup
 

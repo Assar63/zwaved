@@ -124,6 +124,17 @@ fi
 while IFS= read -r file; do
     [[ -f "${file}" ]] || continue
 
+    # Tests verify production code; they don't need to *be* production
+    # code under the same lint regime. gtest macros confuse rules like
+    # bugprone-unchecked-optional-access (the EXPECT_EQ inside an
+    # ASSERT_TRUE-guarded block) and bugprone-easily-swappable-
+    # parameters fires on every TEST(). The tests/.clang-tidy already
+    # disables WarningsAsErrors as a safety net for direct invocations;
+    # this skip keeps the hook output clean.
+    if [[ "${file}" == tests/* ]]; then
+        continue
+    fi
+
     case "${file}" in
         *.cpp | *.cxx | *.cc | *.c)
             if ! clang-tidy "${file}" --quiet -p "${tidy_build_dir}" >/dev/null; then

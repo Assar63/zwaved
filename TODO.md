@@ -48,7 +48,7 @@ companion `zwave-terminal` client, and packaging.
 
 ### Quality & docs
 
-- [ ] Unit tests.
+- [x] **Unit tests** — first three modules covered: `HostApi` (encoder + decoder round-trips for every `FUNC_ID` the daemon issues), `BinarySwitch` (encode + decodeReport), `Association` (encode + decode for both Report and GroupingsReport). GoogleTest via `libgtest-dev`; `ZWAVED_BUILD_TESTS=ON` default; `ctest --test-dir cmake-build-gnu`. `FrameTransport` next.
 - [ ] `Help` command — list of supported D-Bus methods and what they do.
 - [ ] Refresh `MANUAL.md` and `README.md`; add a dedicated README for `utils/zwave-terminal/`.
 

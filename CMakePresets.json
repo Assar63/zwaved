@@ -12,7 +12,8 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "ZWAVED_EXTERNAL_API": "dbus",
         "ZWAVED_LOGGER_SINK": "stdout",
-        "ZWAVED_BUILD_UTILS": "ON"
+        "ZWAVED_BUILD_UTILS": "ON",
+        "ZWAVED_BUILD_TESTS": "ON"
       }
     },
     {
@@ -26,7 +27,8 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "ZWAVED_EXTERNAL_API": "dbus",
         "ZWAVED_LOGGER_SINK": "stdout",
-        "ZWAVED_BUILD_UTILS": "ON"
+        "ZWAVED_BUILD_UTILS": "ON",
+        "ZWAVED_BUILD_TESTS": "ON"
       }
     },
     {

@@ -1,0 +1,15 @@
+# clang-tidy override for files under tests/.
+#
+# Inherit the project-root check list (gtest tests should still benefit
+# from compile-time diagnostics) but downgrade WarningsAsErrors so the
+# suite isn't held to production lint discipline. Several checks fire
+# on perfectly correct gtest patterns:
+#
+#   * bugprone-unchecked-optional-access — `opt->member` inside an
+#     EXPECT_EQ that follows ASSERT_TRUE(opt.has_value()).
+#   * bugprone-easily-swappable-parameters — fires on every TEST().
+#
+# `scripts/check-format` skips files in this subtree entirely; this
+# file is a safety net for `clang-tidy <file>` invocations that bypass
+# the hook (e.g. an IDE running tidy on save).
+WarningsAsErrors: ''

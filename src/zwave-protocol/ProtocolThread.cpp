@@ -8,6 +8,7 @@
 #include "ZwaveDataFrame.hpp"
 #include "application/Association.hpp"
 #include "application/BinarySwitch.hpp"
+#include "application/MultichannelAssociation.hpp"
 
 #include <array>
 #include <atomic>
@@ -128,6 +129,10 @@ struct ZwaveProtocolState
     MessageBus::SubscriptionId removeAssociationSubscription{0};
     MessageBus::SubscriptionId getAssociationSubscription{0};
     MessageBus::SubscriptionId getAssociationGroupingsSubscription{0};
+    MessageBus::SubscriptionId setMultichannelAssociationSubscription{0};
+    MessageBus::SubscriptionId removeMultichannelAssociationSubscription{0};
+    MessageBus::SubscriptionId getMultichannelAssociationSubscription{0};
+    MessageBus::SubscriptionId getMultichannelAssociationGroupingsSubscription{0};
     MessageBus::SubscriptionId behaviorConfigSubscription{0};
 
     // Cached `[behavior] auto_lifeline` toggle. Defaults to true to
@@ -305,6 +310,69 @@ auto onGetAssociation(const MessageBus::GetAssociationCommand& cmd) -> void
     HostApi::SendDataRequest req{};
     req.nodeId     = cmd.nodeId;
     req.data       = Association::encodeGet(cmd.groupId);
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+/// Translate the bus's `EndpointMember` (visible to all consumers via
+/// MessageBus.hpp) into the application-codec's `EndpointMember` —
+/// the two structs hold identical data but live in different
+/// translation-unit groups, so we copy field-by-field at the boundary.
+auto toCodecEndpoints(const std::vector<MessageBus::EndpointMember>& busMembers)
+    -> std::vector<MultichannelAssociation::EndpointMember>
+{
+    std::vector<MultichannelAssociation::EndpointMember> out;
+    out.reserve(busMembers.size());
+    for (const auto& member : busMembers)
+    {
+        out.push_back(MultichannelAssociation::EndpointMember{.nodeId = member.nodeId, .endpoint = member.endpoint});
+    }
+    return out;
+}
+
+auto onSetMultichannelAssociation(const MessageBus::SetMultichannelAssociationCommand& cmd) -> void
+{
+    const auto endpoints = toCodecEndpoints(cmd.endpointMembers);
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = MultichannelAssociation::encodeSet(cmd.groupId,
+                                                  std::span<const std::uint8_t>(cmd.nodeMembers),
+                                                  std::span<const MultichannelAssociation::EndpointMember>(endpoints));
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onRemoveMultichannelAssociation(const MessageBus::RemoveMultichannelAssociationCommand& cmd) -> void
+{
+    const auto endpoints = toCodecEndpoints(cmd.endpointMembers);
+    HostApi::SendDataRequest req{};
+    req.nodeId = cmd.nodeId;
+    req.data =
+        MultichannelAssociation::encodeRemove(cmd.groupId,
+                                              std::span<const std::uint8_t>(cmd.nodeMembers),
+                                              std::span<const MultichannelAssociation::EndpointMember>(endpoints));
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onGetMultichannelAssociation(const MessageBus::GetMultichannelAssociationCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = MultichannelAssociation::encodeGet(cmd.groupId);
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onGetMultichannelAssociationGroupings(const MessageBus::GetMultichannelAssociationGroupingsCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = MultichannelAssociation::encodeGroupingsGet();
     req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
     req.callbackId = cmd.callbackId;
     pushRequest(req);
@@ -733,6 +801,15 @@ auto subscribeBus() -> void
     state().getAssociationSubscription = MessageBus::subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);
     state().getAssociationGroupingsSubscription =
         MessageBus::subscribe<MessageBus::GetAssociationGroupingsCommand>(onGetAssociationGroupings);
+    state().setMultichannelAssociationSubscription =
+        MessageBus::subscribe<MessageBus::SetMultichannelAssociationCommand>(onSetMultichannelAssociation);
+    state().removeMultichannelAssociationSubscription =
+        MessageBus::subscribe<MessageBus::RemoveMultichannelAssociationCommand>(onRemoveMultichannelAssociation);
+    state().getMultichannelAssociationSubscription =
+        MessageBus::subscribe<MessageBus::GetMultichannelAssociationCommand>(onGetMultichannelAssociation);
+    state().getMultichannelAssociationGroupingsSubscription =
+        MessageBus::subscribe<MessageBus::GetMultichannelAssociationGroupingsCommand>(
+            onGetMultichannelAssociationGroupings);
     state().behaviorConfigSubscription = MessageBus::subscribe<MessageBus::BehaviorConfig>(
         [](const MessageBus::BehaviorConfig& cfg) -> void
         { state().autoLifeline.store(cfg.autoLifeline, std::memory_order_relaxed); });
@@ -741,6 +818,10 @@ auto subscribeBus() -> void
 auto unsubscribeBus() -> void
 {
     MessageBus::unsubscribe(state().behaviorConfigSubscription);
+    MessageBus::unsubscribe(state().getMultichannelAssociationGroupingsSubscription);
+    MessageBus::unsubscribe(state().getMultichannelAssociationSubscription);
+    MessageBus::unsubscribe(state().removeMultichannelAssociationSubscription);
+    MessageBus::unsubscribe(state().setMultichannelAssociationSubscription);
     MessageBus::unsubscribe(state().getAssociationGroupingsSubscription);
     MessageBus::unsubscribe(state().getAssociationSubscription);
     MessageBus::unsubscribe(state().removeAssociationSubscription);
@@ -750,16 +831,20 @@ auto unsubscribeBus() -> void
     MessageBus::unsubscribe(state().removeNodeSubscription);
     MessageBus::unsubscribe(state().addNodeSubscription);
     MessageBus::unsubscribe(state().dongleSubscription);
-    state().getAssociationGroupingsSubscription = 0;
-    state().getAssociationSubscription          = 0;
-    state().removeAssociationSubscription       = 0;
-    state().setAssociationSubscription          = 0;
-    state().switchBinarySubscription            = 0;
-    state().removeFailedNodeSubscription        = 0;
-    state().removeNodeSubscription              = 0;
-    state().addNodeSubscription                 = 0;
-    state().dongleSubscription                  = 0;
-    state().behaviorConfigSubscription          = 0;
+    state().getMultichannelAssociationGroupingsSubscription = 0;
+    state().getMultichannelAssociationSubscription          = 0;
+    state().removeMultichannelAssociationSubscription       = 0;
+    state().setMultichannelAssociationSubscription          = 0;
+    state().getAssociationGroupingsSubscription             = 0;
+    state().getAssociationSubscription                      = 0;
+    state().removeAssociationSubscription                   = 0;
+    state().setAssociationSubscription                      = 0;
+    state().switchBinarySubscription                        = 0;
+    state().removeFailedNodeSubscription                    = 0;
+    state().removeNodeSubscription                          = 0;
+    state().addNodeSubscription                             = 0;
+    state().dongleSubscription                              = 0;
+    state().behaviorConfigSubscription                      = 0;
 }
 
 auto zwaveCommunicationThread() -> void

@@ -54,6 +54,16 @@ target_link_libraries(Association_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Association_test)
 gtest_discover_tests(Association_test)
 
+# ---- MultichannelAssociation ----------------------------------------
+add_executable(MultichannelAssociation_test
+    MultichannelAssociation_test.cpp
+    "${SRC_DIR}/application/MultichannelAssociation.cpp"
+)
+target_include_directories(MultichannelAssociation_test PRIVATE "${SRC_DIR}/application")
+target_link_libraries(MultichannelAssociation_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(MultichannelAssociation_test)
+gtest_discover_tests(MultichannelAssociation_test)
+
 # ---- FrameTransport -------------------------------------------------
 # Exercises the real poll() / read() / write() syscalls — drives the
 # transport over one end of a socketpair via SerialPort::adoptFd from

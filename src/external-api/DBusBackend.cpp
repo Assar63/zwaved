@@ -235,6 +235,79 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                     MessageBus::GetAssociationGroupingsCommand{.nodeId = nodeId, .callbackId = callbackId});
             });
 
+    // Multi Channel Association (CC 0x8E) mirrors the plain Association
+    // surface but also accepts node:endpoint pairs in a flat
+    // `a(yy)` array. A wire signature with two separate node and
+    // endpoint-pair arrays would be marginally clearer but doubles the
+    // method count for every MCA caller — the flat pair array matches
+    // how the codec already represents members internally.
+    using EndpointPair    = sdbus::Struct<std::uint8_t, std::uint8_t>;
+    auto convertEndpoints = [](const std::vector<EndpointPair>& pairs) -> std::vector<MessageBus::EndpointMember>
+    {
+        std::vector<MessageBus::EndpointMember> result;
+        result.reserve(pairs.size());
+        for (const auto& pair : pairs)
+        {
+            result.push_back(MessageBus::EndpointMember{.nodeId = pair.get<0>(), .endpoint = pair.get<1>()});
+        }
+        return result;
+    };
+
+    obj.registerMethod("SetMultichannelAssociation")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [convertEndpoints](const std::uint8_t& nodeId,
+                               const std::uint8_t& groupId,
+                               const std::vector<std::uint8_t>& nodeMembers,
+                               const std::vector<EndpointPair>& endpointMembers,
+                               const std::uint8_t& callbackId) -> void
+            {
+                MessageBus::publish(
+                    MessageBus::SetMultichannelAssociationCommand{.nodeId          = nodeId,
+                                                                  .groupId         = groupId,
+                                                                  .nodeMembers     = nodeMembers,
+                                                                  .endpointMembers = convertEndpoints(endpointMembers),
+                                                                  .callbackId      = callbackId});
+            });
+
+    obj.registerMethod("RemoveMultichannelAssociation")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [convertEndpoints](const std::uint8_t& nodeId,
+                               const std::uint8_t& groupId,
+                               const std::vector<std::uint8_t>& nodeMembers,
+                               const std::vector<EndpointPair>& endpointMembers,
+                               const std::uint8_t& callbackId) -> void
+            {
+                MessageBus::publish(MessageBus::RemoveMultichannelAssociationCommand{
+                    .nodeId          = nodeId,
+                    .groupId         = groupId,
+                    .nodeMembers     = nodeMembers,
+                    .endpointMembers = convertEndpoints(endpointMembers),
+                    .callbackId      = callbackId});
+            });
+
+    obj.registerMethod("GetMultichannelAssociation")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [](const std::uint8_t& nodeId, const std::uint8_t& groupId, const std::uint8_t& callbackId) -> void
+            {
+                MessageBus::publish(MessageBus::GetMultichannelAssociationCommand{
+                    .nodeId = nodeId, .groupId = groupId, .callbackId = callbackId});
+            });
+
+    obj.registerMethod("GetMultichannelAssociationGroupings")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            [](const std::uint8_t& nodeId, const std::uint8_t& callbackId) -> void
+            {
+                MessageBus::publish(
+                    MessageBus::GetMultichannelAssociationGroupingsCommand{.nodeId = nodeId, .callbackId = callbackId});
+            });
+
     obj.registerMethod("RemoveFailedNode")
         .onInterface(IFACE_NAME)
         .implementedAs(

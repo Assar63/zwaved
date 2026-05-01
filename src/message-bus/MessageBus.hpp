@@ -291,6 +291,51 @@ struct GetAssociationGroupingsCommand
     std::uint8_t callbackId = 0;
 };
 
+/// One node:endpoint pair carried by Multi Channel Association
+/// commands and reports. Mirrors
+/// `MultichannelAssociation::EndpointMember`; redeclared here so the
+/// bus header doesn't pull in the application/ codec.
+struct EndpointMember
+{
+    std::uint8_t nodeId   = 0;
+    std::uint8_t endpoint = 0;
+};
+
+/// Set / remove / get / get-groupings on the Multi Channel
+/// Association CC (0x8E). Like the plain `SetAssociationCommand`
+/// trio but each group can hold both whole-node and node:endpoint
+/// members.
+struct SetMultichannelAssociationCommand
+{
+    std::uint8_t nodeId  = 0;
+    std::uint8_t groupId = 0;
+    std::vector<std::uint8_t> nodeMembers;
+    std::vector<EndpointMember> endpointMembers;
+    std::uint8_t callbackId = 0;
+};
+
+struct RemoveMultichannelAssociationCommand
+{
+    std::uint8_t nodeId  = 0;
+    std::uint8_t groupId = 0;
+    std::vector<std::uint8_t> nodeMembers;
+    std::vector<EndpointMember> endpointMembers;
+    std::uint8_t callbackId = 0;
+};
+
+struct GetMultichannelAssociationCommand
+{
+    std::uint8_t nodeId     = 0;
+    std::uint8_t groupId    = 0;
+    std::uint8_t callbackId = 0;
+};
+
+struct GetMultichannelAssociationGroupingsCommand
+{
+    std::uint8_t nodeId     = 0;
+    std::uint8_t callbackId = 0;
+};
+
 // ---- Retention trait ----------------------------------------------
 
 /// Specialize to true_type for events whose latest value should be

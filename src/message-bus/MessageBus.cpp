@@ -144,4 +144,17 @@ template auto publish<GetAssociationCommand>(const GetAssociationCommand&) -> vo
 template auto subscribe<GetAssociationGroupingsCommand>(std::function<void(const GetAssociationGroupingsCommand&)>)
     -> SubscriptionId;
 template auto publish<GetAssociationGroupingsCommand>(const GetAssociationGroupingsCommand&) -> void;
+template auto subscribe<SetMultichannelAssociationCommand>(
+    std::function<void(const SetMultichannelAssociationCommand&)>) -> SubscriptionId;
+template auto publish<SetMultichannelAssociationCommand>(const SetMultichannelAssociationCommand&) -> void;
+template auto subscribe<RemoveMultichannelAssociationCommand>(
+    std::function<void(const RemoveMultichannelAssociationCommand&)>) -> SubscriptionId;
+template auto publish<RemoveMultichannelAssociationCommand>(const RemoveMultichannelAssociationCommand&) -> void;
+template auto subscribe<GetMultichannelAssociationCommand>(
+    std::function<void(const GetMultichannelAssociationCommand&)>) -> SubscriptionId;
+template auto publish<GetMultichannelAssociationCommand>(const GetMultichannelAssociationCommand&) -> void;
+template auto subscribe<GetMultichannelAssociationGroupingsCommand>(
+    std::function<void(const GetMultichannelAssociationGroupingsCommand&)>) -> SubscriptionId;
+template auto publish<GetMultichannelAssociationGroupingsCommand>(const GetMultichannelAssociationGroupingsCommand&)
+    -> void;
 }  // namespace MessageBus

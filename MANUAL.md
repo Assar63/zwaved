@@ -38,10 +38,12 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list thirteen methods (`AddNode`, `StopAddNode`,
+The introspection should list seventeen methods (`AddNode`, `StopAddNode`,
 `RemoveNode`, `StopRemoveNode`, `RemoveFailedNode`, `SetSwitchBinary`,
 `GetNodes`, `GetDongleInfo`, `GetInitData`, `SetAssociation`,
-`RemoveAssociation`, `GetAssociation`, `GetAssociationGroupings`) and
+`RemoveAssociation`, `GetAssociation`, `GetAssociationGroupings`,
+`SetMultichannelAssociation`, `RemoveMultichannelAssociation`,
+`GetMultichannelAssociation`, `GetMultichannelAssociationGroupings`) and
 eleven signals (`NodeInclusionStatus`, `NodeExclusionStatus`,
 `DongleStatus`, `DongleInfo`, `InitData`, `SendDataStatus`,
 `ApplicationCommand`, `SwitchBinaryReport`, `AssociationReport`,
@@ -91,6 +93,10 @@ or wait for the next hot-plug to determine current state.
 | `RemoveAssociation`       | `y y ay y` (nodeId, groupId, members, callbackId)                                 | Remove `members` from `groupId` (empty `members` means *all*)                                                                                                                |
 | `GetAssociation`          | `y y y` (nodeId, groupId, callbackId)                                             | Query the current members of `groupId`; result arrives as `AssociationReport`                                                                                                |
 | `GetAssociationGroupings` | `y y` (nodeId, callbackId)                                                        | Query how many association groups `nodeId` exposes; result arrives as `AssociationGroupingsReport`                                                                           |
+| `SetMultichannelAssociation`          | `y y ay a(yy) y` (nodeId, groupId, nodeMembers, endpointMembers, callbackId)          | Add `nodeMembers` and `(nodeId,endpoint)` pairs to `groupId` (CC 0x8E cmd 0x01)                              |
+| `RemoveMultichannelAssociation`       | `y y ay a(yy) y` (nodeId, groupId, nodeMembers, endpointMembers, callbackId)          | Remove members from `groupId`; both arrays empty means *all*                                                  |
+| `GetMultichannelAssociation`          | `y y y` (nodeId, groupId, callbackId)                                                 | Query members; result arrives as `ApplicationCommand` carrying a Multi Channel Association REPORT (CC 0x8E cmd 0x03)  |
+| `GetMultichannelAssociationGroupings` | `y y` (nodeId, callbackId)                                                            | Query supported groupings; result arrives as `ApplicationCommand` carrying a Multi Channel Association GROUPINGS REPORT (CC 0x8E cmd 0x06) |
 
 `y` = `BYTE` (uint8), `q` = `UINT16`, `ay` = array of bytes.
 
@@ -447,6 +453,65 @@ on the wire (Association SET is idempotent for already-listed members),
 so re-inclusion of the same device is safe. Non-Z-Wave-Plus nodes (no
 0x5E in the supported list) are left untouched — set them up with the
 explicit `[L]` terminal action or `SetAssociation` D-Bus method.
+
+## 14b. Multi Channel Association (CC 0x8E)
+
+For multi-endpoint devices (a Z-Wave thermostat with separate humidity
+and temperature endpoints, a metering strip with a per-outlet endpoint,
+…) plain Association can only target whole nodes — there's no way to
+say *send the report to endpoint 3 of node 7*. Command Class `0x8E`
+("Multi Channel Association") solves this by carrying both **node**
+members (just like CC `0x85`) and **endpoint** members (`nodeId,
+endpoint` pairs). The wire frame puts node members first, then a
+`MARKER = 0x00` byte, then the pairs.
+
+The four daemon methods mirror their plain-Association counterparts but
+add a fifth argument carrying the endpoint pairs as `a(yy)`:
+
+```bash
+# How many MCA groups does node 12 expose?
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetMultichannelAssociationGroupings yy 12 1
+
+# Read group 3 of node 12
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetMultichannelAssociation yyy 12 3 2
+
+# Add a node member (node 5) and an endpoint member (node 7 endpoint 2)
+# to node 12's group 3:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetMultichannelAssociation 'yyaya(yy)y' \
+    12 3 \
+    1 5 \
+    1 7 2 \
+    9
+
+# Remove that endpoint member, leaving the node member in place:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 RemoveMultichannelAssociation 'yyaya(yy)y' \
+    12 3 \
+    0 \
+    1 7 2 \
+    10
+
+# Remove ALL members (both kinds) — both arrays empty:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 RemoveMultichannelAssociation 'yyaya(yy)y' \
+    12 3 \
+    0 \
+    0 \
+    11
+```
+
+Get/Groupings replies come back as **raw `ApplicationCommand` signals**
+(rather than typed `MultichannelAssociationReport`), since clients that
+care about MCA already need a CC decoder for the encompassing endpoint
+encapsulation. Filter on `ccData[0] == 0x8E && ccData[1] == 0x03` for
+REPORT and `ccData[1] == 0x06` for GROUPINGS REPORT; the wire shape is
+documented in the Z-Wave Application Command Class spec §4.51.
+
+`SendDataStatus` arrives separately for each Set/Remove/Get/Groupings
+call (echoing the `callbackId` you passed).
 
 ## 15. Existing-network discovery (`InitData`)
 

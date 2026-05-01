@@ -90,6 +90,7 @@ Each component owns its thread and `running` flag inside an anonymous namespace,
 - Application-layer command-class codecs live under `src/zwave-protocol/application/`. Each one produces and parses the byte sequence that goes inside FUNC_ID_ZW_SEND_DATA payloads; they don't touch the dongle directly. Currently:
   - `BinarySwitch` for Command Class `0x25` (Set / Get / Report); pairs with `SendDataRequest` to drive On/Off at a node
   - `Association` for Command Class `0x85` (Set / Get / Report / Remove / Groupings Get / Groupings Report); pairs with `SendDataRequest` to manage per-group association lists
+  - `MultichannelAssociation` for Command Class `0x8E` — the same six commands as `Association`, but each group can hold both whole-node members and `(nodeId, endpoint)` pair members separated by a `MARKER = 0x00` byte on the wire
   - New CCs (Multilevel Switch, Configuration, etc.) belong here and just need adding to `src/zwave-protocol/application/CMakeLists.txt`
 - `HostApiSession` tracks the single active inclusion/exclusion session and correlates requests with their callbacks
 - Inter-thread channels: `HostApiRequestQueue` (in: `AddNodeRequest` / `RemoveNodeRequest` / `SendDataRequest` variant) and `HostApiCallbackDispatcher` (out: `NodeStatusCallback` / `SendDataCallback` variant)

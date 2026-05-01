@@ -7,4 +7,5 @@
 target_sources(zwaved PRIVATE
     BinarySwitch.cpp
     Association.cpp
+    MultichannelAssociation.cpp
 )

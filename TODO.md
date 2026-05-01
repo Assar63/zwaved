@@ -13,6 +13,7 @@ companion `zwave-terminal` client, and packaging.
 
 - [x] **Binary Switch (CC `0x25`)** — `SetSwitchBinary` over D-Bus, end-to-end including SendData and Report decode.
 - [x] **Association (CC `0x85`)** — `SetAssociation` / `RemoveAssociation` / `GetAssociation` / `GetAssociationGroupings`; `AssociationReport` and `AssociationGroupingsReport` signals on the unsolicited path.
+- [x] **Multi Channel Association (CC `0x8E`)** — `SetMultichannelAssociation` / `RemoveMultichannelAssociation` / `GetMultichannelAssociation` / `GetMultichannelAssociationGroupings`. Same six wire commands as plain Association, but each group also carries `(nodeId, endpoint)` pairs after a `MARKER = 0x00` byte. Reports come back as raw `ApplicationCommand` signals — clients filter on `ccData[0] == 0x8E`.
 - [x] **Unsolicited event handling** — `FUNC_ID_APPLICATION_COMMAND_HANDLER` decoded and fanned out via `MessageBus`.
 - [x] **Node list** — `src/node-registry/` tracks included nodes; exposed as `GetNodes()` on D-Bus and via `[l]` in the terminal.
 - [x] **Dongle introspection on connect** — `GET_VERSION` + `MEMORY_GET_ID` synchronously after serial open; published as `DongleInfo` (retained on the bus, signalled on D-Bus, cached for `GetDongleInfo`). `[i]` in the terminal queries it.
@@ -48,7 +49,7 @@ companion `zwave-terminal` client, and packaging.
 
 ### Quality & docs
 
-- [x] **Unit tests** — four modules covered: `HostApi` (encoder + decoder round-trips for every `FUNC_ID` the daemon issues), `BinarySwitch` (encode + decodeReport), `Association` (encode + decode for both Report and GroupingsReport), `FrameTransport` (passive `pumpOnce` paths plus active `sendRequest` happy / NAK-retry / CAN-retry paths, driven over a `socketpair(2)` via `SerialPort::adoptFd`). GoogleTest via `libgtest-dev`; `ZWAVED_BUILD_TESTS=ON` default; 55/55 in ~2.4s via `ctest --test-dir cmake-build-gnu`.
+- [x] **Unit tests** — five modules covered: `HostApi` (encoder + decoder round-trips for every `FUNC_ID` the daemon issues), `BinarySwitch` (encode + decodeReport), `Association` (encode + decode for both Report and GroupingsReport), `MultichannelAssociation` (encode/decode for whole-node + endpoint-pair members, REMOVE-all elision of MARKER, malformed-frame rejection), `FrameTransport` (passive `pumpOnce` paths plus active `sendRequest` happy / NAK-retry / CAN-retry paths, driven over a `socketpair(2)` via `SerialPort::adoptFd`). GoogleTest via `libgtest-dev`; `ZWAVED_BUILD_TESTS=ON` default; 76/76 in ~2.5s via `ctest --test-dir cmake-build-gnu`.
 - [ ] `Help` command — list of supported D-Bus methods and what they do.
 - [ ] Refresh `MANUAL.md` and `README.md`; add a dedicated README for `utils/zwave-terminal/`.
 

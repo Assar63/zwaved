@@ -33,6 +33,64 @@ configure_file(
     @ONLY
 )
 
+# ----------------------------------------------------------------------
+# Codegen: scripts/codegen/ → ${CMAKE_BINARY_DIR}/generated/
+#
+# InterfaceManifest.yml is the single source of truth for the
+# daemon's bus + D-Bus + CC surface; the Python generator under
+# scripts/codegen/ turns it into C++ headers/sources. Phase 1 emits
+# only Manifest.gen.hpp as a sanity-check artefact — nothing in the
+# daemon consumes it yet, but adding the custom command here means a
+# manifest edit retriggers the generator on the next build, and the
+# CMake build graph already includes the codegen by the time later
+# phases plug in real outputs.
+# ----------------------------------------------------------------------
+find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
+
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import yaml, jinja2"
+    RESULT_VARIABLE _zwaved_codegen_deps_rc
+    OUTPUT_QUIET ERROR_QUIET
+)
+if(NOT _zwaved_codegen_deps_rc EQUAL 0)
+    message(FATAL_ERROR
+        "scripts/codegen requires PyYAML and Jinja2.\n"
+        "On Debian/Ubuntu: sudo apt install python3-yaml python3-jinja2"
+    )
+endif()
+
+set(ZWAVED_MANIFEST   "${CMAKE_SOURCE_DIR}/InterfaceManifest.yml")
+set(ZWAVED_CODEGEN    "${CMAKE_SOURCE_DIR}/scripts/codegen/generate.py")
+set(ZWAVED_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
+
+set(ZWAVED_GENERATED_HEADERS
+    "${ZWAVED_GENERATED_DIR}/Manifest.gen.hpp"
+    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.hpp"
+)
+set(ZWAVED_GENERATED_SOURCES
+    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
+)
+
+# Reconfigure when any generator source changes so the OUTPUT list
+# stays accurate as new targets land.
+file(GLOB_RECURSE ZWAVED_CODEGEN_SOURCES
+    CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/scripts/codegen/*.py"
+    "${CMAKE_SOURCE_DIR}/scripts/codegen/templates/*"
+)
+
+add_custom_command(
+    OUTPUT ${ZWAVED_GENERATED_HEADERS} ${ZWAVED_GENERATED_SOURCES}
+    COMMAND "${Python3_EXECUTABLE}" "${ZWAVED_CODEGEN}"
+        --manifest "${ZWAVED_MANIFEST}"
+        --out      "${ZWAVED_GENERATED_DIR}"
+    DEPENDS "${ZWAVED_MANIFEST}" ${ZWAVED_CODEGEN_SOURCES}
+    COMMENT "Codegen: InterfaceManifest.yml → ${ZWAVED_GENERATED_DIR}/"
+    VERBATIM
+)
+
+add_custom_target(zwaved_codegen DEPENDS ${ZWAVED_GENERATED_HEADERS} ${ZWAVED_GENERATED_SOURCES})
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUDEV REQUIRED IMPORTED_TARGET libudev)
 pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
@@ -69,6 +127,11 @@ set_property(CACHE ZWAVED_LOGGER_SINK PROPERTY STRINGS "stdout" "syslog")
 
 # Process source subdirectories
 add_subdirectory(src)
+
+# zwaved doesn't consume any generated header today, so the
+# dependency edge is added explicitly so the codegen still runs as
+# part of a normal `cmake --build`.
+add_dependencies(zwaved zwaved_codegen)
 
 if(ZWAVED_LOGGER_SINK STREQUAL "syslog")
     target_compile_definitions(zwaved PRIVATE ZWAVED_LOGGER_SYSLOG=1)

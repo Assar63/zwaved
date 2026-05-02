@@ -1,0 +1,807 @@
+# BackendManifest.yml
+#
+# Canonical description of the daemon's external and internal message
+# surface. Every cross-module contract lives here -- in-process
+# MessageBus event shapes, the D-Bus method/signal surface, and the
+# Z-Wave Command Class wire frames that ride inside SendData payloads.
+#
+# Today this is human documentation. The intent is for a CMake-time
+# code generator to consume it as the single source of truth, emitting
+# MessageBus.hpp event structs, MessageBus.cpp explicit
+# instantiations, the D-Bus method/signal bindings in DBusBackend.cpp,
+# and CC codec skeletons. Until that lands, the file is kept in sync
+# by hand alongside the modules it describes -- a discrepancy between
+# the manifest and any of those four sites is a bug in the manifest.
+#
+# ----- Type system ---------------------------------------------------
+# Field types map cleanly onto both C++ and D-Bus:
+#
+#   bool         cpp: bool                          dbus: b
+#   u8           cpp: std::uint8_t                  dbus: y
+#   u16          cpp: std::uint16_t                 dbus: q
+#   u32          cpp: std::uint32_t                 dbus: u
+#   u64          cpp: std::uint64_t                 dbus: t
+#   string       cpp: std::string                   dbus: s
+#   bytes        cpp: std::vector<std::uint8_t>     dbus: ay
+#   array<T, N>  cpp: std::array<T, N>              dbus: a<T> (no length check)
+#   list<T>      cpp: std::vector<T>                dbus: a<T>
+#   struct ref   cpp: <Name>                        dbus: (<fields...>)
+#
+# `default:` documents the wire-level default the codegen should emit
+# in the C++ struct's member initializer. `doc:` is human-only.
+
+version: 1
+
+# =====================================================================
+# 1. Nested structs
+# =====================================================================
+# Reusable shapes referenced by `events` and the D-Bus surface. Each
+# becomes a plain C++ struct in the codegen output; they are not
+# subscribable/publishable on the bus on their own.
+
+structs:
+
+  - name: NodeInfo
+    doc: One node entry in the persistent registry.
+    fields:
+      - { name: nodeId,         type: u8,     default: 0 }
+      - { name: basicType,      type: u8,     default: 0 }
+      - { name: genericType,    type: u8,     default: 0 }
+      - { name: specificType,   type: u8,     default: 0 }
+      - { name: commandClasses, type: bytes }
+
+  - name: AcceptedDongleConfig
+    doc: One accepted USB dongle identity (VID/PID/name).
+    fields:
+      - { name: vid,  type: string, doc: "4-char lowercase hex" }
+      - { name: pid,  type: string, doc: "4-char lowercase hex" }
+      - { name: name, type: string }
+
+  - name: EndpointMember
+    doc: |
+      One node:endpoint pair carried by Multi Channel Association
+      commands and reports. Mirrors the application-layer codec's
+      EndpointMember; redeclared so the bus header is independent of
+      application/.
+    fields:
+      - { name: nodeId,   type: u8, default: 0 }
+      - { name: endpoint, type: u8, default: 0 }
+
+# =====================================================================
+# 2. MessageBus events
+# =====================================================================
+# Every event published on the in-process bus. `category` controls how
+# the codegen treats it:
+#
+#   state      - retained: late subscribers receive the latest value on
+#                subscribe. Specialize IsRetained<T> to true_type.
+#   config     - retained, populated once at startup by Config.
+#   transient  - not retained.
+#   command    - not retained; published from external transports,
+#                consumed by ProtocolThread.
+#
+# `direction` is documentation: who publishes, who subscribes.
+
+events:
+
+  # ---- 2a. State (retained) ---------------------------------------
+  - name: DongleStatus
+    category: state
+    direction: { publishers: [zwave-dongle], subscribers: [external-api, zwave-protocol] }
+    doc: Lifecycle state of the Z-Wave dongle's serial attachment.
+    fields:
+      - { name: connected, type: bool,   default: false }
+      - { name: ttyPath,   type: string, doc: "empty unless connected" }
+
+  - name: DongleInfo
+    category: state
+    direction: { publishers: [zwave-protocol], subscribers: [external-api] }
+    doc: |
+      Static introspection from FUNC_ID_GET_VERSION + FUNC_ID_MEMORY_GET_ID
+      after the serial port opens.
+    fields:
+      - { name: libraryVersion,   type: string, doc: "e.g. 'Z-Wave 6.07'" }
+      - { name: libraryType,      type: u8,     default: 0 }
+      - { name: homeId,           type: bytes,  doc: "4 bytes" }
+      - { name: controllerNodeId, type: u8,     default: 0 }
+
+  - name: InitData
+    category: state
+    direction: { publishers: [zwave-protocol], subscribers: [external-api, node-registry] }
+    doc: FUNC_ID_SERIAL_API_GET_INIT_DATA (0x02) RESPONSE — startup snapshot.
+    fields:
+      - { name: serialApiVersion, type: u8,    default: 0 }
+      - { name: capabilities,     type: u8,    default: 0, doc: "bit 0=secondary, 1=no-send, 2=SIS, 3=real-primary" }
+      - { name: chipType,         type: u8,    default: 0 }
+      - { name: chipVersion,      type: u8,    default: 0 }
+      - { name: nodeIds,          type: bytes, doc: "expanded node bitmap" }
+
+  - name: NodeListChanged
+    category: state
+    direction: { publishers: [node-registry], subscribers: [external-api] }
+    doc: Snapshot of the node registry. Republished on add/remove/seed/setHomeId.
+    fields:
+      - { name: nodes, type: list<NodeInfo> }
+
+  - name: SessionStatus
+    category: state
+    direction: { publishers: [zwave-protocol], subscribers: [external-api] }
+    doc: |
+      Mirror of the protocol thread's inclusion/exclusion session
+      tracker, so external observers can answer "is a session in
+      flight" without reaching into protocol internals.
+    fields:
+      - { name: active,    type: bool, default: false }
+      - { name: commandId, type: u8,   default: 0, doc: "HostApi::CMD_ADD_NODE_TO_NETWORK / CMD_REMOVE_NODE_FROM_NETWORK / 0" }
+      - { name: sessionId, type: u8,   default: 0 }
+
+  # ---- 2b. Configuration (retained, set once at startup) -----------
+  # Published once by Config (priority 102) after parsing zwaved.conf;
+  # consumers subscribe from their own constructor and pick up the
+  # cached value via replay-on-subscribe.
+
+  - name: LoggerConfig
+    category: config
+    direction: { publishers: [config], subscribers: [logger] }
+    doc: Logger threshold. minLevel is the underlying integer of Logger::Level.
+    fields:
+      - { name: minLevel, type: u8, default: 1, doc: "0=Debug, 1=Info, 2=Warn, 3=Error" }
+
+  - name: DonglesConfig
+    category: config
+    direction: { publishers: [config], subscribers: [zwave-dongle] }
+    doc: USB dongles the monitor thread will recognise.
+    fields:
+      - { name: accept, type: list<AcceptedDongleConfig> }
+
+  - name: StorageConfig
+    category: config
+    direction: { publishers: [config], subscribers: [node-registry] }
+    doc: Storage paths. Empty stateDir means fall back to env / built-in default.
+    fields:
+      - { name: stateDir, type: string }
+
+  - name: BehaviorConfig
+    category: config
+    direction: { publishers: [config], subscribers: [zwave-protocol] }
+    doc: Daemon-wide feature toggles.
+    fields:
+      - { name: autoLifeline, type: bool, default: true }
+
+  # ---- 2c. Transient protocol events ------------------------------
+
+  - name: ApplicationCommand
+    category: transient
+    direction: { publishers: [zwave-protocol], subscribers: [external-api, cc-translator] }
+    doc: Unsolicited CC frame inside FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04).
+    fields:
+      - { name: rxStatus,     type: u8,    default: 0 }
+      - { name: sourceNodeId, type: u8,    default: 0 }
+      - { name: ccData,       type: bytes }
+
+  - name: NodeInclusionStatus
+    category: transient
+    direction: { publishers: [zwave-protocol], subscribers: [external-api] }
+    doc: Decoded callback for FUNC_ID_ZW_ADD_NODE_TO_NETWORK (0x4A).
+    fields:
+      - { name: sessionId,          type: u8,  default: 0 }
+      - { name: status,             type: u8,  default: 0 }
+      - { name: nodeId,             type: u16, default: 0 }
+      - { name: basicDeviceType,    type: u8,  default: 0 }
+      - { name: genericDeviceType,  type: u8,  default: 0 }
+      - { name: specificDeviceType, type: u8,  default: 0 }
+      - { name: commandClasses,     type: bytes }
+
+  - name: NodeExclusionStatus
+    category: transient
+    direction: { publishers: [zwave-protocol], subscribers: [external-api] }
+    doc: Decoded callback for FUNC_ID_ZW_REMOVE_NODE_FROM_NETWORK (0x4B).
+    fields:
+      - { name: sessionId,          type: u8,  default: 0 }
+      - { name: status,             type: u8,  default: 0 }
+      - { name: nodeId,             type: u16, default: 0 }
+      - { name: basicDeviceType,    type: u8,  default: 0 }
+      - { name: genericDeviceType,  type: u8,  default: 0 }
+      - { name: specificDeviceType, type: u8,  default: 0 }
+      - { name: commandClasses,     type: bytes }
+
+  - name: SendDataCallback
+    category: transient
+    direction: { publishers: [zwave-protocol], subscribers: [external-api] }
+    doc: Decoded callback for FUNC_ID_ZW_SEND_DATA (0x13) completion.
+    fields:
+      - { name: callbackId, type: u8, default: 0 }
+      - { name: txStatus,   type: u8, default: 0, doc: "0=OK, 1=NoAck, 2=Fail, 3=NotIdle, 4=NoRoute, 5=Verified" }
+
+  - name: RemoveFailedNodeStatus
+    category: transient
+    direction: { publishers: [zwave-protocol], subscribers: [external-api] }
+    doc: |
+      Progress signal for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61).
+      Emitted twice for a typical removal: phase=PHASE_RESPONSE
+      carries the synchronous response, phase=PHASE_CALLBACK the
+      async callback.
+    constants:
+      - { name: PHASE_RESPONSE, value: 0 }
+      - { name: PHASE_CALLBACK, value: 1 }
+    fields:
+      - { name: nodeId,    type: u8, default: 0 }
+      - { name: sessionId, type: u8, default: 0 }
+      - { name: phase,     type: u8, default: PHASE_RESPONSE }
+      - { name: status,    type: u8, default: 0, doc: "interpretation depends on phase" }
+
+  # ---- 2d. Command events (D-Bus → ProtocolThread) ----------------
+  # External transports translate semantic D-Bus calls into one of
+  # these and publish; ProtocolThread subscribes and dispatches.
+
+  - name: AddNodeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Initiate or stop FUNC_ID_ZW_ADD_NODE_TO_NETWORK (0x4A).
+    constants:
+      - { name: MODE_ANY_NODE,            value: 0x01 }
+      - { name: MODE_STOP,                value: 0x05 }
+      - { name: MODE_STOP_REPLICATION,    value: 0x06 }
+      - { name: MODE_SMART_START_INCLUDE, value: 0x08 }
+      - { name: MODE_SMART_START_LISTEN,  value: 0x09 }
+    fields:
+      - { name: mode,              type: u8,             default: MODE_ANY_NODE }
+      - { name: power,             type: bool,           default: false }
+      - { name: nwi,               type: bool,           default: false }
+      - { name: protocolLongRange, type: bool,           default: false }
+      - { name: skipFlNeighbors,   type: bool,           default: false }
+      - { name: sessionId,         type: u8,             default: 0 }
+      - { name: includeHomeIds,    type: bool,           default: false }
+      - { name: nwiHomeId,         type: "array<u8, 4>" }
+      - { name: authHomeId,        type: "array<u8, 4>" }
+
+  - name: RemoveNodeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Initiate or stop FUNC_ID_ZW_REMOVE_NODE_FROM_NETWORK (0x4B).
+    constants:
+      - { name: MODE_ANY_NODE, value: 0x01 }
+      - { name: MODE_STOP,     value: 0x05 }
+    fields:
+      - { name: mode,      type: u8,   default: MODE_ANY_NODE }
+      - { name: power,     type: bool, default: false }
+      - { name: nwe,       type: bool, default: false }
+      - { name: sessionId, type: u8,   default: 0 }
+
+  - name: RemoveFailedNodeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Drive FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61) for an unresponsive node.
+    fields:
+      - { name: nodeId,    type: u8, default: 0 }
+      - { name: sessionId, type: u8, default: 0 }
+
+  - name: SetSwitchBinaryCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Drive a node's Binary Switch (CC 0x25) on/off state.
+    fields:
+      - { name: nodeId,     type: u8,   default: 0 }
+      - { name: turnOn,     type: bool, default: false }
+      - { name: callbackId, type: u8,   default: 0 }
+
+  - name: GetSwitchBinaryCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's Binary Switch state.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: SetBasicCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Send a Basic (CC 0x20) Set. Spec semantics:
+      0=off, 0x01..0x63=level 1..99, 0xFF=on/full/"previous level".
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: value,      type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetBasicCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's Basic value.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: SetAssociationCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Add members to a group on the Association CC (0x85).
+    fields:
+      - { name: nodeId,     type: u8,    default: 0 }
+      - { name: groupId,    type: u8,    default: 0 }
+      - { name: members,    type: bytes }
+      - { name: callbackId, type: u8,    default: 0 }
+
+  - name: RemoveAssociationCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Remove members from a group (empty members = remove all).
+    fields:
+      - { name: nodeId,     type: u8,    default: 0 }
+      - { name: groupId,    type: u8,    default: 0 }
+      - { name: members,    type: bytes }
+      - { name: callbackId, type: u8,    default: 0 }
+
+  - name: GetAssociationCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: groupId,    type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetAssociationGroupingsCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: SetMultichannelAssociationCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Multi Channel Association (CC 0x8E) with both whole-node and (node,endpoint) members.
+    fields:
+      - { name: nodeId,          type: u8,                    default: 0 }
+      - { name: groupId,         type: u8,                    default: 0 }
+      - { name: nodeMembers,     type: bytes }
+      - { name: endpointMembers, type: list<EndpointMember> }
+      - { name: callbackId,      type: u8,                    default: 0 }
+
+  - name: RemoveMultichannelAssociationCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    fields:
+      - { name: nodeId,          type: u8,                    default: 0 }
+      - { name: groupId,         type: u8,                    default: 0 }
+      - { name: nodeMembers,     type: bytes }
+      - { name: endpointMembers, type: list<EndpointMember> }
+      - { name: callbackId,      type: u8,                    default: 0 }
+
+  - name: GetMultichannelAssociationCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: groupId,    type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetMultichannelAssociationGroupingsCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+# =====================================================================
+# 3. D-Bus surface
+# =====================================================================
+# The system-bus contract published by ExternalApi::DBusBackend.
+
+dbus:
+  bus_name:    com.tiunda.ZWaved
+  object_path: /com/tiunda/ZWaved
+  interface:   com.tiunda.ZWaved1
+
+  # ---- 3a. Methods ------------------------------------------------
+  # `action` describes what the method does. Three shapes:
+  #
+  #   publish: <EventName>
+  #     Take the inbound D-Bus arguments and publish them as the
+  #     given MessageBus command event. Field mapping is by name
+  #     unless `map:` is given. Return type is void (no out args).
+  #
+  #   publish_constant: { event: <Event>, fields: {<f>: <value>} }
+  #     Publish a fixed shape (e.g. StopAddNode → AddNodeCommand
+  #     with mode=MODE_STOP). Inbound D-Bus args fill any missing
+  #     fields; everything else is the constant.
+  #
+  #   read_cached: <EventName>
+  #     Return the latest retained value of the given state event.
+  #     The struct shape comes from `returns:`.
+  #
+  #   custom: <name>
+  #     Hand-written body. Codegen emits a forward declaration the
+  #     daemon implements; bookkeeping fields below describe the
+  #     return shape so the manifest still documents the contract.
+
+  methods:
+
+    # -- Inclusion / exclusion -------------------------------------
+    - name: AddNode
+      params:
+        - { name: mode,       dbus: y, cpp: u8 }
+        - { name: flags,      dbus: y, cpp: u8, doc: "bit 7=Power, 6=NWI, 5=Protocol, 4=SFLND" }
+        - { name: sessionId,  dbus: y, cpp: u8 }
+        - { name: nwiHomeId,  dbus: ay, cpp: bytes }
+        - { name: authHomeId, dbus: ay, cpp: bytes }
+      action:
+        publish: AddNodeCommand
+        # `flags` byte is unpacked into individual bool fields by the
+        # codegen; `nwiHomeId`/`authHomeId` empty arrays land as the
+        # default-constructed std::array<u8,4> with includeHomeIds=false.
+
+    - name: StopAddNode
+      params:
+        - { name: sessionId, dbus: y, cpp: u8 }
+      action:
+        publish_constant:
+          event: AddNodeCommand
+          fields: { mode: MODE_STOP }
+
+    - name: RemoveNode
+      params:
+        - { name: mode,      dbus: y, cpp: u8 }
+        - { name: flags,     dbus: y, cpp: u8, doc: "bit 7=Power, 6=NWE" }
+        - { name: sessionId, dbus: y, cpp: u8 }
+      action:
+        publish: RemoveNodeCommand
+
+    - name: StopRemoveNode
+      params:
+        - { name: sessionId, dbus: y, cpp: u8 }
+      action:
+        publish_constant:
+          event: RemoveNodeCommand
+          fields: { mode: MODE_STOP }
+
+    - name: RemoveFailedNode
+      params:
+        - { name: nodeId,    dbus: y, cpp: u8 }
+        - { name: sessionId, dbus: y, cpp: u8 }
+      action:
+        publish: RemoveFailedNodeCommand
+
+    # -- Application CCs -------------------------------------------
+    - name: SetSwitchBinary
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: turnOn,     dbus: b, cpp: bool }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: SetSwitchBinaryCommand
+
+    - name: GetSwitchBinary
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetSwitchBinaryCommand
+
+    - name: SetBasic
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: value,      dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: SetBasicCommand
+
+    - name: GetBasic
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetBasicCommand
+
+    - name: SetAssociation
+      params:
+        - { name: nodeId,     dbus: y,  cpp: u8 }
+        - { name: groupId,    dbus: y,  cpp: u8 }
+        - { name: members,    dbus: ay, cpp: bytes }
+        - { name: callbackId, dbus: y,  cpp: u8 }
+      action:
+        publish: SetAssociationCommand
+
+    - name: RemoveAssociation
+      params:
+        - { name: nodeId,     dbus: y,  cpp: u8 }
+        - { name: groupId,    dbus: y,  cpp: u8 }
+        - { name: members,    dbus: ay, cpp: bytes }
+        - { name: callbackId, dbus: y,  cpp: u8 }
+      action:
+        publish: RemoveAssociationCommand
+
+    - name: GetAssociation
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: groupId,    dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetAssociationCommand
+
+    - name: GetAssociationGroupings
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetAssociationGroupingsCommand
+
+    - name: SetMultichannelAssociation
+      params:
+        - { name: nodeId,          dbus: y,      cpp: u8 }
+        - { name: groupId,         dbus: y,      cpp: u8 }
+        - { name: nodeMembers,     dbus: ay,     cpp: bytes }
+        - { name: endpointMembers, dbus: a(yy),  cpp: list<EndpointMember> }
+        - { name: callbackId,      dbus: y,      cpp: u8 }
+      action:
+        publish: SetMultichannelAssociationCommand
+
+    - name: RemoveMultichannelAssociation
+      params:
+        - { name: nodeId,          dbus: y,      cpp: u8 }
+        - { name: groupId,         dbus: y,      cpp: u8 }
+        - { name: nodeMembers,     dbus: ay,     cpp: bytes }
+        - { name: endpointMembers, dbus: a(yy),  cpp: list<EndpointMember> }
+        - { name: callbackId,      dbus: y,      cpp: u8 }
+      action:
+        publish: RemoveMultichannelAssociationCommand
+
+    - name: GetMultichannelAssociation
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: groupId,    dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetMultichannelAssociationCommand
+
+    - name: GetMultichannelAssociationGroupings
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetMultichannelAssociationGroupingsCommand
+
+    # -- Cached-state queries --------------------------------------
+    - name: GetNodes
+      params: []
+      returns:
+        type: list<NodeInfo>
+        dbus: a(yyyyay)
+      action:
+        read_cached: NodeListChanged
+        # Maps `event.nodes` directly to the return tuple.
+
+    - name: GetDongleInfo
+      params: []
+      returns:
+        struct:
+          - { name: libraryVersion,   dbus: s,  cpp: string }
+          - { name: libraryType,      dbus: y,  cpp: u8 }
+          - { name: homeId,           dbus: ay, cpp: bytes }
+          - { name: controllerNodeId, dbus: y,  cpp: u8 }
+      action:
+        read_cached: DongleInfo
+
+    - name: GetInitData
+      params: []
+      returns:
+        struct:
+          - { name: serialApiVersion, dbus: y,  cpp: u8 }
+          - { name: capabilities,     dbus: y,  cpp: u8 }
+          - { name: nodeIds,          dbus: ay, cpp: bytes }
+          - { name: chipType,         dbus: y,  cpp: u8 }
+          - { name: chipVersion,      dbus: y,  cpp: u8 }
+      action:
+        read_cached: InitData
+
+    # -- Custom (hand-written) -------------------------------------
+    - name: GetVersion
+      params: []
+      returns:
+        struct:
+          - { name: semver,      dbus: s, source: Version::SEMVER }
+          - { name: gitDescribe, dbus: s, source: Version::GIT_DESCRIBE }
+      action:
+        custom: emitVersion
+
+    - name: GetNetworkStatus
+      doc: |
+        Aggregate snapshot drawing on multiple cached events
+        (DongleStatus + DongleInfo + NodeListChanged + SessionStatus)
+        plus daemon uptime. Hand-written today; a richer mapping
+        notation could express it declaratively, but the surface is
+        small enough that codegen for it isn't load-bearing.
+      params: []
+      returns:
+        struct:
+          - { name: dongleConnected,  dbus: b, source: cached.DongleStatus.connected }
+          - { name: ttyPath,          dbus: s, source: cached.DongleStatus.ttyPath }
+          - { name: homeId,           dbus: s, source: "hex(cached.DongleInfo.homeId)" }
+          - { name: controllerNodeId, dbus: y, source: cached.DongleInfo.controllerNodeId }
+          - { name: nodeCount,        dbus: u, source: "cached.NodeListChanged.nodes.size()" }
+          - { name: sessionActive,    dbus: b, source: cached.SessionStatus.active }
+          - { name: sessionCommandId, dbus: y, source: cached.SessionStatus.commandId }
+          - { name: sessionId,        dbus: y, source: cached.SessionStatus.sessionId }
+          - { name: uptimeSeconds,    dbus: t, source: "now() - startTime" }
+      action:
+        custom: emitNetworkStatus
+
+  # ---- 3b. Signals ------------------------------------------------
+  # Each signal is triggered by one or more MessageBus events. The
+  # default mapping copies named fields straight through; CC-decoder
+  # signals add a `decode:` step that runs an application/ codec on
+  # the inbound `ccData` and rejects the trigger when it returns
+  # std::nullopt.
+
+  signals:
+
+    - name: DongleStatus
+      params:
+        - { name: connected, dbus: b }
+        - { name: ttyPath,   dbus: s }
+      triggered_by: { event: DongleStatus }
+
+    - name: DongleInfo
+      params:
+        - { name: libraryVersion,   dbus: s }
+        - { name: libraryType,      dbus: y }
+        - { name: homeId,           dbus: ay }
+        - { name: controllerNodeId, dbus: y }
+      triggered_by: { event: DongleInfo }
+
+    - name: InitData
+      params:
+        - { name: serialApiVersion, dbus: y }
+        - { name: capabilities,     dbus: y }
+        - { name: nodeIds,          dbus: ay }
+        - { name: chipType,         dbus: y }
+        - { name: chipVersion,      dbus: y }
+      triggered_by: { event: InitData }
+
+    - name: NodeInclusionStatus
+      params:
+        - { name: sessionId,    dbus: y }
+        - { name: status,       dbus: y }
+        - { name: nodeId,       dbus: q }
+        - { name: basicType,    dbus: y, source: basicDeviceType }
+        - { name: genericType,  dbus: y, source: genericDeviceType }
+        - { name: specificType, dbus: y, source: specificDeviceType }
+        - { name: commandClasses, dbus: ay }
+      triggered_by: { event: NodeInclusionStatus }
+
+    - name: NodeExclusionStatus
+      params:
+        - { name: sessionId,    dbus: y }
+        - { name: status,       dbus: y }
+        - { name: nodeId,       dbus: q }
+        - { name: basicType,    dbus: y, source: basicDeviceType }
+        - { name: genericType,  dbus: y, source: genericDeviceType }
+        - { name: specificType, dbus: y, source: specificDeviceType }
+        - { name: commandClasses, dbus: ay }
+      triggered_by: { event: NodeExclusionStatus }
+
+    - name: SendDataStatus
+      params:
+        - { name: callbackId, dbus: y }
+        - { name: txStatus,   dbus: y }
+      triggered_by: { event: SendDataCallback }
+
+    - name: ApplicationCommand
+      params:
+        - { name: rxStatus,     dbus: y }
+        - { name: sourceNodeId, dbus: y }
+        - { name: ccData,       dbus: ay }
+      triggered_by: { event: ApplicationCommand }
+
+    - name: RemoveFailedNodeStatus
+      params:
+        - { name: nodeId,    dbus: y }
+        - { name: sessionId, dbus: y }
+        - { name: phase,     dbus: y }
+        - { name: status,    dbus: y }
+      triggered_by: { event: RemoveFailedNodeStatus }
+
+    # -- CC-decoder signals: same trigger event, decoded via an
+    # application/ codec into a typed shape.
+
+    - name: SwitchBinaryReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: state,        dbus: y, doc: "0=Off, 1=On, 2=Unknown (BinarySwitch::State)" }
+      triggered_by:
+        event:  ApplicationCommand
+        decode:
+          codec: BinarySwitch.decodeReport
+          input: ccData
+          # Skip emit when the codec returns std::nullopt.
+          on_none: skip
+        map:
+          sourceNodeId: event.sourceNodeId
+          state:       "static_cast<u8>(decoded.state)"
+
+# =====================================================================
+# 4. Application Command Class codecs
+# =====================================================================
+# CC byte/command definitions and wire shapes. The codegen target for
+# these is the `src/zwave-protocol/application/<Name>.{hpp,cpp}` pair;
+# they're consumed by ProtocolThread (encode → SendData) and by the
+# CC-decoder D-Bus signals (decode → typed signal payload).
+
+command_classes:
+
+  - name: BinarySwitch
+    class_byte: 0x25
+    description: |
+      Binary on/off control. SET takes a single value byte
+      (0=off, 0xFF=on); REPORT carries the current state.
+    commands:
+      - name: Set
+        byte: 0x01
+        encode_args:
+          - { name: turnOn, type: bool }
+        wire:
+          - "turnOn ? 0xFF : 0x00"
+      - name: Get
+        byte: 0x02
+        encode_args: []
+        wire: []
+      - name: Report
+        byte: 0x03
+        decoded_struct:
+          - { name: rawValue, type: u8 }
+          - { name: state,    type: enum, doc: "Off | On | Unknown" }
+
+  - name: Basic
+    class_byte: 0x20
+    description: |
+      Universal-fallback CC. Devices without a more specific CC for
+      their primary behaviour map Basic onto whatever does make
+      sense (a switch becomes on/off, a dimmer becomes 0..99).
+    commands:
+      - name: Set
+        byte: 0x01
+        encode_args:
+          - { name: value, type: u8 }
+        wire:
+          - "value"
+      - name: Get
+        byte: 0x02
+        encode_args: []
+        wire: []
+      - name: Report
+        byte: 0x03
+        decoded_struct:
+          - { name: currentValue, type: u8 }
+          - { name: targetValue,  type: u8 }
+          - { name: duration,     type: u8 }
+          - { name: wireFormatV2, type: bool, doc: "true if 5-byte v2+ wire form" }
+
+  - name: Association
+    class_byte: 0x85
+    description: |
+      Per-group association lists -- group 1 is conventionally the
+      lifeline, owned by the primary controller.
+    commands:
+      - { name: Set,             byte: 0x01 }
+      - { name: Get,             byte: 0x02 }
+      - { name: Report,          byte: 0x03 }
+      - { name: Remove,          byte: 0x04 }
+      - { name: GroupingsGet,    byte: 0x05 }
+      - { name: GroupingsReport, byte: 0x06 }
+
+  - name: MultichannelAssociation
+    class_byte: 0x8E
+    description: |
+      Like plain Association but each group can hold both whole-node
+      members and (nodeId, endpoint) pair members, separated on the
+      wire by MARKER = 0x00. REMOVE with both lists empty omits the
+      MARKER and means "remove all members."
+    constants:
+      - { name: MARKER, value: 0x00 }
+    commands:
+      - { name: Set,             byte: 0x01 }
+      - { name: Get,             byte: 0x02 }
+      - { name: Report,          byte: 0x03 }
+      - { name: Remove,          byte: 0x04 }
+      - { name: GroupingsGet,    byte: 0x05 }
+      - { name: GroupingsReport, byte: 0x06 }

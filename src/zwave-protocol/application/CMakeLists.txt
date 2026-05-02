@@ -5,6 +5,7 @@
 # Configuration, etc.) belong here.
 
 target_sources(zwaved PRIVATE
+    Basic.cpp
     BinarySwitch.cpp
     Association.cpp
     MultichannelAssociation.cpp

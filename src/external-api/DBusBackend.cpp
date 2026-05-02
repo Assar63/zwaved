@@ -191,6 +191,22 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                     MessageBus::SetSwitchBinaryCommand{.nodeId = nodeId, .turnOn = turnOn, .callbackId = callbackId});
             });
 
+    obj.registerMethod("SetBasic")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [](const std::uint8_t& nodeId, const std::uint8_t& value, const std::uint8_t& callbackId) -> void {
+                MessageBus::publish(
+                    MessageBus::SetBasicCommand{.nodeId = nodeId, .value = value, .callbackId = callbackId});
+            });
+
+    obj.registerMethod("GetBasic")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [](const std::uint8_t& nodeId, const std::uint8_t& callbackId) -> void
+            { MessageBus::publish(MessageBus::GetBasicCommand{.nodeId = nodeId, .callbackId = callbackId}); });
+
     obj.registerMethod("SetAssociation")
         .onInterface(IFACE_NAME)
         .implementedAs(

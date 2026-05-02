@@ -44,6 +44,16 @@ target_link_libraries(BinarySwitch_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(BinarySwitch_test)
 gtest_discover_tests(BinarySwitch_test)
 
+# ---- Basic ----------------------------------------------------------
+add_executable(Basic_test
+    Basic_test.cpp
+    "${SRC_DIR}/application/Basic.cpp"
+)
+target_include_directories(Basic_test PRIVATE "${SRC_DIR}/application")
+target_link_libraries(Basic_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(Basic_test)
+gtest_discover_tests(Basic_test)
+
 # ---- Association ----------------------------------------------------
 add_executable(Association_test
     Association_test.cpp

@@ -261,6 +261,22 @@ struct SetSwitchBinaryCommand
     std::uint8_t callbackId = 0;
 };
 
+/// Set / get a node's Basic Command Class (0x20) value. The value byte
+/// follows the spec's universal-fallback semantics: 0x00 = off,
+/// 0x01..0x63 = level 1..99, 0xFF = on / full / "previous level".
+struct SetBasicCommand
+{
+    std::uint8_t nodeId     = 0;
+    std::uint8_t value      = 0;
+    std::uint8_t callbackId = 0;
+};
+
+struct GetBasicCommand
+{
+    std::uint8_t nodeId     = 0;
+    std::uint8_t callbackId = 0;
+};
+
 /// Set / remove / get / get-groupings on the Association CC (0x85).
 struct SetAssociationCommand
 {

@@ -7,6 +7,7 @@
 #include "SerialPort.hpp"
 #include "ZwaveDataFrame.hpp"
 #include "application/Association.hpp"
+#include "application/Basic.hpp"
 #include "application/BinarySwitch.hpp"
 #include "application/MultichannelAssociation.hpp"
 
@@ -126,6 +127,8 @@ struct ZwaveProtocolState
     MessageBus::SubscriptionId removeNodeSubscription{0};
     MessageBus::SubscriptionId removeFailedNodeSubscription{0};
     MessageBus::SubscriptionId switchBinarySubscription{0};
+    MessageBus::SubscriptionId setBasicSubscription{0};
+    MessageBus::SubscriptionId getBasicSubscription{0};
     MessageBus::SubscriptionId setAssociationSubscription{0};
     MessageBus::SubscriptionId removeAssociationSubscription{0};
     MessageBus::SubscriptionId getAssociationSubscription{0};
@@ -281,6 +284,26 @@ auto onSetSwitchBinary(const MessageBus::SetSwitchBinaryCommand& cmd) -> void
     HostApi::SendDataRequest req{};
     req.nodeId     = cmd.nodeId;
     req.data       = BinarySwitch::encodeSet(cmd.turnOn);
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onSetBasic(const MessageBus::SetBasicCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = Basic::encodeSet(cmd.value);
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onGetBasic(const MessageBus::GetBasicCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = Basic::encodeGet();
     req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
     req.callbackId = cmd.callbackId;
     pushRequest(req);
@@ -862,6 +885,8 @@ auto subscribeBus() -> void
     state().removeFailedNodeSubscription =
         MessageBus::subscribe<MessageBus::RemoveFailedNodeCommand>(onRemoveFailedNodeCommand);
     state().switchBinarySubscription   = MessageBus::subscribe<MessageBus::SetSwitchBinaryCommand>(onSetSwitchBinary);
+    state().setBasicSubscription       = MessageBus::subscribe<MessageBus::SetBasicCommand>(onSetBasic);
+    state().getBasicSubscription       = MessageBus::subscribe<MessageBus::GetBasicCommand>(onGetBasic);
     state().setAssociationSubscription = MessageBus::subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
     state().removeAssociationSubscription =
         MessageBus::subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
@@ -893,6 +918,8 @@ auto unsubscribeBus() -> void
     MessageBus::unsubscribe(state().getAssociationSubscription);
     MessageBus::unsubscribe(state().removeAssociationSubscription);
     MessageBus::unsubscribe(state().setAssociationSubscription);
+    MessageBus::unsubscribe(state().getBasicSubscription);
+    MessageBus::unsubscribe(state().setBasicSubscription);
     MessageBus::unsubscribe(state().switchBinarySubscription);
     MessageBus::unsubscribe(state().removeFailedNodeSubscription);
     MessageBus::unsubscribe(state().removeNodeSubscription);
@@ -906,6 +933,8 @@ auto unsubscribeBus() -> void
     state().getAssociationSubscription                      = 0;
     state().removeAssociationSubscription                   = 0;
     state().setAssociationSubscription                      = 0;
+    state().getBasicSubscription                            = 0;
+    state().setBasicSubscription                            = 0;
     state().switchBinarySubscription                        = 0;
     state().removeFailedNodeSubscription                    = 0;
     state().removeNodeSubscription                          = 0;

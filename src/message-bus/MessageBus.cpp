@@ -134,6 +134,10 @@ template auto subscribe<RemoveFailedNodeCommand>(std::function<void(const Remove
 template auto publish<RemoveFailedNodeCommand>(const RemoveFailedNodeCommand&) -> void;
 template auto subscribe<SetSwitchBinaryCommand>(std::function<void(const SetSwitchBinaryCommand&)>) -> SubscriptionId;
 template auto publish<SetSwitchBinaryCommand>(const SetSwitchBinaryCommand&) -> void;
+template auto subscribe<SetBasicCommand>(std::function<void(const SetBasicCommand&)>) -> SubscriptionId;
+template auto publish<SetBasicCommand>(const SetBasicCommand&) -> void;
+template auto subscribe<GetBasicCommand>(std::function<void(const GetBasicCommand&)>) -> SubscriptionId;
+template auto publish<GetBasicCommand>(const GetBasicCommand&) -> void;
 template auto subscribe<SetAssociationCommand>(std::function<void(const SetAssociationCommand&)>) -> SubscriptionId;
 template auto publish<SetAssociationCommand>(const SetAssociationCommand&) -> void;
 template auto subscribe<RemoveAssociationCommand>(std::function<void(const RemoveAssociationCommand&)>)

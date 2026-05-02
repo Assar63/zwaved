@@ -38,12 +38,13 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list seventeen methods (`AddNode`, `StopAddNode`,
+The introspection should list nineteen methods (`AddNode`, `StopAddNode`,
 `RemoveNode`, `StopRemoveNode`, `RemoveFailedNode`, `SetSwitchBinary`,
-`GetNodes`, `GetDongleInfo`, `GetInitData`, `SetAssociation`,
-`RemoveAssociation`, `GetAssociation`, `GetAssociationGroupings`,
-`SetMultichannelAssociation`, `RemoveMultichannelAssociation`,
-`GetMultichannelAssociation`, `GetMultichannelAssociationGroupings`) and
+`SetBasic`, `GetBasic`, `GetNodes`, `GetDongleInfo`, `GetInitData`,
+`SetAssociation`, `RemoveAssociation`, `GetAssociation`,
+`GetAssociationGroupings`, `SetMultichannelAssociation`,
+`RemoveMultichannelAssociation`, `GetMultichannelAssociation`,
+`GetMultichannelAssociationGroupings`) and
 eleven signals (`NodeInclusionStatus`, `NodeExclusionStatus`,
 `DongleStatus`, `DongleInfo`, `InitData`, `SendDataStatus`,
 `ApplicationCommand`, `SwitchBinaryReport`, `AssociationReport`,
@@ -76,27 +77,29 @@ or wait for the next hot-plug to determine current state.
 
 ## 2. Method reference
 
-| Method                    | Signature                                                                         | Purpose                                                                                                                                                                      |
-|---------------------------|-----------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `AddNode`                 | `y y y ay ay` (mode, flags, sessionId, nwiHomeId, authHomeId)                     | Start an inclusion of any/SmartStart variant                                                                                                                                 |
-| `StopAddNode`             | `y` (sessionId)                                                                   | Send Mode `0x05` to stop an in-progress inclusion                                                                                                                            |
-| `RemoveNode`              | `y y y` (mode, flags, sessionId)                                                  | Start an exclusion                                                                                                                                                           |
-| `StopRemoveNode`          | `y` (sessionId)                                                                   | Send Mode `0x05` to stop an in-progress exclusion                                                                                                                            |
-| `RemoveFailedNode`        | `y y` (nodeId, sessionId)                                                         | Drive `FUNC_ID_ZW_REMOVE_FAILED_NODE_ID` (0x61) for a node that has stopped responding; emits `RemoveFailedNodeStatus` for both the immediate response and the final outcome |
-| `GetVersion`              | `→ (s s)` (semver, gitDescribe)                                                   | Return the daemon's own version (semver bumped manually in `project()`, plus `git describe --tags --dirty --always` from build time) |
-| `GetNetworkStatus`        | `→ (b s s y u b y y t)` (dongleConnected, ttyPath, homeId, controllerNodeId, nodeCount, sessionActive, sessionCommandId, sessionId, uptimeSeconds) | Aggregate snapshot of the daemon's view of the network: dongle connection, home ID, included-node count, in-flight inclusion/exclusion session, daemon uptime |
-| `SetSwitchBinary`         | `y b y` (nodeId, on, callbackId)                                                  | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)`                                                                   |
-| `GetNodes`                | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes)                | Return the in-memory list of currently-included nodes                                                                                                                        |
-| `GetDongleInfo`           | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId)            | Return the dongle introspection captured when the serial port opened                                                                                                         |
-| `GetInitData`             | `→ (y y ay y y)` (serialApiVersion, capabilities, nodeIds, chipType, chipVersion) | Return the SERIAL_API_GET_INIT_DATA response captured at startup; `nodeIds` is the expanded node bitmap                                                                      |
-| `SetAssociation`          | `y y ay y` (nodeId, groupId, members, callbackId)                                 | Add `members` to `groupId` on `nodeId`'s association table (CC 0x85 cmd 0x01)                                                                                                |
-| `RemoveAssociation`       | `y y ay y` (nodeId, groupId, members, callbackId)                                 | Remove `members` from `groupId` (empty `members` means *all*)                                                                                                                |
-| `GetAssociation`          | `y y y` (nodeId, groupId, callbackId)                                             | Query the current members of `groupId`; result arrives as `AssociationReport`                                                                                                |
-| `GetAssociationGroupings` | `y y` (nodeId, callbackId)                                                        | Query how many association groups `nodeId` exposes; result arrives as `AssociationGroupingsReport`                                                                           |
-| `SetMultichannelAssociation`          | `y y ay a(yy) y` (nodeId, groupId, nodeMembers, endpointMembers, callbackId)          | Add `nodeMembers` and `(nodeId,endpoint)` pairs to `groupId` (CC 0x8E cmd 0x01)                              |
-| `RemoveMultichannelAssociation`       | `y y ay a(yy) y` (nodeId, groupId, nodeMembers, endpointMembers, callbackId)          | Remove members from `groupId`; both arrays empty means *all*                                                  |
-| `GetMultichannelAssociation`          | `y y y` (nodeId, groupId, callbackId)                                                 | Query members; result arrives as `ApplicationCommand` carrying a Multi Channel Association REPORT (CC 0x8E cmd 0x03)  |
-| `GetMultichannelAssociationGroupings` | `y y` (nodeId, callbackId)                                                            | Query supported groupings; result arrives as `ApplicationCommand` carrying a Multi Channel Association GROUPINGS REPORT (CC 0x8E cmd 0x06) |
+| Method                                | Signature                                                                                                                                          | Purpose                                                                                                                                                                      |
+|---------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `AddNode`                             | `y y y ay ay` (mode, flags, sessionId, nwiHomeId, authHomeId)                                                                                      | Start an inclusion of any/SmartStart variant                                                                                                                                 |
+| `StopAddNode`                         | `y` (sessionId)                                                                                                                                    | Send Mode `0x05` to stop an in-progress inclusion                                                                                                                            |
+| `RemoveNode`                          | `y y y` (mode, flags, sessionId)                                                                                                                   | Start an exclusion                                                                                                                                                           |
+| `StopRemoveNode`                      | `y` (sessionId)                                                                                                                                    | Send Mode `0x05` to stop an in-progress exclusion                                                                                                                            |
+| `RemoveFailedNode`                    | `y y` (nodeId, sessionId)                                                                                                                          | Drive `FUNC_ID_ZW_REMOVE_FAILED_NODE_ID` (0x61) for a node that has stopped responding; emits `RemoveFailedNodeStatus` for both the immediate response and the final outcome |
+| `GetVersion`                          | `→ (s s)` (semver, gitDescribe)                                                                                                                    | Return the daemon's own version (semver bumped manually in `project()`, plus `git describe --tags --dirty --always` from build time)                                         |
+| `GetNetworkStatus`                    | `→ (b s s y u b y y t)` (dongleConnected, ttyPath, homeId, controllerNodeId, nodeCount, sessionActive, sessionCommandId, sessionId, uptimeSeconds) | Aggregate snapshot of the daemon's view of the network: dongle connection, home ID, included-node count, in-flight inclusion/exclusion session, daemon uptime                |
+| `SetSwitchBinary`                     | `y b y` (nodeId, on, callbackId)                                                                                                                   | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)`                                                                   |
+| `SetBasic`                            | `y y y` (nodeId, value, callbackId)                                                                                                                | Send a Basic SET (CC 0x20) — `value=0` off, `value=0xFF` on, `value=1..99` (`0x01..0x63`) dimmer level. Universal fallback for devices without a specific CC                 |
+| `GetBasic`                            | `y y` (nodeId, callbackId)                                                                                                                         | Send a Basic GET; the node's reply lands as a raw `ApplicationCommand` signal carrying the Basic Report (`ccData[0] == 0x20`, `ccData[1] == 0x03`)                           |
+| `GetNodes`                            | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes)                                                                                 | Return the in-memory list of currently-included nodes                                                                                                                        |
+| `GetDongleInfo`                       | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId)                                                                             | Return the dongle introspection captured when the serial port opened                                                                                                         |
+| `GetInitData`                         | `→ (y y ay y y)` (serialApiVersion, capabilities, nodeIds, chipType, chipVersion)                                                                  | Return the SERIAL_API_GET_INIT_DATA response captured at startup; `nodeIds` is the expanded node bitmap                                                                      |
+| `SetAssociation`                      | `y y ay y` (nodeId, groupId, members, callbackId)                                                                                                  | Add `members` to `groupId` on `nodeId`'s association table (CC 0x85 cmd 0x01)                                                                                                |
+| `RemoveAssociation`                   | `y y ay y` (nodeId, groupId, members, callbackId)                                                                                                  | Remove `members` from `groupId` (empty `members` means *all*)                                                                                                                |
+| `GetAssociation`                      | `y y y` (nodeId, groupId, callbackId)                                                                                                              | Query the current members of `groupId`; result arrives as `AssociationReport`                                                                                                |
+| `GetAssociationGroupings`             | `y y` (nodeId, callbackId)                                                                                                                         | Query how many association groups `nodeId` exposes; result arrives as `AssociationGroupingsReport`                                                                           |
+| `SetMultichannelAssociation`          | `y y ay a(yy) y` (nodeId, groupId, nodeMembers, endpointMembers, callbackId)                                                                       | Add `nodeMembers` and `(nodeId,endpoint)` pairs to `groupId` (CC 0x8E cmd 0x01)                                                                                              |
+| `RemoveMultichannelAssociation`       | `y y ay a(yy) y` (nodeId, groupId, nodeMembers, endpointMembers, callbackId)                                                                       | Remove members from `groupId`; both arrays empty means *all*                                                                                                                 |
+| `GetMultichannelAssociation`          | `y y y` (nodeId, groupId, callbackId)                                                                                                              | Query members; result arrives as `ApplicationCommand` carrying a Multi Channel Association REPORT (CC 0x8E cmd 0x03)                                                         |
+| `GetMultichannelAssociationGroupings` | `y y` (nodeId, callbackId)                                                                                                                         | Query supported groupings; result arrives as `ApplicationCommand` carrying a Multi Channel Association GROUPINGS REPORT (CC 0x8E cmd 0x06)                                   |
 
 `y` = `BYTE` (uint8), `q` = `UINT16`, `ay` = array of bytes.
 
@@ -344,6 +347,36 @@ transmission failed somewhere in the network.
 Get/Report (reading the current state from a node) is not yet
 implemented — the daemon does not yet decode `APPLICATION_COMMAND_HANDLER`
 incoming frames.
+
+## 11b. Driving a Basic value (CC 0x20)
+
+The Basic Command Class is the universal fallback — devices that don't
+expose a more specific CC for their primary behaviour will still
+respond to `Basic SET` and `Basic GET`. A binary switch interprets it
+as on/off, a dimmer as a 0–99 level, a thermostat as a setpoint hint,
+etc. When in doubt about a node's primary CC, Basic is the safe
+starting point.
+
+```bash
+# Turn node 5 fully on (0xFF) with callback id 7:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetBasic yyy 5 0xFF 7
+
+# Set node 5 to 50 % (decimal 50 → 0x32):
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetBasic yyy 5 50 8
+
+# Read the current value (Report arrives as ApplicationCommand):
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetBasic yy 5 9
+```
+
+The `Set` calls complete with the same `SendDataStatus(callbackId,
+txStatus)` table as `SetSwitchBinary`. The `Get` reply doesn't get a
+typed signal today — clients filter the existing `ApplicationCommand`
+stream on `ccData[0] == 0x20 && ccData[1] == 0x03` (Basic REPORT) and
+read `ccData[2]` (current value), optionally `ccData[3]` (target) and
+`ccData[4]` (duration) for v2+ frames.
 
 ## 12. Unsolicited node events
 

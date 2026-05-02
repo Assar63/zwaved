@@ -33,7 +33,7 @@ companion `zwave-terminal` client, and packaging.
 
 **Simple — single fixed-shape payload, mirrors the existing BinarySwitch / Association pattern:**
 
-- [ ] **Basic (CC `0x20`)** — Set / Get / Report on a single value byte. Universal fallback CC many devices map to.
+- [x] **Basic (CC `0x20`)** — `SetBasic` / `GetBasic` over D-Bus drive Basic SET / GET; the codec also decodes both v1 (3-byte) and v2+ (5-byte with `targetValue` + `duration`) Reports. Reports come back through the existing `ApplicationCommand` signal — clients filter on `ccData[0] == 0x20`.
 - [ ] **Multilevel Switch (CC `0x26`)** — Set / Get / Report; 0–99 level + duration byte. Dimmers, blinds, fan speed.
 - [ ] **Battery (CC `0x80`)** — Get / Report; one byte (0–100 %, `0xFF` = low). Prerequisite for useful sleeping-device support.
 - [ ] **Version (CC `0x86`)** — Get / Report; library / protocol / app version bytes. Per-node analogue of the existing `DongleInfo` story.

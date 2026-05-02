@@ -2,6 +2,7 @@
 
 #include "../message-bus/MessageBus.hpp"
 #include "../zwave-protocol/application/BinarySwitch.hpp"
+#include "DBusBackendInternal.hpp"
 #include "Version.hpp"
 
 #include <array>
@@ -26,10 +27,6 @@
 
 namespace
 {
-constexpr const char* BUS_NAME    = "com.tiunda.ZWaved";
-constexpr const char* OBJECT_PATH = "/com/tiunda/ZWaved";
-constexpr const char* IFACE_NAME  = "com.tiunda.ZWaved1";
-
 constexpr const char* SIGNAL_INCLUSION_STATUS          = "NodeInclusionStatus";
 constexpr const char* SIGNAL_EXCLUSION_STATUS          = "NodeExclusionStatus";
 constexpr const char* SIGNAL_DONGLE_STATUS             = "DongleStatus";
@@ -42,6 +39,7 @@ constexpr const char* SIGNAL_REMOVE_FAILED_NODE_STATUS = "RemoveFailedNodeStatus
 
 constexpr int IDLE_POLL_MS = 200;
 
+// Flag-byte bits for the AddNode / RemoveNode method handlers.
 constexpr std::uint8_t FLAG_POWER_BIT    = 7;
 constexpr std::uint8_t FLAG_NWI_BIT      = 6;
 constexpr std::uint8_t FLAG_PROTOCOL_BIT = 5;
@@ -66,41 +64,6 @@ constexpr std::uint8_t FLAG_NWE_BIT      = 6;
 
 namespace ExternalApi
 {
-struct DBusBackend::Impl
-{
-    std::unique_ptr<sdbus::IConnection> connection;
-    std::unique_ptr<sdbus::IObject> object;
-    std::atomic<bool> connected{false};
-
-    MessageBus::SubscriptionId dongleStatusSub{0};
-    MessageBus::SubscriptionId dongleInfoSub{0};
-    MessageBus::SubscriptionId initDataSub{0};
-    MessageBus::SubscriptionId applicationCommandSub{0};
-    MessageBus::SubscriptionId nodeListSub{0};
-    MessageBus::SubscriptionId inclusionSub{0};
-    MessageBus::SubscriptionId exclusionSub{0};
-    MessageBus::SubscriptionId sendDataSub{0};
-    MessageBus::SubscriptionId removeFailedNodeSub{0};
-    MessageBus::SubscriptionId sessionStatusSub{0};
-
-    // Cached state replayed to D-Bus method callers (GetDongleInfo,
-    // GetInitData, GetNodes, GetNetworkStatus). Each is fed by a
-    // retained MessageBus event so a late D-Bus client gets the
-    // latest value without the backend reaching into the producing
-    // module.
-    std::mutex stateMutex;
-    MessageBus::DongleStatus lastDongleStatus;
-    MessageBus::DongleInfo lastDongleInfo;
-    MessageBus::InitData lastInitData;
-    std::vector<MessageBus::NodeInfo> lastNodes;
-    MessageBus::SessionStatus lastSessionStatus;
-
-    // Captured the first time `run()` is called; powers the uptime
-    // field of GetNetworkStatus. steady_clock so it doesn't jump
-    // around if the wall clock is stepped.
-    std::chrono::steady_clock::time_point startTime;
-};
-
 DBusBackend::DBusBackend()
     : impl(std::make_unique<Impl>())
 {
@@ -112,7 +75,7 @@ DBusBackend::~DBusBackend()
     DBusBackend::stop();
 }
 
-// NOLINTBEGIN(readability-function-cognitive-complexity): flat D-Bus method/signal registration list
+// NOLINTBEGIN(readability-function-cognitive-complexity): flat signal/subscriber registration list
 auto DBusBackend::run(const std::atomic<bool>& running) -> void
 {
     impl->startTime = std::chrono::steady_clock::now();
@@ -131,306 +94,13 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
 
     auto& obj = *impl->object;
 
-    obj.registerMethod("AddNode")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& mode,
-               const std::uint8_t& flags,
-               const std::uint8_t& sessionId,
-               const std::vector<std::uint8_t>& nwiHomeId,
-               const std::vector<std::uint8_t>& authHomeId) -> void
-            {
-                MessageBus::publish(
-                    MessageBus::AddNodeCommand{.mode              = mode,
-                                               .power             = bitSet(flags, FLAG_POWER_BIT),
-                                               .nwi               = bitSet(flags, FLAG_NWI_BIT),
-                                               .protocolLongRange = bitSet(flags, FLAG_PROTOCOL_BIT),
-                                               .skipFlNeighbors   = bitSet(flags, FLAG_SFLND_BIT),
-                                               .sessionId         = sessionId,
-                                               .includeHomeIds    = !nwiHomeId.empty() || !authHomeId.empty(),
-                                               .nwiHomeId         = homeIdFromVector(nwiHomeId),
-                                               .authHomeId        = homeIdFromVector(authHomeId)});
-            });
-
-    obj.registerMethod("StopAddNode")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            [](const std::uint8_t& sessionId) -> void
-            {
-                MessageBus::publish(
-                    MessageBus::AddNodeCommand{.mode = MessageBus::AddNodeCommand::MODE_STOP, .sessionId = sessionId});
-            });
-
-    obj.registerMethod("RemoveNode")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& mode, const std::uint8_t& flags, const std::uint8_t& sessionId) -> void
-            {
-                MessageBus::publish(MessageBus::RemoveNodeCommand{.mode      = mode,
-                                                                  .power     = bitSet(flags, FLAG_POWER_BIT),
-                                                                  .nwe       = bitSet(flags, FLAG_NWE_BIT),
-                                                                  .sessionId = sessionId});
-            });
-
-    obj.registerMethod("StopRemoveNode")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            [](const std::uint8_t& sessionId) -> void
-            {
-                MessageBus::publish(MessageBus::RemoveNodeCommand{.mode      = MessageBus::RemoveNodeCommand::MODE_STOP,
-                                                                  .sessionId = sessionId});
-            });
-
-    obj.registerMethod("SetSwitchBinary")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& nodeId, const bool& turnOn, const std::uint8_t& callbackId) -> void
-            {
-                MessageBus::publish(
-                    MessageBus::SetSwitchBinaryCommand{.nodeId = nodeId, .turnOn = turnOn, .callbackId = callbackId});
-            });
-
-    obj.registerMethod("GetSwitchBinary")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& nodeId, const std::uint8_t& callbackId) -> void
-            { MessageBus::publish(MessageBus::GetSwitchBinaryCommand{.nodeId = nodeId, .callbackId = callbackId}); });
-
-    obj.registerMethod("SetBasic")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& nodeId, const std::uint8_t& value, const std::uint8_t& callbackId) -> void {
-                MessageBus::publish(
-                    MessageBus::SetBasicCommand{.nodeId = nodeId, .value = value, .callbackId = callbackId});
-            });
-
-    obj.registerMethod("GetBasic")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& nodeId, const std::uint8_t& callbackId) -> void
-            { MessageBus::publish(MessageBus::GetBasicCommand{.nodeId = nodeId, .callbackId = callbackId}); });
-
-    obj.registerMethod("SetAssociation")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& nodeId,
-               const std::uint8_t& groupId,
-               const std::vector<std::uint8_t>& members,
-               const std::uint8_t& callbackId) -> void
-            {
-                MessageBus::publish(MessageBus::SetAssociationCommand{
-                    .nodeId = nodeId, .groupId = groupId, .members = members, .callbackId = callbackId});
-            });
-
-    obj.registerMethod("RemoveAssociation")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& nodeId,
-               const std::uint8_t& groupId,
-               const std::vector<std::uint8_t>& members,
-               const std::uint8_t& callbackId) -> void
-            {
-                MessageBus::publish(MessageBus::RemoveAssociationCommand{
-                    .nodeId = nodeId, .groupId = groupId, .members = members, .callbackId = callbackId});
-            });
-
-    obj.registerMethod("GetAssociation")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& nodeId, const std::uint8_t& groupId, const std::uint8_t& callbackId) -> void
-            {
-                MessageBus::publish(
-                    MessageBus::GetAssociationCommand{.nodeId = nodeId, .groupId = groupId, .callbackId = callbackId});
-            });
-
-    obj.registerMethod("GetAssociationGroupings")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            [](const std::uint8_t& nodeId, const std::uint8_t& callbackId) -> void {
-                MessageBus::publish(
-                    MessageBus::GetAssociationGroupingsCommand{.nodeId = nodeId, .callbackId = callbackId});
-            });
-
-    // Multi Channel Association (CC 0x8E) mirrors the plain Association
-    // surface but also accepts node:endpoint pairs in a flat
-    // `a(yy)` array. A wire signature with two separate node and
-    // endpoint-pair arrays would be marginally clearer but doubles the
-    // method count for every MCA caller — the flat pair array matches
-    // how the codec already represents members internally.
-    using EndpointPair    = sdbus::Struct<std::uint8_t, std::uint8_t>;
-    auto convertEndpoints = [](const std::vector<EndpointPair>& pairs) -> std::vector<MessageBus::EndpointMember>
-    {
-        std::vector<MessageBus::EndpointMember> result;
-        result.reserve(pairs.size());
-        for (const auto& pair : pairs)
-        {
-            result.push_back(MessageBus::EndpointMember{.nodeId = pair.get<0>(), .endpoint = pair.get<1>()});
-        }
-        return result;
-    };
-
-    obj.registerMethod("SetMultichannelAssociation")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [convertEndpoints](const std::uint8_t& nodeId,
-                               const std::uint8_t& groupId,
-                               const std::vector<std::uint8_t>& nodeMembers,
-                               const std::vector<EndpointPair>& endpointMembers,
-                               const std::uint8_t& callbackId) -> void
-            {
-                MessageBus::publish(
-                    MessageBus::SetMultichannelAssociationCommand{.nodeId          = nodeId,
-                                                                  .groupId         = groupId,
-                                                                  .nodeMembers     = nodeMembers,
-                                                                  .endpointMembers = convertEndpoints(endpointMembers),
-                                                                  .callbackId      = callbackId});
-            });
-
-    obj.registerMethod("RemoveMultichannelAssociation")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [convertEndpoints](const std::uint8_t& nodeId,
-                               const std::uint8_t& groupId,
-                               const std::vector<std::uint8_t>& nodeMembers,
-                               const std::vector<EndpointPair>& endpointMembers,
-                               const std::uint8_t& callbackId) -> void
-            {
-                MessageBus::publish(MessageBus::RemoveMultichannelAssociationCommand{
-                    .nodeId          = nodeId,
-                    .groupId         = groupId,
-                    .nodeMembers     = nodeMembers,
-                    .endpointMembers = convertEndpoints(endpointMembers),
-                    .callbackId      = callbackId});
-            });
-
-    obj.registerMethod("GetMultichannelAssociation")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& nodeId, const std::uint8_t& groupId, const std::uint8_t& callbackId) -> void
-            {
-                MessageBus::publish(MessageBus::GetMultichannelAssociationCommand{
-                    .nodeId = nodeId, .groupId = groupId, .callbackId = callbackId});
-            });
-
-    obj.registerMethod("GetMultichannelAssociationGroupings")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            [](const std::uint8_t& nodeId, const std::uint8_t& callbackId) -> void
-            {
-                MessageBus::publish(
-                    MessageBus::GetMultichannelAssociationGroupingsCommand{.nodeId = nodeId, .callbackId = callbackId});
-            });
-
-    obj.registerMethod("RemoveFailedNode")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
-            [](const std::uint8_t& nodeId, const std::uint8_t& sessionId) -> void
-            { MessageBus::publish(MessageBus::RemoveFailedNodeCommand{.nodeId = nodeId, .sessionId = sessionId}); });
-
-    using NodeTuple = sdbus::Struct<uint8_t, uint8_t, uint8_t, uint8_t, std::vector<uint8_t>>;
-    obj.registerMethod("GetNodes")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            [this]() -> std::vector<NodeTuple>
-            {
-                std::vector<NodeTuple> result;
-                std::scoped_lock const lock(impl->stateMutex);
-                result.reserve(impl->lastNodes.size());
-                for (const auto& info : impl->lastNodes)
-                {
-                    result.emplace_back(
-                        info.nodeId, info.basicType, info.genericType, info.specificType, info.commandClasses);
-                }
-                return result;
-            });
-
-    using DongleInfoTuple = sdbus::Struct<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>;
-    obj.registerMethod("GetDongleInfo")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            [this]() -> DongleInfoTuple
-            {
-                std::scoped_lock const lock(impl->stateMutex);
-                return DongleInfoTuple{impl->lastDongleInfo.libraryVersion,
-                                       impl->lastDongleInfo.libraryType,
-                                       impl->lastDongleInfo.homeId,
-                                       impl->lastDongleInfo.controllerNodeId};
-            });
-
-    using InitDataTuple =
-        sdbus::Struct<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t, std::uint8_t>;
-    obj.registerMethod("GetInitData")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            [this]() -> InitDataTuple
-            {
-                std::scoped_lock const lock(impl->stateMutex);
-                return InitDataTuple{impl->lastInitData.serialApiVersion,
-                                     impl->lastInitData.capabilities,
-                                     impl->lastInitData.nodeIds,
-                                     impl->lastInitData.chipType,
-                                     impl->lastInitData.chipVersion};
-            });
-
-    using DaemonVersionTuple = sdbus::Struct<std::string, std::string>;
-    obj.registerMethod("GetVersion")
-        .onInterface(IFACE_NAME)
-        .implementedAs([]() -> DaemonVersionTuple
-                       { return DaemonVersionTuple{Version::SEMVER, Version::GIT_DESCRIBE}; });
-
-    using NetworkStatusTuple = sdbus::Struct<bool,
-                                             std::string,
-                                             std::string,
-                                             std::uint8_t,
-                                             std::uint32_t,
-                                             bool,
-                                             std::uint8_t,
-                                             std::uint8_t,
-                                             std::uint64_t>;
-    obj.registerMethod("GetNetworkStatus")
-        .onInterface(IFACE_NAME)
-        .implementedAs(
-            [this]() -> NetworkStatusTuple
-            {
-                std::scoped_lock const lock(impl->stateMutex);
-
-                // Hex-format the home ID (4 bytes from MEMORY_GET_ID)
-                // for human readability — matches what NodeRegistry
-                // logs and what's keyed into the SQLite db.
-                std::ostringstream homeIdStream;
-                homeIdStream << std::hex << std::uppercase << std::setfill('0');
-                for (const auto byte : impl->lastDongleInfo.homeId)
-                {
-                    homeIdStream << std::setw(2) << static_cast<unsigned>(byte);
-                }
-
-                const auto uptime =
-                    std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - impl->startTime)
-                        .count();
-
-                return NetworkStatusTuple{impl->lastDongleStatus.connected,
-                                          impl->lastDongleStatus.ttyPath,
-                                          homeIdStream.str(),
-                                          impl->lastDongleInfo.controllerNodeId,
-                                          static_cast<std::uint32_t>(impl->lastNodes.size()),
-                                          impl->lastSessionStatus.active,
-                                          impl->lastSessionStatus.commandId,
-                                          impl->lastSessionStatus.sessionId,
-                                          static_cast<std::uint64_t>(uptime)};
-            });
+    // Methods are emitted from InterfaceManifest.yml by
+    // scripts/codegen/. `publish:` and `publish_constant:` actions
+    // are inlined; `custom:` methods (AddNode / RemoveNode / the two
+    // MultichannelAssociation Set/Remove / GetVersion /
+    // GetNetworkStatus / GetNodes / GetDongleInfo / GetInitData)
+    // forward to the emit* helpers below.
+    registerGeneratedMethods(obj, *impl);
 
     obj.registerSignal(SIGNAL_INCLUSION_STATUS)
         .onInterface(IFACE_NAME)
@@ -797,5 +467,150 @@ auto DBusBackend::stop() -> void
         }
         impl->connected = false;
     }
+}
+
+// =====================================================================
+// Hand-written `custom:` method handlers — one per method whose action
+// shape isn't yet expressible in the manifest. Forward-declared by the
+// generated DBusMethods.gen.hpp; called from
+// registerGeneratedMethods() via thin per-method lambdas.
+// =====================================================================
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitAddNode(DBusBackend::Impl& /*impl*/,
+                 std::uint8_t mode,
+                 std::uint8_t flags,
+                 std::uint8_t sessionId,
+                 const std::vector<std::uint8_t>& nwiHomeId,
+                 const std::vector<std::uint8_t>& authHomeId) -> void
+{
+    MessageBus::publish(MessageBus::AddNodeCommand{.mode              = mode,
+                                                   .power             = bitSet(flags, FLAG_POWER_BIT),
+                                                   .nwi               = bitSet(flags, FLAG_NWI_BIT),
+                                                   .protocolLongRange = bitSet(flags, FLAG_PROTOCOL_BIT),
+                                                   .skipFlNeighbors   = bitSet(flags, FLAG_SFLND_BIT),
+                                                   .sessionId         = sessionId,
+                                                   .includeHomeIds    = !nwiHomeId.empty() || !authHomeId.empty(),
+                                                   .nwiHomeId         = homeIdFromVector(nwiHomeId),
+                                                   .authHomeId        = homeIdFromVector(authHomeId)});
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitRemoveNode(DBusBackend::Impl& /*impl*/, std::uint8_t mode, std::uint8_t flags, std::uint8_t sessionId) -> void
+{
+    MessageBus::publish(MessageBus::RemoveNodeCommand{.mode      = mode,
+                                                      .power     = bitSet(flags, FLAG_POWER_BIT),
+                                                      .nwe       = bitSet(flags, FLAG_NWE_BIT),
+                                                      .sessionId = sessionId});
+}
+
+namespace
+{
+auto convertEndpointPairs(const std::vector<EndpointPair>& pairs) -> std::vector<MessageBus::EndpointMember>
+{
+    std::vector<MessageBus::EndpointMember> result;
+    result.reserve(pairs.size());
+    for (const auto& pair : pairs)
+    {
+        result.push_back(MessageBus::EndpointMember{.nodeId = pair.get<0>(), .endpoint = pair.get<1>()});
+    }
+    return result;
+}
+}  // namespace
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitSetMultichannelAssociation(DBusBackend::Impl& /*impl*/,
+                                    std::uint8_t nodeId,
+                                    std::uint8_t groupId,
+                                    const std::vector<std::uint8_t>& nodeMembers,
+                                    const std::vector<EndpointPair>& endpointMembers,
+                                    std::uint8_t callbackId) -> void
+{
+    MessageBus::publish(
+        MessageBus::SetMultichannelAssociationCommand{.nodeId          = nodeId,
+                                                      .groupId         = groupId,
+                                                      .nodeMembers     = nodeMembers,
+                                                      .endpointMembers = convertEndpointPairs(endpointMembers),
+                                                      .callbackId      = callbackId});
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitRemoveMultichannelAssociation(DBusBackend::Impl& /*impl*/,
+                                       std::uint8_t nodeId,
+                                       std::uint8_t groupId,
+                                       const std::vector<std::uint8_t>& nodeMembers,
+                                       const std::vector<EndpointPair>& endpointMembers,
+                                       std::uint8_t callbackId) -> void
+{
+    MessageBus::publish(
+        MessageBus::RemoveMultichannelAssociationCommand{.nodeId          = nodeId,
+                                                         .groupId         = groupId,
+                                                         .nodeMembers     = nodeMembers,
+                                                         .endpointMembers = convertEndpointPairs(endpointMembers),
+                                                         .callbackId      = callbackId});
+}
+
+auto emitGetNodes(DBusBackend::Impl& impl) -> std::vector<NodeTuple>
+{
+    std::vector<NodeTuple> result;
+    std::scoped_lock const lock(impl.stateMutex);
+    result.reserve(impl.lastNodes.size());
+    for (const auto& info : impl.lastNodes)
+    {
+        result.emplace_back(info.nodeId, info.basicType, info.genericType, info.specificType, info.commandClasses);
+    }
+    return result;
+}
+
+auto emitGetDongleInfo(DBusBackend::Impl& impl) -> DongleInfoTuple
+{
+    std::scoped_lock const lock(impl.stateMutex);
+    return DongleInfoTuple{impl.lastDongleInfo.libraryVersion,
+                           impl.lastDongleInfo.libraryType,
+                           impl.lastDongleInfo.homeId,
+                           impl.lastDongleInfo.controllerNodeId};
+}
+
+auto emitGetInitData(DBusBackend::Impl& impl) -> InitDataTuple
+{
+    std::scoped_lock const lock(impl.stateMutex);
+    return InitDataTuple{impl.lastInitData.serialApiVersion,
+                         impl.lastInitData.capabilities,
+                         impl.lastInitData.nodeIds,
+                         impl.lastInitData.chipType,
+                         impl.lastInitData.chipVersion};
+}
+
+auto emitGetVersion(DBusBackend::Impl& /*impl*/) -> DaemonVersionTuple
+{
+    return DaemonVersionTuple{Version::SEMVER, Version::GIT_DESCRIBE};
+}
+
+auto emitGetNetworkStatus(DBusBackend::Impl& impl) -> NetworkStatusTuple
+{
+    std::scoped_lock const lock(impl.stateMutex);
+
+    // Hex-format the home ID (4 bytes from MEMORY_GET_ID) for human
+    // readability — matches what NodeRegistry logs and what's keyed
+    // into the SQLite db.
+    std::ostringstream homeIdStream;
+    homeIdStream << std::hex << std::uppercase << std::setfill('0');
+    for (const auto byte : impl.lastDongleInfo.homeId)
+    {
+        homeIdStream << std::setw(2) << static_cast<unsigned>(byte);
+    }
+
+    const auto uptime =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - impl.startTime).count();
+
+    return NetworkStatusTuple{impl.lastDongleStatus.connected,
+                              impl.lastDongleStatus.ttyPath,
+                              homeIdStream.str(),
+                              impl.lastDongleInfo.controllerNodeId,
+                              static_cast<std::uint32_t>(impl.lastNodes.size()),
+                              impl.lastSessionStatus.active,
+                              impl.lastSessionStatus.commandId,
+                              impl.lastSessionStatus.sessionId,
+                              static_cast<std::uint64_t>(uptime)};
 }
 }  // namespace ExternalApi

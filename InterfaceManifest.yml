@@ -425,11 +425,13 @@ dbus:
         - { name: sessionId,  dbus: y, cpp: u8 }
         - { name: nwiHomeId,  dbus: ay, cpp: bytes }
         - { name: authHomeId, dbus: ay, cpp: bytes }
+      # Custom: the flags byte unpacks into four bool fields on
+      # AddNodeCommand (power / nwi / protocolLongRange /
+      # skipFlNeighbors), and the home-ID arrays are converted from
+      # vector<u8> into array<u8, 4> with an `includeHomeIds`
+      # computed flag — none of which the codegen expresses today.
       action:
-        publish: AddNodeCommand
-        # `flags` byte is unpacked into individual bool fields by the
-        # codegen; `nwiHomeId`/`authHomeId` empty arrays land as the
-        # default-constructed std::array<u8,4> with includeHomeIds=false.
+        custom: emitAddNode
 
     - name: StopAddNode
       params:
@@ -444,8 +446,9 @@ dbus:
         - { name: mode,      dbus: y, cpp: u8 }
         - { name: flags,     dbus: y, cpp: u8, doc: "bit 7=Power, 6=NWE" }
         - { name: sessionId, dbus: y, cpp: u8 }
+      # Custom: same flag-byte-unpack reason as AddNode.
       action:
-        publish: RemoveNodeCommand
+        custom: emitRemoveNode
 
     - name: StopRemoveNode
       params:
@@ -531,20 +534,24 @@ dbus:
         - { name: nodeId,          dbus: y,      cpp: u8 }
         - { name: groupId,         dbus: y,      cpp: u8 }
         - { name: nodeMembers,     dbus: ay,     cpp: bytes }
-        - { name: endpointMembers, dbus: a(yy),  cpp: list<EndpointMember> }
+        - { name: endpointMembers, dbus: "a(yy)", cpp: "list<EndpointPair>" }
         - { name: callbackId,      dbus: y,      cpp: u8 }
+      # Custom: the endpointMembers a(yy) inbound array converts
+      # element-wise from sdbus::Struct<u8,u8> to EndpointMember,
+      # which the codegen doesn't express today.
       action:
-        publish: SetMultichannelAssociationCommand
+        custom: emitSetMultichannelAssociation
 
     - name: RemoveMultichannelAssociation
       params:
         - { name: nodeId,          dbus: y,      cpp: u8 }
         - { name: groupId,         dbus: y,      cpp: u8 }
         - { name: nodeMembers,     dbus: ay,     cpp: bytes }
-        - { name: endpointMembers, dbus: a(yy),  cpp: list<EndpointMember> }
+        - { name: endpointMembers, dbus: "a(yy)", cpp: "list<EndpointPair>" }
         - { name: callbackId,      dbus: y,      cpp: u8 }
+      # Custom: same EndpointMember conversion as Set above.
       action:
-        publish: RemoveMultichannelAssociationCommand
+        custom: emitRemoveMultichannelAssociation
 
     - name: GetMultichannelAssociation
       params:
@@ -562,14 +569,19 @@ dbus:
         publish: GetMultichannelAssociationGroupingsCommand
 
     # -- Cached-state queries --------------------------------------
+    # `read_cached:` is documented as a first-class action in the
+    # manifest, but the codegen treats these as `custom:` for now —
+    # generating the per-event tuple construction and lock-and-copy
+    # body needs richer type-system support and a convention for
+    # how the daemon caches each event (whole-event vs. just the
+    # `.nodes` field for NodeListChanged). Phase 3.5.
     - name: GetNodes
       params: []
       returns:
         type: list<NodeInfo>
         dbus: a(yyyyay)
       action:
-        read_cached: NodeListChanged
-        # Maps `event.nodes` directly to the return tuple.
+        custom: emitGetNodes
 
     - name: GetDongleInfo
       params: []
@@ -580,7 +592,7 @@ dbus:
           - { name: homeId,           dbus: ay, cpp: bytes }
           - { name: controllerNodeId, dbus: y,  cpp: u8 }
       action:
-        read_cached: DongleInfo
+        custom: emitGetDongleInfo
 
     - name: GetInitData
       params: []
@@ -592,7 +604,7 @@ dbus:
           - { name: chipType,         dbus: y,  cpp: u8 }
           - { name: chipVersion,      dbus: y,  cpp: u8 }
       action:
-        read_cached: InitData
+        custom: emitGetInitData
 
     # -- Custom (hand-written) -------------------------------------
     - name: GetVersion
@@ -602,7 +614,7 @@ dbus:
           - { name: semver,      dbus: s, source: Version::SEMVER }
           - { name: gitDescribe, dbus: s, source: Version::GIT_DESCRIBE }
       action:
-        custom: emitVersion
+        custom: emitGetVersion
 
     - name: GetNetworkStatus
       doc: |
@@ -624,7 +636,7 @@ dbus:
           - { name: sessionId,        dbus: y, source: cached.SessionStatus.sessionId }
           - { name: uptimeSeconds,    dbus: t, source: "now() - startTime" }
       action:
-        custom: emitNetworkStatus
+        custom: emitGetNetworkStatus
 
   # ---- 3b. Signals ------------------------------------------------
   # Each signal is triggered by one or more MessageBus events. The

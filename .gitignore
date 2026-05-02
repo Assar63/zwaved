@@ -4,3 +4,7 @@
 *.iws
 cmake-*/
 build*/
+
+# scripts/codegen/ Python cache
+__pycache__/
+*.pyc

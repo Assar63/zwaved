@@ -66,9 +66,11 @@ set(ZWAVED_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 set(ZWAVED_GENERATED_HEADERS
     "${ZWAVED_GENERATED_DIR}/Manifest.gen.hpp"
     "${ZWAVED_GENERATED_DIR}/MessageBus.gen.hpp"
+    "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.hpp"
 )
 set(ZWAVED_GENERATED_SOURCES
     "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.cpp"
 )
 
 # Reconfigure when any generator source changes so the OUTPUT list

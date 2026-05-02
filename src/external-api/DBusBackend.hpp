@@ -23,8 +23,15 @@ class DBusBackend : public IBackend
     auto run(const std::atomic<bool>& running) -> void override;
     auto stop() -> void override;
 
-  private:
+    // Pimpl forward declaration. The full definition lives in
+    // DBusBackendInternal.hpp so the generator-emitted method
+    // bindings (DBusMethods.gen.cpp) and the hand-written `custom:`
+    // handlers can reach the cached state and subscription IDs.
+    // Public here so those translation units can reference Impl& as
+    // a parameter type without a friend declaration per handler.
     struct Impl;
+
+  private:
     std::unique_ptr<Impl> impl;
 };
 }  // namespace ExternalApi

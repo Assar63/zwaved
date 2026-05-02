@@ -7,7 +7,15 @@ target_sources(zwaved PRIVATE
 )
 
 if(ZWAVED_BUILD_DBUS)
-    target_sources(zwaved PRIVATE DBusBackend.cpp)
+    set_source_files_properties(
+        "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.cpp"
+        PROPERTIES GENERATED TRUE
+    )
+    target_sources(zwaved PRIVATE
+        DBusBackend.cpp
+        "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.cpp"
+    )
+    target_include_directories(zwaved PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_definitions(zwaved PRIVATE ZWAVED_HAS_DBUS=1)
     target_link_libraries(zwaved PRIVATE PkgConfig::SDBUS_CPP)
 endif()

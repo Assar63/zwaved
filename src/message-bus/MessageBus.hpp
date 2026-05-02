@@ -261,6 +261,15 @@ struct SetSwitchBinaryCommand
     std::uint8_t callbackId = 0;
 };
 
+/// Query a node's Binary Switch (CC 0x25) state. The Report comes back
+/// asynchronously as both a raw `ApplicationCommand` and a typed
+/// `SwitchBinaryReport` D-Bus signal.
+struct GetSwitchBinaryCommand
+{
+    std::uint8_t nodeId     = 0;
+    std::uint8_t callbackId = 0;
+};
+
 /// Set / get a node's Basic Command Class (0x20) value. The value byte
 /// follows the spec's universal-fallback semantics: 0x00 = off,
 /// 0x01..0x63 = level 1..99, 0xFF = on / full / "previous level".

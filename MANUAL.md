@@ -38,10 +38,10 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list nineteen methods (`AddNode`, `StopAddNode`,
+The introspection should list twenty methods (`AddNode`, `StopAddNode`,
 `RemoveNode`, `StopRemoveNode`, `RemoveFailedNode`, `SetSwitchBinary`,
-`SetBasic`, `GetBasic`, `GetNodes`, `GetDongleInfo`, `GetInitData`,
-`SetAssociation`, `RemoveAssociation`, `GetAssociation`,
+`GetSwitchBinary`, `SetBasic`, `GetBasic`, `GetNodes`, `GetDongleInfo`,
+`GetInitData`, `SetAssociation`, `RemoveAssociation`, `GetAssociation`,
 `GetAssociationGroupings`, `SetMultichannelAssociation`,
 `RemoveMultichannelAssociation`, `GetMultichannelAssociation`,
 `GetMultichannelAssociationGroupings`) and
@@ -87,6 +87,7 @@ or wait for the next hot-plug to determine current state.
 | `GetVersion`                          | `→ (s s)` (semver, gitDescribe)                                                                                                                    | Return the daemon's own version (semver bumped manually in `project()`, plus `git describe --tags --dirty --always` from build time)                                         |
 | `GetNetworkStatus`                    | `→ (b s s y u b y y t)` (dongleConnected, ttyPath, homeId, controllerNodeId, nodeCount, sessionActive, sessionCommandId, sessionId, uptimeSeconds) | Aggregate snapshot of the daemon's view of the network: dongle connection, home ID, included-node count, in-flight inclusion/exclusion session, daemon uptime                |
 | `SetSwitchBinary`                     | `y b y` (nodeId, on, callbackId)                                                                                                                   | Send a Binary Switch SET (CC 0x25) to a node; completion arrives as `SendDataStatus(callbackId, txStatus)`                                                                   |
+| `GetSwitchBinary`                     | `y y` (nodeId, callbackId)                                                                                                                         | Send a Binary Switch GET; the node's reply lands as a typed `SwitchBinaryReport(sourceNodeId, state)` signal alongside the raw `ApplicationCommand`                          |
 | `SetBasic`                            | `y y y` (nodeId, value, callbackId)                                                                                                                | Send a Basic SET (CC 0x20) — `value=0` off, `value=0xFF` on, `value=1..99` (`0x01..0x63`) dimmer level. Universal fallback for devices without a specific CC                 |
 | `GetBasic`                            | `y y` (nodeId, callbackId)                                                                                                                         | Send a Basic GET; the node's reply lands as a raw `ApplicationCommand` signal carrying the Basic Report (`ccData[0] == 0x20`, `ccData[1] == 0x03`)                           |
 | `GetNodes`                            | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes)                                                                                 | Return the in-memory list of currently-included nodes                                                                                                                        |
@@ -344,9 +345,18 @@ A `0x01` (no ACK) usually means the node is asleep or out of range.
 A `0x02` typically means the dongle accepted the request but
 transmission failed somewhere in the network.
 
-Get/Report (reading the current state from a node) is not yet
-implemented — the daemon does not yet decode `APPLICATION_COMMAND_HANDLER`
-incoming frames.
+To read the current state, call `GetSwitchBinary`. The node's reply
+arrives asynchronously as both a typed `SwitchBinaryReport(sourceNodeId,
+state)` signal (`state` = `0` Off, `1` On, `2` Unknown) and a raw
+`ApplicationCommand` carrying the same bytes — see §12. The same typed
+signal also fires whenever the node sends an unsolicited Report after a
+manual toggle.
+
+```bash
+# Query node 5's current Binary Switch state, callback id 9:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetSwitchBinary yy 5 9
+```
 
 ## 11b. Driving a Basic value (CC 0x20)
 

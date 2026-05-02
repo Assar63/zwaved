@@ -127,6 +127,7 @@ struct ZwaveProtocolState
     MessageBus::SubscriptionId removeNodeSubscription{0};
     MessageBus::SubscriptionId removeFailedNodeSubscription{0};
     MessageBus::SubscriptionId switchBinarySubscription{0};
+    MessageBus::SubscriptionId getSwitchBinarySubscription{0};
     MessageBus::SubscriptionId setBasicSubscription{0};
     MessageBus::SubscriptionId getBasicSubscription{0};
     MessageBus::SubscriptionId setAssociationSubscription{0};
@@ -284,6 +285,16 @@ auto onSetSwitchBinary(const MessageBus::SetSwitchBinaryCommand& cmd) -> void
     HostApi::SendDataRequest req{};
     req.nodeId     = cmd.nodeId;
     req.data       = BinarySwitch::encodeSet(cmd.turnOn);
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onGetSwitchBinary(const MessageBus::GetSwitchBinaryCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = BinarySwitch::encodeGet();
     req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
     req.callbackId = cmd.callbackId;
     pushRequest(req);
@@ -884,10 +895,11 @@ auto subscribeBus() -> void
     state().removeNodeSubscription = MessageBus::subscribe<MessageBus::RemoveNodeCommand>(onRemoveNodeCommand);
     state().removeFailedNodeSubscription =
         MessageBus::subscribe<MessageBus::RemoveFailedNodeCommand>(onRemoveFailedNodeCommand);
-    state().switchBinarySubscription   = MessageBus::subscribe<MessageBus::SetSwitchBinaryCommand>(onSetSwitchBinary);
-    state().setBasicSubscription       = MessageBus::subscribe<MessageBus::SetBasicCommand>(onSetBasic);
-    state().getBasicSubscription       = MessageBus::subscribe<MessageBus::GetBasicCommand>(onGetBasic);
-    state().setAssociationSubscription = MessageBus::subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
+    state().switchBinarySubscription    = MessageBus::subscribe<MessageBus::SetSwitchBinaryCommand>(onSetSwitchBinary);
+    state().getSwitchBinarySubscription = MessageBus::subscribe<MessageBus::GetSwitchBinaryCommand>(onGetSwitchBinary);
+    state().setBasicSubscription        = MessageBus::subscribe<MessageBus::SetBasicCommand>(onSetBasic);
+    state().getBasicSubscription        = MessageBus::subscribe<MessageBus::GetBasicCommand>(onGetBasic);
+    state().setAssociationSubscription  = MessageBus::subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
     state().removeAssociationSubscription =
         MessageBus::subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
     state().getAssociationSubscription = MessageBus::subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);
@@ -920,6 +932,7 @@ auto unsubscribeBus() -> void
     MessageBus::unsubscribe(state().setAssociationSubscription);
     MessageBus::unsubscribe(state().getBasicSubscription);
     MessageBus::unsubscribe(state().setBasicSubscription);
+    MessageBus::unsubscribe(state().getSwitchBinarySubscription);
     MessageBus::unsubscribe(state().switchBinarySubscription);
     MessageBus::unsubscribe(state().removeFailedNodeSubscription);
     MessageBus::unsubscribe(state().removeNodeSubscription);
@@ -935,6 +948,7 @@ auto unsubscribeBus() -> void
     state().setAssociationSubscription                      = 0;
     state().getBasicSubscription                            = 0;
     state().setBasicSubscription                            = 0;
+    state().getSwitchBinarySubscription                     = 0;
     state().switchBinarySubscription                        = 0;
     state().removeFailedNodeSubscription                    = 0;
     state().removeNodeSubscription                          = 0;

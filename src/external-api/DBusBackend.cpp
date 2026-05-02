@@ -1,6 +1,7 @@
 #include "DBusBackend.hpp"
 
 #include "../message-bus/MessageBus.hpp"
+#include "../zwave-protocol/application/BinarySwitch.hpp"
 #include "Version.hpp"
 
 #include <array>
@@ -36,6 +37,7 @@ constexpr const char* SIGNAL_DONGLE_INFO               = "DongleInfo";
 constexpr const char* SIGNAL_INIT_DATA                 = "InitData";
 constexpr const char* SIGNAL_SEND_DATA_STATUS          = "SendDataStatus";
 constexpr const char* SIGNAL_APPLICATION_COMMAND       = "ApplicationCommand";
+constexpr const char* SIGNAL_SWITCH_BINARY_REPORT      = "SwitchBinaryReport";
 constexpr const char* SIGNAL_REMOVE_FAILED_NODE_STATUS = "RemoveFailedNodeStatus";
 
 constexpr int IDLE_POLL_MS = 200;
@@ -190,6 +192,13 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
                 MessageBus::publish(
                     MessageBus::SetSwitchBinaryCommand{.nodeId = nodeId, .turnOn = turnOn, .callbackId = callbackId});
             });
+
+    obj.registerMethod("GetSwitchBinary")
+        .onInterface(IFACE_NAME)
+        .implementedAs(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+            [](const std::uint8_t& nodeId, const std::uint8_t& callbackId) -> void
+            { MessageBus::publish(MessageBus::GetSwitchBinaryCommand{.nodeId = nodeId, .callbackId = callbackId}); });
 
     obj.registerMethod("SetBasic")
         .onInterface(IFACE_NAME)
@@ -467,6 +476,10 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
         .onInterface(IFACE_NAME)
         .withParameters<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>>("rxStatus", "sourceNodeId", "ccData");
 
+    obj.registerSignal(SIGNAL_SWITCH_BINARY_REPORT)
+        .onInterface(IFACE_NAME)
+        .withParameters<std::uint8_t, std::uint8_t>("sourceNodeId", "state");
+
     obj.registerSignal(SIGNAL_REMOVE_FAILED_NODE_STATUS)
         .onInterface(IFACE_NAME)
         .withParameters<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t>(
@@ -583,6 +596,25 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
             catch (const sdbus::Error& err)
             {
                 std::cerr << "[DBusBackend] failed to emit ApplicationCommand: " << err.what() << '\n';
+            }
+
+            // Decode CC-specific reports off the same frame so clients
+            // that prefer typed signals don't have to re-implement the
+            // codec. The raw ApplicationCommand above stays the
+            // authoritative passthrough for anything we don't decode.
+            if (auto report = BinarySwitch::decodeReport(event.ccData); report.has_value())
+            {
+                try
+                {
+                    auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_SWITCH_BINARY_REPORT);
+                    signal << event.sourceNodeId;
+                    signal << static_cast<std::uint8_t>(report->state);
+                    impl->object->emitSignal(signal);
+                }
+                catch (const sdbus::Error& err)
+                {
+                    std::cerr << "[DBusBackend] failed to emit SwitchBinaryReport: " << err.what() << '\n';
+                }
             }
         });
 

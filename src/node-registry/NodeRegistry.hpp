@@ -40,6 +40,16 @@ auto remove(std::uint8_t nodeId) -> void;
 /// entry already exists — won't downgrade a fully-populated node.
 auto seed(std::uint8_t nodeId) -> void;
 
+/// Overwrite only the device-class triple (basic/generic/specific)
+/// of an existing entry, leaving its `commandClasses` intact.
+/// Suitable for filling in seeded entries with the answer from
+/// FUNC_ID_GET_NODE_PROTOCOL_INFO (0x41), which carries the device
+/// class but not the CC list. No-op if no entry exists for `nodeId`.
+auto updateDeviceClass(std::uint8_t nodeId,
+                       std::uint8_t basicType,
+                       std::uint8_t genericType,
+                       std::uint8_t specificType) -> void;
+
 /// Thread-safe copy of the current registry, sorted ascending by nodeId.
 [[nodiscard]] auto snapshot() -> std::vector<NodeInfo>;
 }  // namespace NodeRegistry

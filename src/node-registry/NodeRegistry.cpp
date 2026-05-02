@@ -412,6 +412,41 @@ auto NodeRegistry::seed(std::uint8_t nodeId) -> void
     MessageBus::publish(*event);
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire shape fixed by FUNC_ID_GET_NODE_PROTOCOL_INFO
+auto NodeRegistry::updateDeviceClass(std::uint8_t nodeId,
+                                     std::uint8_t basicType,
+                                     std::uint8_t genericType,
+                                     std::uint8_t specificType) -> void
+{
+    initIfNeeded();
+    std::optional<MessageBus::NodeListChanged> event;
+    {
+        std::scoped_lock const lock(state().mutex);
+        const auto home = state().currentHomeId;
+        if (!home.has_value())
+        {
+            return;
+        }
+        const auto iter = state().nodes.find(nodeId);
+        if (iter == state().nodes.end())
+        {
+            return;
+        }
+        // Persistence intentionally goes through `persistAdd` rather
+        // than a partial UPDATE — the schema is keyed by
+        // (home_id, node_id) and `persistAdd` is an UPSERT, so a
+        // single call covers both "row exists" (overwrite the three
+        // fields, preserve commandClasses) and the unreachable-but-
+        // safe "row missing" case.
+        iter->second.basicType    = basicType;
+        iter->second.genericType  = genericType;
+        iter->second.specificType = specificType;
+        persistAdd(*home, iter->second);
+        event = snapshotEvent();
+    }
+    MessageBus::publish(*event);
+}
+
 auto NodeRegistry::snapshot() -> std::vector<NodeInfo>
 {
     initIfNeeded();

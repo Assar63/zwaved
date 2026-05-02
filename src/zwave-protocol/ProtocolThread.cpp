@@ -23,6 +23,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -435,16 +436,23 @@ struct IntrospectionResult
 {
     std::optional<MessageBus::DongleInfo> dongleInfo;
     std::optional<MessageBus::InitData> initData;
+    // Per-node device-class triples for nodes the controller knows
+    // about — keyed by the bitmap order of `initData->nodeIds`, so
+    // the caller iterates these straight into NodeRegistry without a
+    // second pass.
+    std::vector<std::pair<std::uint8_t, HostApi::NodeProtocolInfoResponse>> nodeProtocolInfo;
 };
 
 /// Run the dongle's startup introspection: GET_VERSION (0x15) +
-/// MEMORY_GET_ID (0x20) + SERIAL_API_GET_INIT_DATA (0x02). Uses a
-/// short-lived FrameTransport with its own capturing handler so
-/// RESPONSE frames land in local optionals without going through the
-/// runtime callback path. GET_VERSION and MEMORY_GET_ID failures are
-/// fatal (no DongleInfo); GET_INIT_DATA is best-effort — if it
-/// times out or the dongle doesn't support the FUNC_ID, the result
-/// just has no initData payload.
+/// MEMORY_GET_ID (0x20) + SERIAL_API_GET_INIT_DATA (0x02), then a
+/// per-node GET_NODE_PROTOCOL_INFO (0x41) for every nodeId in the
+/// init-data bitmap. Uses a short-lived FrameTransport with its own
+/// capturing handler so RESPONSE frames land in local optionals
+/// without going through the runtime callback path. GET_VERSION and
+/// MEMORY_GET_ID failures are fatal (no DongleInfo); GET_INIT_DATA is
+/// best-effort — if it times out or the dongle doesn't support the
+/// FUNC_ID, the result just has no initData payload.
+// NOLINTBEGIN(readability-function-cognitive-complexity): flat sequence of REQUEST/RESPONSE steps
 auto introspectDongle(SerialPort& port) -> IntrospectionResult
 {
     using Clock = std::chrono::steady_clock;
@@ -452,6 +460,7 @@ auto introspectDongle(SerialPort& port) -> IntrospectionResult
     std::optional<HostApi::VersionResponse> version;
     std::optional<HostApi::MemoryIdResponse> identity;
     std::optional<HostApi::InitDataResponse> initData;
+    std::optional<HostApi::NodeProtocolInfoResponse> nodeProtocolInfo;
 
     FrameTransport transport(&port,
                              [&](const ZwaveDataFrame& frame)
@@ -467,6 +476,10 @@ auto introspectDongle(SerialPort& port) -> IntrospectionResult
                                  else if (auto resp = HostApi::decodeInitData(frame); resp.has_value())
                                  {
                                      initData = resp;
+                                 }
+                                 else if (auto resp = HostApi::decodeNodeProtocolInfo(frame); resp.has_value())
+                                 {
+                                     nodeProtocolInfo = resp;
                                  }
                              });
 
@@ -484,6 +497,25 @@ auto introspectDongle(SerialPort& port) -> IntrospectionResult
             transport.pumpOnce(IDLE_PUMP_TIMEOUT_MS);
         }
         return slot.has_value();
+    };
+
+    // Per-node version of `sendAndAwait`: encodes a custom REQUEST
+    // (rather than the bare-command-byte form sendAndAwait builds) so
+    // the request carries the target nodeId. Slot is reset on entry so
+    // the prior node's response doesn't satisfy the wait.
+    auto fetchNodeProtocolInfo = [&](std::uint8_t nodeId) -> std::optional<HostApi::NodeProtocolInfoResponse>
+    {
+        nodeProtocolInfo.reset();
+        if (!transport.sendRequest(HostApi::encodeGetNodeProtocolInfo(nodeId)))
+        {
+            return std::nullopt;
+        }
+        const auto deadline = Clock::now() + std::chrono::milliseconds(INTROSPECTION_TIMEOUT_MS);
+        while (!nodeProtocolInfo.has_value() && Clock::now() < deadline)
+        {
+            transport.pumpOnce(IDLE_PUMP_TIMEOUT_MS);
+        }
+        return nodeProtocolInfo;
     };
 
     IntrospectionResult result;
@@ -523,9 +555,44 @@ auto introspectDongle(SerialPort& port) -> IntrospectionResult
         payload.chipVersion      = initData->chipVersion;
         payload.nodeIds          = initData->nodeIds;
         result.initData          = payload;
+
+        // Per-node device-class fill-in. GET_NODE_PROTOCOL_INFO is a
+        // controller-local query — the dongle answers from its own
+        // NVM without going on-air — so it works even for sleeping
+        // or out-of-range nodes and adds at most a few ms per node.
+        // The CC list still requires REQUEST_NODE_INFO + an
+        // APPLICATION_UPDATE round-trip, which would block on
+        // sleeping nodes; that's a follow-up best done lazily.
+        for (const auto nodeId : initData->nodeIds)
+        {
+            // Skip the controller's own ID — querying it returns the
+            // dongle's own protocol info, which we don't surface to
+            // the registry (it isn't a node in the GetNodes sense).
+            if (nodeId == identity->controllerNodeId)
+            {
+                continue;
+            }
+            const auto info = fetchNodeProtocolInfo(nodeId);
+            if (!info.has_value())
+            {
+                std::cerr << "[ProtocolThread] GET_NODE_PROTOCOL_INFO timeout for node " << static_cast<int>(nodeId)
+                          << " (continuing)\n";
+                continue;
+            }
+            // All-zero payload means the controller has no entry for
+            // this nodeId — which contradicts the init-data bitmap,
+            // but treat as "skip" rather than registering a fake
+            // device class of 0/0/0.
+            if (info->basicDeviceType == 0 && info->genericDeviceType == 0 && info->specificDeviceType == 0)
+            {
+                continue;
+            }
+            result.nodeProtocolInfo.emplace_back(nodeId, *info);
+        }
     }
     return result;
 }
+// NOLINTEND(readability-function-cognitive-complexity)
 
 /// Handle the response/callback frame pair for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID.
 /// Returns true if the frame matched either decoder (response or callback)
@@ -897,6 +964,17 @@ auto zwaveCommunicationThread() -> void
                 for (const auto nodeId : init.nodeIds)
                 {
                     NodeRegistry::seed(nodeId);
+                }
+                // Overlay each seeded skeleton with the device-class
+                // triple captured from FUNC_ID_GET_NODE_PROTOCOL_INFO.
+                // `updateDeviceClass` preserves any pre-existing
+                // commandClasses (e.g. from a prior inclusion that
+                // landed the full info), so this is safe to run
+                // unconditionally.
+                for (const auto& [nodeId, info] : introspection.nodeProtocolInfo)
+                {
+                    NodeRegistry::updateDeviceClass(
+                        nodeId, info.basicDeviceType, info.genericDeviceType, info.specificDeviceType);
                 }
                 MessageBus::publish(init);
             }

@@ -18,6 +18,7 @@ constexpr uint8_t CMD_APPLICATION_COMMAND      = 0x04;
 constexpr uint8_t CMD_SEND_DATA                = 0x13;
 constexpr uint8_t CMD_GET_VERSION              = 0x15;
 constexpr uint8_t CMD_MEMORY_GET_ID            = 0x20;
+constexpr uint8_t CMD_GET_NODE_PROTOCOL_INFO   = 0x41;
 constexpr uint8_t CMD_ADD_NODE_TO_NETWORK      = 0x4A;
 constexpr uint8_t CMD_REMOVE_NODE_FROM_NETWORK = 0x4B;
 constexpr uint8_t CMD_REMOVE_FAILED_NODE_ID    = 0x61;
@@ -132,6 +133,20 @@ struct InitDataResponse
     std::vector<uint8_t> nodeIds;
 };
 
+/// Decoded payload of FUNC_ID_GET_NODE_PROTOCOL_INFO (0x41) RESPONSE.
+/// Pure controller-local query — the dongle answers from its own NVM
+/// without going on-air, so it works for sleeping or out-of-range
+/// nodes too. Spec: INS12350 §4.3.2.
+struct NodeProtocolInfoResponse
+{
+    uint8_t capabilities       = 0;  // listening, baud, protocol-version bits
+    uint8_t security           = 0;  // beam, routing-slave, sensor flags
+    uint8_t reserved           = 0;
+    uint8_t basicDeviceType    = 0;
+    uint8_t genericDeviceType  = 0;
+    uint8_t specificDeviceType = 0;
+};
+
 /// Decoded payload of FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04). Emitted
 /// by the controller whenever a node sends an unsolicited Command Class
 /// frame (e.g. SwitchBinary REPORT after a manual toggle, sensor pings,
@@ -200,6 +215,7 @@ struct NodeStatusCallback
 [[nodiscard]] auto encodeRemoveNode(const RemoveNodeRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeRemoveFailedNode(const RemoveFailedNodeRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeSendData(const SendDataRequest& request) -> ZwaveDataFrame;
+[[nodiscard]] auto encodeGetNodeProtocolInfo(uint8_t nodeId) -> ZwaveDataFrame;
 
 /// Decode a FUNC_ID_ZW_SEND_DATA (0x13) callback. Returns std::nullopt
 /// if the frame is not a 0x13 callback or the payload is too short.
@@ -220,6 +236,13 @@ struct NodeStatusCallback
 /// the node bitmap into a sorted nodeIds vector (only valid 1..232
 /// node IDs are emitted).
 [[nodiscard]] auto decodeInitData(const ZwaveDataFrame& frame) -> std::optional<InitDataResponse>;
+
+/// Decode a FUNC_ID_GET_NODE_PROTOCOL_INFO (0x41) RESPONSE. Returns
+/// std::nullopt for non-matching frames or short payloads. A six-byte
+/// payload of all zeros indicates the controller's NVM has no entry
+/// for the requested node — treat as "node not known," not as a real
+/// node with all-zero device class.
+[[nodiscard]] auto decodeNodeProtocolInfo(const ZwaveDataFrame& frame) -> std::optional<NodeProtocolInfoResponse>;
 
 /// Decode either a 0x4A or 0x4B callback. Pass nodeId16Bit = true if the
 /// controller has been configured for 16-bit node IDs (default false matches

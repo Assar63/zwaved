@@ -2,6 +2,7 @@
 
 #include "ZwaveDataFrame.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -24,6 +25,15 @@ constexpr std::size_t INIT_DATA_TRAILER  = 2;  // chipType + chipVersion
 constexpr unsigned BITS_PER_BYTE         = 8;
 constexpr std::uint8_t MAX_VALID_NODE_ID = 232;
 constexpr unsigned NODE_ID_HIGH_SHIFT    = 8;
+
+// FUNC_ID_GET_NODE_PROTOCOL_INFO RESPONSE byte offsets.
+constexpr std::size_t NPI_OFFSET_CAPABILITIES = 0;
+constexpr std::size_t NPI_OFFSET_SECURITY     = 1;
+constexpr std::size_t NPI_OFFSET_RESERVED     = 2;
+constexpr std::size_t NPI_OFFSET_BASIC        = 3;
+constexpr std::size_t NPI_OFFSET_GENERIC      = 4;
+constexpr std::size_t NPI_OFFSET_SPECIFIC     = 5;
+constexpr std::size_t NPI_PAYLOAD_BYTES       = 6;
 
 auto makeFlagByte(const uint8_t mode,
                   const bool power,
@@ -120,6 +130,15 @@ auto HostApi::encodeRemoveFailedNode(const RemoveFailedNodeRequest& request) -> 
     payload.reserve(2);
     payload.push_back(request.nodeId);
     payload.push_back(request.sessionId);
+    frame.setPayload(payload.data(), payload.size());
+    return frame;
+}
+
+auto HostApi::encodeGetNodeProtocolInfo(uint8_t nodeId) -> ZwaveDataFrame
+{
+    ZwaveDataFrame frame;
+    frame.setHeader(ZwaveDataFrame::FrameType::REQUEST, CMD_GET_NODE_PROTOCOL_INFO);
+    const std::array<uint8_t, 1> payload{nodeId};
     frame.setPayload(payload.data(), payload.size());
     return frame;
 }
@@ -258,6 +277,29 @@ auto HostApi::decodeInitData(const ZwaveDataFrame& frame) -> std::optional<InitD
 
     out.chipType    = payload[INIT_DATA_HEADER + bitmapLen];
     out.chipVersion = payload[INIT_DATA_HEADER + bitmapLen + 1];
+    return out;
+}
+
+auto HostApi::decodeNodeProtocolInfo(const ZwaveDataFrame& frame) -> std::optional<NodeProtocolInfoResponse>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_GET_NODE_PROTOCOL_INFO ||
+        frame.getType() != ZwaveDataFrame::FrameType::RESPONSE)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload  = frame.getPayload();
+    std::size_t const total = frame.getPayloadSize();
+    if (payload == nullptr || total < NPI_PAYLOAD_BYTES)
+    {
+        return std::nullopt;
+    }
+    NodeProtocolInfoResponse out;
+    out.capabilities       = payload[NPI_OFFSET_CAPABILITIES];
+    out.security           = payload[NPI_OFFSET_SECURITY];
+    out.reserved           = payload[NPI_OFFSET_RESERVED];
+    out.basicDeviceType    = payload[NPI_OFFSET_BASIC];
+    out.genericDeviceType  = payload[NPI_OFFSET_GENERIC];
+    out.specificDeviceType = payload[NPI_OFFSET_SPECIFIC];
     return out;
 }
 

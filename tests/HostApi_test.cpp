@@ -326,6 +326,59 @@ TEST(HostApi, DecodeInitDataExpandsBitmap)
 }
 
 // ===========================================================================
+// encodeGetNodeProtocolInfo / decodeNodeProtocolInfo (FUNC_ID = 0x41)
+// ===========================================================================
+
+TEST(HostApi, EncodeGetNodeProtocolInfoCarriesNodeId)
+{
+    const auto frame = HostApi::encodeGetNodeProtocolInfo(0x0B);
+    EXPECT_EQ(frame.getCommand(), HostApi::CMD_GET_NODE_PROTOCOL_INFO);
+    EXPECT_EQ(frame.getType(), ZwaveDataFrame::FrameType::REQUEST);
+    ASSERT_EQ(frame.getPayloadSize(), 1U);
+    EXPECT_EQ(frame.getPayload()[0], 0x0B);
+}
+
+TEST(HostApi, DecodeNodeProtocolInfo)
+{
+    // capabilities=0x93 (listening, 9.6k, version 3),
+    // security=0x01, reserved=0x00, basic=0x04 (Routing Slave),
+    // generic=0x10 (Binary Switch), specific=0x01 (Power Switch Binary).
+    const std::vector<std::uint8_t> payload{0x93, 0x01, 0x00, 0x04, 0x10, 0x01};
+    const auto bytes = buildResponseFrame(HostApi::CMD_GET_NODE_PROTOCOL_INFO, payload);
+    const auto frame = frameFromBytes(bytes);
+    const auto resp  = HostApi::decodeNodeProtocolInfo(frame);
+    ASSERT_TRUE(resp.has_value());
+    EXPECT_EQ(resp->capabilities, 0x93);
+    EXPECT_EQ(resp->security, 0x01);
+    EXPECT_EQ(resp->reserved, 0x00);
+    EXPECT_EQ(resp->basicDeviceType, 0x04);
+    EXPECT_EQ(resp->genericDeviceType, 0x10);
+    EXPECT_EQ(resp->specificDeviceType, 0x01);
+}
+
+TEST(HostApi, DecodeNodeProtocolInfoRejectsRequestType)
+{
+    const auto bytes = buildRequestFrame(HostApi::CMD_GET_NODE_PROTOCOL_INFO, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
+    const auto frame = frameFromBytes(bytes);
+    EXPECT_FALSE(HostApi::decodeNodeProtocolInfo(frame).has_value());
+}
+
+TEST(HostApi, DecodeNodeProtocolInfoRejectsShortPayload)
+{
+    // Five bytes — one short of the spec minimum.
+    const auto bytes = buildResponseFrame(HostApi::CMD_GET_NODE_PROTOCOL_INFO, {0x00, 0x00, 0x00, 0x00, 0x00});
+    const auto frame = frameFromBytes(bytes);
+    EXPECT_FALSE(HostApi::decodeNodeProtocolInfo(frame).has_value());
+}
+
+TEST(HostApi, DecodeNodeProtocolInfoRejectsWrongCommand)
+{
+    const auto bytes = buildResponseFrame(HostApi::CMD_GET_VERSION, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
+    const auto frame = frameFromBytes(bytes);
+    EXPECT_FALSE(HostApi::decodeNodeProtocolInfo(frame).has_value());
+}
+
+// ===========================================================================
 // decodeNodeCallback (FUNC_ID_ZW_ADD_NODE_TO_NETWORK / REMOVE)
 // ===========================================================================
 

@@ -37,15 +37,15 @@ Picked Python (3.11+) over the alternatives:
 scripts/codegen/
 ├── README.md            this file
 ├── generate.py          CLI entry point — dispatches to target modules
-├── schema.py            (Phase 1) dataclasses mirroring the manifest
-├── loader.py            (Phase 1) yaml → schema, validation, errors
+├── schema.py            dataclasses mirroring the manifest
+├── loader.py            yaml → schema, validation, errors
 ├── targets/
 │   ├── __init__.py
 │   ├── messagebus.py    emits MessageBus event structs + instantiations
 │   ├── dbus_methods.py  emits DBusBackend method registrations
 │   ├── dbus_signals.py  emits DBusBackend signal registrations + emits
 │   └── cc_codecs.py     emits application/<Name>.{hpp,cpp} skeletons
-└── templates/           (Phase 1+) Jinja2 templates, one per output
+└── templates/           Jinja2 templates, one per generated output
 ```
 
 ## Usage
@@ -67,7 +67,7 @@ The generator runs `clang-format -i` on every emitted file before
 exiting so the output already matches the project's style and a
 post-generation diff doesn't churn on whitespace.
 
-### CMake integration (Phase 1)
+### CMake integration
 
 A custom command in the root `CMakeLists.txt` invokes the generator
 when `InterfaceManifest.yml` or any file under `scripts/codegen/` changes.
@@ -84,73 +84,153 @@ the manifest; the generated C++ is a derivative artefact, the same
 way `cmake-build-*/generated/Version.hpp` already is. Reviewers see
 manifest changes in the diff; CI proves the generator is reproducible.
 
-## Phased rollout
+## Rollout history
 
-Each phase replaces one slice of hand-written code with generator
-output. Earlier phases pay for the infrastructure of later ones, so
-the order is "lowest-risk slice first."
+The codegen landed in six phases between 2026-05-02 and 2026-05-03.
+Each phase replaced one slice of hand-written code with generator
+output, lowest-risk slice first.
 
-### Phase 1 — Infrastructure stand-up
-- `codegen/generate.py` parses arguments and dispatches.
-- `codegen/loader.py` loads `InterfaceManifest.yml` and validates it
-  against `codegen/schema.py` dataclasses, with concrete error
-  messages on missing/unknown fields and unknown type names.
-- One target generates a single trivial header (a sanity-check banner)
-  to prove the toolchain is wired end to end.
-- CMake custom command + dependency tracking lands.
-- No daemon code consumes generated output yet.
+### Phase 1 — Infrastructure stand-up ✅ (commit `33028d1`)
+- `generate.py` argparse + dispatch.
+- `loader.py` + `schema.py` parse `InterfaceManifest.yml` into
+  validated dataclasses, with concrete errors on missing fields,
+  unknown categories, dangling event refs, and malformed type
+  expressions.
+- A trivial sanity-check target (since removed in Phase 6) proved
+  the YAML → loader → schema → Jinja2 → file → clang-format chain
+  end to end before any real target plugged in.
+- CMake `add_custom_command` with dependency tracking on the
+  manifest, every `*.py`, and every template.
 
-### Phase 2 — MessageBus
-- Generate `MessageBus.gen.hpp` carrying every event struct, the
-  `IsRetained<T>` specializations, and the nested struct definitions
-  (`NodeInfo`, `EndpointMember`, `AcceptedDongleConfig`).
-- Generate `MessageBus.gen.cpp` carrying the explicit instantiations.
-- `MessageBus.hpp` becomes a thin file that includes
-  `MessageBus.gen.hpp` and declares the public `subscribe` /
-  `publish` / `unsubscribe` / `touch` API.
-- Delete the hand-written event-struct and instantiation blocks.
-- This is the lowest-risk slice: pure data shapes, no behaviour
-  change, every existing call site continues to compile unmodified.
+### Phase 2 — MessageBus ✅ (commit `33028d1`)
+- `MessageBus.gen.hpp` carries every event struct, every nested
+  struct (`NodeInfo` / `EndpointMember` / `AcceptedDongleConfig`),
+  and the `IsRetained<T>` specializations.
+- `MessageBus.gen.cpp` carries the explicit
+  `subscribe<T>` / `publish<T>` instantiations.
+- `MessageBus.hpp` shrunk from 393 to 55 lines (a thin wrapper over
+  the generated header plus the public-API declarations).
+  `MessageBus.cpp` shrunk from 162 to 30 lines.
+- New `MessageBusInternal.hpp` holds the `Topic<T>` /
+  `BusState` / template bodies in `MessageBus::detail::`, shared by
+  both translation units.
 
-### Phase 3 — D-Bus methods
-- The manifest's `action:` notation drives a generator that emits
-  `DBusMethods.gen.cpp` containing the `obj.registerMethod(...)`
-  block for every method whose action is `publish:` /
-  `publish_constant:` / `read_cached:`. Methods marked
-  `custom:` (today: `GetVersion`, `GetNetworkStatus`) keep their
-  hand-written bodies and are referenced by the generator as
-  forward declarations.
-- `DBusBackend.cpp` shrinks; the long flat method-registration list
-  goes away. The `NOLINTBEGIN(readability-function-cognitive-complexity)`
-  band on `run()` either narrows or disappears entirely.
+### Phase 3 — D-Bus methods ✅ (commit `4afe339`)
+- 13 of 22 methods (every `publish:` and `publish_constant:` action)
+  now generated inline in `DBusMethods.gen.cpp`.
+- 9 methods (flag-byte unpacking on `AddNode` / `RemoveNode`,
+  struct-array conversion on the Multi Channel Association
+  Set/Remove, plus the four `read_cached:`-shaped getters and
+  `GetVersion` / `GetNetworkStatus`) stay hand-written as `custom:`
+  handlers — the codegen forwards to them via thin per-method
+  lambdas.
+- `DBusBackendInternal.hpp` lifted the `Impl` struct, tuple aliases,
+  and `BUS_NAME` / `OBJECT_PATH` / `IFACE_NAME` constants out of
+  the `.cpp`.
+- `DBusBackend.cpp` lost ~166 lines (the entire flat method
+  registration list).
 
-### Phase 4 — D-Bus signals
-- Generate `DBusSignals.gen.cpp` with the signal registrations and
-  the `MessageBus::subscribe` lambdas that emit them. The `decode:`
-  notation handles the `SwitchBinaryReport` style typed-from-CC
-  signals — the generator emits the codec call and the
-  `if (!decoded) return;` guard automatically.
-- All hand-written `subscribe`/`emitSignal` blocks for D-Bus signals
-  go away.
+### Phase 4 — D-Bus signals ✅ (commit `035b44a`)
+- All 9 D-Bus signals generated. Per-event subscribers grouped so
+  one `MessageBus::subscribe<X>` can drive multiple signals (the
+  `ApplicationCommand` event drives both the raw `ApplicationCommand`
+  passthrough and the typed `SwitchBinaryReport` via the manifest's
+  `decode:` notation, which inlines the
+  `BinarySwitch::decodeReport` call and the `std::nullopt` guard).
+- Five hand-written cache-update subscribers stay (DongleStatus /
+  DongleInfo / InitData / NodeListChanged / SessionStatus) — they
+  feed `impl->last*` for the `custom: emitGet*` handlers and run
+  before the generated signal subs so any field a D-Bus signal
+  carries is already cached when it goes out.
+- `DBusBackend.cpp` lost another ~270 lines (the registerSignal
+  block and the eight signal-emit lambdas).
 
-### Phase 5 — CC codec skeletons
-- For every CC declared in the manifest with a complete wire shape,
-  generate `application/<Name>.gen.hpp` and `application/<Name>.gen.cpp`
-  carrying the encode/decode functions for the simple commands
-  (single-byte SET, no-arg GET, fixed-shape REPORT). The
-  hand-written `application/<Name>.{hpp,cpp}` shrinks to whatever
-  the generator can't express — currently the irregular bits like
-  `MultichannelAssociation`'s MARKER-separated REMOVE-all encoding.
-- Existing tests under `tests/<Name>_test.cpp` continue to verify
-  the generated codec; no test rewrite required.
+### Phase 5 — CC codec skeletons ✅ (commit `c75efd1`)
+- Every CC gets `application/<Name>.gen.hpp` with COMMAND_CLASS,
+  per-command byte constants (`<wire_prefix>_<CMD>`), and any
+  per-CC `constants:` block (`VALUE_OFF` / `VALUE_ON` /
+  `VALUE_UNKNOWN`, `MARKER`).
+- CCs with fully-expressed wire shapes (BinarySwitch, Basic) also
+  get `application/<Name>.gen.cpp` with simple `encodeSet` /
+  `encodeGet` bodies.
+- Hand-written `application/<Name>.{hpp,cpp}` shrunk to the
+  irregular parts: `enum State`, `struct Report`, decode functions,
+  multi-frame Association encoders, MultichannelAssociation's
+  MARKER-elision REMOVE-all wire form.
 
-### Phase 6 — Cleanup
-- Delete now-orphaned hand-written code paths.
-- `MANUAL.md` / `README.md` method tables are also generated from
-  the manifest (markdown target). Hand-edited prose stays put.
-- The manifest, the generator, and the daemon's hand-written code
-  are now disjoint: nothing in the daemon's source tree
-  duplicates information the manifest holds.
+### Phase 6 — Cleanup ✅ (this rev)
+- Phase 1 sanity-check target (`Manifest.gen.hpp` +
+  `targets/manifest_summary.py` + its template) deleted; its job
+  was to prove the toolchain wires up, and Phases 2–5 prove that
+  every rebuild.
+- Top-level docs (`README.md`, `CLAUDE.md`) updated to point at
+  `InterfaceManifest.yml` as the canonical interface description.
+- `MANUAL.md` / `README.md` method-table generation **deferred** —
+  see the section below. The duplication is currently low-cost
+  (~one round of doc edits per CC; no observed drift bugs in the
+  six-phase rollout). The infrastructure to do it cleanly
+  (auto-update markers + `--check` mode + a CI verification step)
+  is a multi-day stretch that doesn't pay for itself yet.
+
+## Deferred extensions
+
+These are tracked here as obvious next steps for the codegen, ordered
+by leverage. None are blocking; each lands when a concrete need
+shows up.
+
+### `read_cached:` action support
+Three methods stay `custom:` today (`emitGetNodes`,
+`emitGetDongleInfo`, `emitGetInitData`) because the codegen doesn't
+yet emit the cached-state lookup + tuple-construction body. The
+manifest already documents the action shape; the generator just
+needs the inline-body emission and a per-event "cached-as" name
+convention (NodeListChanged → `lastNodes`, DongleInfo → cached
+whole, etc.).
+
+### Flag-byte unpacking annotation
+`AddNode` / `RemoveNode` stay `custom:` because the inbound `flags`
+byte unpacks into four bool fields on the bus event. A small
+`unpack_bits:` annotation on the param would express this:
+
+```yaml
+- { name: flags, dbus: y, cpp: u8, unpack_bits: { 7: power, 6: nwi, 5: protocolLongRange, 4: skipFlNeighbors } }
+```
+
+The codegen would emit the `bitSet(flags, 7)` calls automatically.
+
+### Inbound struct-array conversion
+The `SetMultichannelAssociation` / `RemoveMultichannelAssociation`
+endpoint-pair param is `a(yy)` on the wire and
+`vector<MessageBus::EndpointMember>` on the bus event. A simple
+`element_struct: EndpointMember` notation (positional field
+mapping from the inbound `sdbus::Struct` to the bus struct) would
+let those become regular `publish:` actions.
+
+### Variable-length wire shapes for encoders
+Association's encoders take a `std::span<const uint8_t> members`
+parameter and emit it as a sequence of bytes after the
+`(CC, cmd, groupId)` header. A richer `wire:` grammar could express
+this — splat operator, conditional MARKER emission for MCA's
+REMOVE-all — and let the encoders generate.
+
+### Decode-side support including enum mapping
+`BinarySwitch::decodeReport` and `Basic::decodeReport` stay
+hand-written because the manifest can't currently express the
+state-byte → enum-State mapping or the v1/v2 wire-form branching
+in `Basic`. Adding a `decode:` block that mirrors the existing
+`encode_args:` / `wire:` pattern would close the last gap.
+
+### Per-directory overlay files (already deferred)
+See the section below — design held for the first concrete
+"manifest can't express this CC's irregular bit" case.
+
+### Markdown method-table generation (deferred from Phase 6)
+A target that emits the canonical method/signal table from the
+manifest into `MANUAL.md` and `README.md` via auto-update markers.
+Combined with a `--check` mode the pre-commit hook runs, this
+removes the last documented duplication. Practical when manifest
+edits start outpacing manual doc updates; on the back burner until
+then.
 
 ## Deferred: per-directory overlay files
 

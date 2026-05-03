@@ -64,7 +64,6 @@ set(ZWAVED_CODEGEN    "${CMAKE_SOURCE_DIR}/scripts/codegen/generate.py")
 set(ZWAVED_GENERATED_DIR "${CMAKE_BINARY_DIR}/generated")
 
 set(ZWAVED_GENERATED_HEADERS
-    "${ZWAVED_GENERATED_DIR}/Manifest.gen.hpp"
     "${ZWAVED_GENERATED_DIR}/MessageBus.gen.hpp"
     "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.hpp"
     "${ZWAVED_GENERATED_DIR}/DBusSignals.gen.hpp"

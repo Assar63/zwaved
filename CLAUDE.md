@@ -66,6 +66,8 @@ The hook checks only staged C/C++ files with `clang-format` and `clang-tidy`. Al
 
 ## Architecture
 
+The cross-module contracts of the daemon (every `MessageBus` event, the full D-Bus method/signal surface, and the per-CC wire constants) are described declaratively in `InterfaceManifest.yml` at the repo root. `scripts/codegen/generate.py` reads the manifest at build time and emits the matching C++ into `cmake-build-*/generated/`: `MessageBus.gen.{hpp,cpp}` (event structs + `subscribe<T>` / `publish<T>` instantiations), `DBusMethods.gen.{hpp,cpp}` (most method registrations; `custom:` actions forward to hand-written `emit*` helpers in `DBusBackend.cpp` for the half-dozen shapes the manifest can't express yet), `DBusSignals.gen.{hpp,cpp}` (all signal registrations + emission subscribers, including the `decode:`-driven typed-from-CC signals), and `application/<Name>.gen.{hpp,cpp}` (per-CC constants and the simple encoders for CCs whose `wire:` shape is fully expressed). Adding a new bus event / D-Bus method / signal / CC is "edit the manifest, rebuild" — nothing in the daemon's source tree duplicates information the manifest holds. See `scripts/codegen/README.md` for the rollout history and the deferred extensions.
+
 The application is a Z-Wave communication daemon built around GCC/Clang's `__attribute__((constructor(N)))`/`__attribute__((destructor(N)))` mechanism — threads start **before** `main()` and stop **after** it returns. Priority constants are defined in `src/zwaved.h`:
 
 | Priority | Component | File |

@@ -230,6 +230,25 @@ events:
       - { name: phase,     type: u8, default: PHASE_RESPONSE }
       - { name: status,    type: u8, default: 0, doc: "interpretation depends on phase" }
 
+  # ---- 2c'. Typed CC reports ---------------------------------------
+  # The cc-translator module subscribes to ApplicationCommand events,
+  # runs the application/ codec decoders, and republishes typed events
+  # like the ones below. Lets external-api emit typed D-Bus signals
+  # without ever including a CC codec header — the bus stays the only
+  # seam between modules.
+
+  - name: BinarySwitchReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Binary Switch (CC 0x25) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose
+      ccData parses as a Binary Switch Report. State follows the
+      BinarySwitch::State enum: 0=Off, 1=On, 2=Unknown.
+    fields:
+      - { name: sourceNodeId, type: u8, default: 0 }
+      - { name: state,        type: u8, default: 0, doc: "0=Off, 1=On, 2=Unknown" }
+
   # ---- 2d. Command events (D-Bus → ProtocolThread) ----------------
   # External transports translate semantic D-Bus calls into one of
   # these and publish; ProtocolThread subscribes and dispatches.
@@ -713,23 +732,20 @@ dbus:
         - { name: status,    dbus: y }
       triggered_by: { event: RemoveFailedNodeStatus }
 
-    # -- CC-decoder signals: same trigger event, decoded via an
-    # application/ codec into a typed shape.
+    # -- Typed CC-report signals: trigger off the cc-translator's
+    # republished typed events. The translator owns the codec call
+    # so external-api never includes a CC codec header. Adding a new
+    # typed signal: declare a typed bus event under `events:`, teach
+    # the translator (src/cc-translator/) to publish it for the
+    # matching ApplicationCommand frame, and add the signal entry
+    # below.
 
     - name: SwitchBinaryReport
       params:
         - { name: sourceNodeId, dbus: y }
-        - { name: state,        dbus: y, doc: "0=Off, 1=On, 2=Unknown (BinarySwitch::State)" }
+        - { name: state,        dbus: y, doc: "0=Off, 1=On, 2=Unknown" }
       triggered_by:
-        event:  ApplicationCommand
-        decode:
-          codec: BinarySwitch.decodeReport
-          input: ccData
-          # Skip emit when the codec returns std::nullopt.
-          on_none: skip
-        map:
-          sourceNodeId: event.sourceNodeId
-          state:       "static_cast<u8>(decoded.state)"
+        event: BinarySwitchReport
 
 # =====================================================================
 # 4. Application Command Class codecs

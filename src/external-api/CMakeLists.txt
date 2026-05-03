@@ -18,13 +18,11 @@ if(ZWAVED_BUILD_DBUS)
         "${ZWAVED_GENERATED_DIR}/DBusSignals.gen.cpp"
     )
     # src/external-api -- for DBusBackendInternal.hpp from the gen TUs.
-    # src/zwave-protocol -- so the gen DBusSignals.gen.cpp can include
-    # `application/<Name>.hpp` for `decode:` codecs without paying the
-    # cmake-build-*/generated/ → src/ relative-path tax.
-    target_include_directories(zwaved PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}"
-        "${CMAKE_SOURCE_DIR}/src/zwave-protocol"
-    )
+    # The earlier src/zwave-protocol/ entry (so the gen DBusSignals.gen.cpp
+    # could `#include "application/<Name>.hpp"` for `decode:` codecs)
+    # is no longer needed: typed-from-CC signals route through the
+    # cc-translator module's republished bus events instead.
+    target_include_directories(zwaved PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
     target_compile_definitions(zwaved PRIVATE ZWAVED_HAS_DBUS=1)
     target_link_libraries(zwaved PRIVATE PkgConfig::SDBUS_CPP)
 endif()

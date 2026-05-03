@@ -14,6 +14,12 @@
 //                       SignalHandler or any worker logs anything.
 //   103 SignalHandler — registers SIGHUP/SIGTERM/SIGINT handlers
 //                       and logs registration via Logger.
+//   110 CcTranslator  — subscribes to bus ApplicationCommand events,
+//                       runs application/ codec decoders, republishes
+//                       typed bus events (e.g. BinarySwitchReport).
+//                       Lets the external-api thread emit typed
+//                       D-Bus signals without ever including a CC
+//                       codec header — the bus is the only seam.
 //   201..203          — dongle / protocol / external-api workers.
 //
 // Toolchain note: priorities 0..100 are reserved, so Logger gets the
@@ -21,6 +27,7 @@
 constexpr int CONFIG_LOGGER_PRIO             = 101;
 constexpr int CONFIG_CONFIG_PRIO             = 102;
 constexpr int CONFIG_ZWAVE_STARTUP_PRIO      = 103;
+constexpr int CONFIG_CC_TRANSLATOR_PRIO      = 110;
 constexpr int CONFIG_ZWAVE_DONGLE_PRIO       = 201;
 constexpr int CONFIG_ZWAVE_PROTOCOL_PRIO     = 202;
 constexpr int CONFIG_ZWAVE_EXTERNAL_API_PRIO = 203;

@@ -23,7 +23,10 @@ cmake-build-*/
 # next line out.
 # .git/
 
-# Docker / CI artifacts.
+# Docker / CI artifacts. The Dockerfile itself reads via `-f` and
+# doesn't need to be inside the COPY'd context; exclude the whole
+# docker/ tree to keep tar payload tight.
 .dockerignore
-Dockerfile
+docker/
 .github/
+.devcontainer/

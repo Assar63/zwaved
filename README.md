@@ -409,17 +409,18 @@ configure ran. (Future enhancement: a custom target with
 ## Continuous Integration
 
 `.github/workflows/build.yml` runs on every push and pull-request.
-The `Dockerfile` is the single source of truth for "how zwaved is
-built": CI runs `docker build` against the same file a developer
-uses locally, which means a broken commit fails CI the same way it
-fails a `docker build .` on your machine. The workflow stops at the
-Dockerfile's `build` stage (the toolchain stage that runs
-`ctest --output-on-failure`), so the artifact CI produces is "this
-commit compiles and its tests pass", not a publishable image.
+`docker/Dockerfile` is the single source of truth for "how zwaved
+is built": CI runs `docker build -f docker/Dockerfile .` against the
+same file a developer uses locally, which means a broken commit
+fails CI the same way it fails the equivalent build on your
+machine. The workflow stops at the Dockerfile's `build` stage (the
+toolchain stage that runs `ctest --output-on-failure`), so the
+artifact CI produces is "this commit compiles and its tests pass",
+not a publishable image.
 
 When a `v*.*.*` tag is pushed (e.g. `git tag v0.1.0 && git push --tags`),
 an additional `publish-image` job kicks in. It builds the full
-Dockerfile (including the slim runtime stage), tags the result as
+`docker/Dockerfile` (including the slim runtime stage), tags the result as
 `ghcr.io/<owner>/<repo>:0.1.0` and `…:latest`, and pushes to
 **GitHub Packages** (ghcr.io). The image's `--version` output and
 `org.opencontainers.image.version` label reflect the tag.

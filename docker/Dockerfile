@@ -12,9 +12,12 @@
 #     dynamic-library deps. Published to ghcr.io on `v*` tags.
 #
 # Single source of truth for "what does zwaved need to build", so the
-# local `docker build .` produces the same artefact CI does.
+# local `docker build -f docker/Dockerfile .` produces the same
+# artefact CI does. The build context is the repo root (so `COPY . .`
+# in the build stage gets the full source tree); only the Dockerfile
+# itself lives under docker/.
 #
-# Build:  docker build -t zwaved:dev .
+# Build:  docker build -f docker/Dockerfile -t zwaved:dev .
 # Run:    docker run --rm --privileged \
 #             --device=/dev/ttyACM0 \
 #             -v /var/run/dbus:/var/run/dbus \

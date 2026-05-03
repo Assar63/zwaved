@@ -16,7 +16,7 @@
     // and run the daemon outside the container against host hardware.
     "name": "zwaved",
     "build": {
-        "dockerfile": "../Dockerfile",
+        "dockerfile": "../docker/Dockerfile",
         "context": "..",
         "target": "toolchain"
     },

@@ -1,6 +1,10 @@
 #ifndef ZWAVED_MULTICHANNEL_ASSOCIATION_HPP
 #define ZWAVED_MULTICHANNEL_ASSOCIATION_HPP
 
+// IWYU pragma: begin_exports
+#include "MultichannelAssociation.gen.hpp"
+// IWYU pragma: end_exports
+
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -22,21 +26,11 @@
 /// matching the simpler `Association::encodeRemove` semantics. With
 /// any explicit members, the encoder always emits the MARKER, even
 /// when only one half of the list is populated.
+///
+/// Constants live in MultichannelAssociation.gen.hpp; encoder /
+/// decoder bodies stay hand-written here.
 namespace MultichannelAssociation
 {
-constexpr std::uint8_t COMMAND_CLASS                              = 0x8E;
-constexpr std::uint8_t MULTI_CHANNEL_ASSOCIATION_SET              = 0x01;
-constexpr std::uint8_t MULTI_CHANNEL_ASSOCIATION_GET              = 0x02;
-constexpr std::uint8_t MULTI_CHANNEL_ASSOCIATION_REPORT           = 0x03;
-constexpr std::uint8_t MULTI_CHANNEL_ASSOCIATION_REMOVE           = 0x04;
-constexpr std::uint8_t MULTI_CHANNEL_ASSOCIATION_GROUPINGS_GET    = 0x05;
-constexpr std::uint8_t MULTI_CHANNEL_ASSOCIATION_GROUPINGS_REPORT = 0x06;
-
-/// Separates plain node members from node:endpoint members in the
-/// wire payload. Z-Wave reserves nodeId `0` (broadcast), so this
-/// value is unambiguous when scanning.
-constexpr std::uint8_t MARKER = 0x00;
-
 /// One node:endpoint member of an association group. `endpoint` is a
 /// 7-bit value (1..127) per Multi Channel CC; the high bit is reserved
 /// and not interpreted here.

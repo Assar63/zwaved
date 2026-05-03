@@ -4,7 +4,8 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <vector>
+
+// encodeSet / encodeGet bodies live in Basic.gen.cpp.
 
 namespace
 {
@@ -13,16 +14,6 @@ constexpr std::size_t REPORT_V1_BYTES = 3;
 // v2 adds targetValue + duration after currentValue.
 constexpr std::size_t REPORT_V2_BYTES = 5;
 }  // namespace
-
-auto Basic::encodeSet(uint8_t value) -> std::vector<uint8_t>
-{
-    return {COMMAND_CLASS, BASIC_SET, value};
-}
-
-auto Basic::encodeGet() -> std::vector<uint8_t>
-{
-    return {COMMAND_CLASS, BASIC_GET};
-}
 
 auto Basic::decodeReport(std::span<const uint8_t> payload) -> std::optional<Report>
 {

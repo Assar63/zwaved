@@ -743,16 +743,27 @@ command_classes:
 
   - name: BinarySwitch
     class_byte: 0x25
+    # Per-command byte constants are emitted as <wire_prefix>_<CMD>,
+    # mirroring the Z-Wave spec naming. Without an explicit
+    # `wire_prefix:`, the codegen falls back to camelCase-to-
+    # SCREAMING_SNAKE on the CC name (which differs from spec for
+    # several CCs — e.g. BinarySwitch's wire name is SWITCH_BINARY,
+    # MultichannelAssociation's is MULTI_CHANNEL_ASSOCIATION).
+    wire_prefix: SWITCH_BINARY
     description: |
       Binary on/off control. SET takes a single value byte
       (0=off, 0xFF=on); REPORT carries the current state.
+    constants:
+      - { name: VALUE_OFF,     value: 0x00 }
+      - { name: VALUE_ON,      value: 0xFF }
+      - { name: VALUE_UNKNOWN, value: 0xFE }
     commands:
       - name: Set
         byte: 0x01
         encode_args:
           - { name: turnOn, type: bool }
         wire:
-          - "turnOn ? 0xFF : 0x00"
+          - "turnOn ? VALUE_ON : VALUE_OFF"
       - name: Get
         byte: 0x02
         encode_args: []
@@ -765,10 +776,15 @@ command_classes:
 
   - name: Basic
     class_byte: 0x20
+    wire_prefix: BASIC
     description: |
       Universal-fallback CC. Devices without a more specific CC for
       their primary behaviour map Basic onto whatever does make
       sense (a switch becomes on/off, a dimmer becomes 0..99).
+    constants:
+      - { name: VALUE_OFF,     value: 0x00 }
+      - { name: VALUE_ON,      value: 0xFF }
+      - { name: VALUE_UNKNOWN, value: 0xFE }
     commands:
       - name: Set
         byte: 0x01
@@ -790,6 +806,7 @@ command_classes:
 
   - name: Association
     class_byte: 0x85
+    wire_prefix: ASSOCIATION
     description: |
       Per-group association lists -- group 1 is conventionally the
       lifeline, owned by the primary controller.
@@ -803,6 +820,7 @@ command_classes:
 
   - name: MultichannelAssociation
     class_byte: 0x8E
+    wire_prefix: MULTI_CHANNEL_ASSOCIATION
     description: |
       Like plain Association but each group can hold both whole-node
       members and (nodeId, endpoint) pair members, separated on the

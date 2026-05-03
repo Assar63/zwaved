@@ -273,6 +273,7 @@ def _build_cc(raw: dict, source: Path) -> CommandClass:
     return CommandClass(
         name=name,
         class_byte=_to_int(_require(raw, "class_byte", where, source), where, source),
+        wire_prefix=raw.get("wire_prefix"),
         description=raw.get("description"),
         constants=[_build_constant(c, where, source) for c in raw.get("constants") or []],
         commands=[_build_cc_command(c, where, source) for c in raw.get("commands") or []],
@@ -282,12 +283,21 @@ def _build_cc(raw: dict, source: Path) -> CommandClass:
 def _build_cc_command(raw: dict, where: str, source: Path) -> CcCommand:
     name = _require(raw, "name", f"{where} command", source)
     sub_where = f"{where} command {name}"
+    encode_args = None
+    if "encode_args" in raw:
+        encode_args = [_build_field(f, sub_where, source) for f in raw["encode_args"] or []]
+    wire = list(raw["wire"]) if "wire" in raw and raw["wire"] is not None else (
+        [] if "wire" in raw else None
+    )
+    decoded_struct = None
+    if "decoded_struct" in raw:
+        decoded_struct = [_build_field(f, sub_where, source) for f in raw["decoded_struct"] or []]
     return CcCommand(
         name=name,
         byte=_to_int(_require(raw, "byte", sub_where, source), sub_where, source),
-        encode_args=[_build_field(f, sub_where, source) for f in raw.get("encode_args") or []],
-        wire=list(raw.get("wire") or []),
-        decoded_struct=[_build_field(f, sub_where, source) for f in raw.get("decoded_struct") or []],
+        encode_args=encode_args,
+        wire=wire,
+        decoded_struct=decoded_struct,
     )
 
 
@@ -347,9 +357,12 @@ def _stringify_default(value: Any) -> Optional[str]:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
-        # Preserve hex literals where the YAML had them; PyYAML parses
-        # 0xFF as int(255), so we lose that info. Hex is restored by the
-        # target generator only where it matters (constants, defaults).
+        # PyYAML parses 0xFF as int(255), losing the lexical hex
+        # form. Re-emit u8-range ints as `0x%02X` to keep CC sentinels
+        # (VALUE_OFF / VALUE_ON / MODE_ANY_NODE / MARKER / …) readable
+        # in the generated C++. Larger ints stay decimal.
+        if 0 <= value <= 0xFF:
+            return f"0x{value:02X}"
         return str(value)
     return str(value)
 

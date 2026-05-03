@@ -1,6 +1,10 @@
 #ifndef ZWAVED_ASSOCIATION_HPP
 #define ZWAVED_ASSOCIATION_HPP
 
+// IWYU pragma: begin_exports
+#include "Association.gen.hpp"
+// IWYU pragma: end_exports
+
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -11,15 +15,13 @@
 /// the source will push unsolicited commands to (Basic SET on toggle,
 /// sensor reports, etc.). Group 1 is conventionally the lifeline group
 /// and is owned by the primary controller.
+///
+/// Constants are generated from InterfaceManifest.yml (Association.gen.hpp).
+/// All encoder/decoder bodies stay hand-written here because Association's
+/// wire shapes (variable-length member lists, multi-frame Reports) aren't
+/// fully expressible in the manifest today.
 namespace Association
 {
-constexpr std::uint8_t COMMAND_CLASS                = 0x85;
-constexpr std::uint8_t ASSOCIATION_SET              = 0x01;
-constexpr std::uint8_t ASSOCIATION_GET              = 0x02;
-constexpr std::uint8_t ASSOCIATION_REPORT           = 0x03;
-constexpr std::uint8_t ASSOCIATION_REMOVE           = 0x04;
-constexpr std::uint8_t ASSOCIATION_GROUPINGS_GET    = 0x05;
-constexpr std::uint8_t ASSOCIATION_GROUPINGS_REPORT = 0x06;
 
 /// Decoded ASSOCIATION_REPORT. `reportsToFollow` is non-zero when a
 /// group's member list spans multiple frames; the controller should

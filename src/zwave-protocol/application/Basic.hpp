@@ -1,10 +1,13 @@
 #ifndef ZWAVED_BASIC_HPP
 #define ZWAVED_BASIC_HPP
 
+// IWYU pragma: begin_exports
+#include "Basic.gen.hpp"
+// IWYU pragma: end_exports
+
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <vector>
 
 /// Z-Wave Basic Command Class (0x20). The "universal fallback" CC —
 /// devices that don't implement a more specific CC for their primary
@@ -17,17 +20,13 @@
 ///   0x63       = max level (99 — used in place of 100 by spec)
 ///   0xFE       = unknown (Report-only)
 ///   0xFF       = on / full / "previous level" for dimmers
+///
+/// Constants and the simple encoders (encodeSet / encodeGet) are
+/// generated from InterfaceManifest.yml and live in Basic.gen.hpp.
+/// The hand-written part defines the decoded Report shape and the
+/// v1/v2 wire-form decoder.
 namespace Basic
 {
-constexpr uint8_t COMMAND_CLASS = 0x20;
-constexpr uint8_t BASIC_SET     = 0x01;
-constexpr uint8_t BASIC_GET     = 0x02;
-constexpr uint8_t BASIC_REPORT  = 0x03;
-
-constexpr uint8_t VALUE_OFF     = 0x00;
-constexpr uint8_t VALUE_ON      = 0xFF;
-constexpr uint8_t VALUE_UNKNOWN = 0xFE;
-
 /// Decoded Basic Report payload. v1 reports carry only `currentValue`
 /// in the wire payload; v2+ adds a `targetValue` and a duration byte
 /// (the time it'll take to transition from current to target). v1
@@ -42,15 +41,6 @@ struct Report
     uint8_t duration     = 0;
     bool wireFormatV2    = false;
 };
-
-/// Build the CC payload for Basic SET. Caller decides the value byte;
-/// 0x00 is off, 0xFF is on / full, 0x01..0x63 is a dimmer level. The
-/// caller is responsible for wrapping the result in
-/// FUNC_ID_ZW_SEND_DATA.
-[[nodiscard]] auto encodeSet(uint8_t value) -> std::vector<uint8_t>;
-
-/// Build the CC payload for Basic GET.
-[[nodiscard]] auto encodeGet() -> std::vector<uint8_t>;
 
 /// Decode a Basic Report payload (the bytes inside an
 /// APPLICATION_COMMAND_HANDLER frame, starting with COMMAND_CLASS).

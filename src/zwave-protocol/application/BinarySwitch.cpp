@@ -3,17 +3,8 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <vector>
 
-auto BinarySwitch::encodeSet(bool turnOn) -> std::vector<uint8_t>
-{
-    return {COMMAND_CLASS, SWITCH_BINARY_SET, turnOn ? VALUE_ON : VALUE_OFF};
-}
-
-auto BinarySwitch::encodeGet() -> std::vector<uint8_t>
-{
-    return {COMMAND_CLASS, SWITCH_BINARY_GET};
-}
+// encodeSet / encodeGet bodies live in BinarySwitch.gen.cpp.
 
 auto BinarySwitch::decodeReport(std::span<const uint8_t> payload) -> std::optional<Report>
 {

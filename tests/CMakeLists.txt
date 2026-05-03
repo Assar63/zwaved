@@ -8,10 +8,22 @@
 # `gtest_discover_tests` registers each TEST() with CTest at build
 # time; run the suite with:
 #     ctest --test-dir cmake-build-gnu --output-on-failure
+#
+# CC tests pull in the matching application/<Name>.gen.{hpp,cpp}
+# from the codegen output via ZWAVED_GENERATED_DIR (also a dep on
+# the zwaved_codegen target, so the .gen files exist before the
+# test compiles).
 
 include(GoogleTest)
 
 set(SRC_DIR "${CMAKE_SOURCE_DIR}/src/zwave-protocol")
+set(GENERATED_APPLICATION_DIR "${ZWAVED_GENERATED_DIR}/application")
+
+set_source_files_properties(
+    "${GENERATED_APPLICATION_DIR}/BinarySwitch.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/Basic.gen.cpp"
+    PROPERTIES GENERATED TRUE
+)
 
 # Tests verify production code; they don't need to *be* production
 # code. clang-tidy rules like bugprone-unchecked-optional-access
@@ -21,6 +33,7 @@ set(SRC_DIR "${CMAKE_SOURCE_DIR}/src/zwave-protocol")
 # the suite stays focused on functional correctness.
 function(zwaved_test_target target)
     set_target_properties("${target}" PROPERTIES CXX_CLANG_TIDY "")
+    add_dependencies("${target}" zwaved_codegen)
 endfunction()
 
 # ---- HostApi --------------------------------------------------------
@@ -38,8 +51,12 @@ gtest_discover_tests(HostApi_test)
 add_executable(BinarySwitch_test
     BinarySwitch_test.cpp
     "${SRC_DIR}/application/BinarySwitch.cpp"
+    "${GENERATED_APPLICATION_DIR}/BinarySwitch.gen.cpp"
 )
-target_include_directories(BinarySwitch_test PRIVATE "${SRC_DIR}/application")
+target_include_directories(BinarySwitch_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
 target_link_libraries(BinarySwitch_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(BinarySwitch_test)
 gtest_discover_tests(BinarySwitch_test)
@@ -48,8 +65,12 @@ gtest_discover_tests(BinarySwitch_test)
 add_executable(Basic_test
     Basic_test.cpp
     "${SRC_DIR}/application/Basic.cpp"
+    "${GENERATED_APPLICATION_DIR}/Basic.gen.cpp"
 )
-target_include_directories(Basic_test PRIVATE "${SRC_DIR}/application")
+target_include_directories(Basic_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
 target_link_libraries(Basic_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Basic_test)
 gtest_discover_tests(Basic_test)
@@ -59,7 +80,10 @@ add_executable(Association_test
     Association_test.cpp
     "${SRC_DIR}/application/Association.cpp"
 )
-target_include_directories(Association_test PRIVATE "${SRC_DIR}/application")
+target_include_directories(Association_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
 target_link_libraries(Association_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Association_test)
 gtest_discover_tests(Association_test)
@@ -69,7 +93,10 @@ add_executable(MultichannelAssociation_test
     MultichannelAssociation_test.cpp
     "${SRC_DIR}/application/MultichannelAssociation.cpp"
 )
-target_include_directories(MultichannelAssociation_test PRIVATE "${SRC_DIR}/application")
+target_include_directories(MultichannelAssociation_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
 target_link_libraries(MultichannelAssociation_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(MultichannelAssociation_test)
 gtest_discover_tests(MultichannelAssociation_test)

@@ -154,15 +154,20 @@ class DBus:
 class CcCommand:
     name: str
     byte: int
-    encode_args: list[Field] = field(default_factory=list)
-    wire: list[str] = field(default_factory=list)         # one expression per wire byte
-    decoded_struct: list[Field] = field(default_factory=list)
+    # Optional rather than default-empty-list: the codegen needs to
+    # distinguish "the YAML didn't declare this command's wire shape"
+    # (None — leave the encoder hand-written) from "explicitly empty"
+    # (a no-arg encoder like Get).
+    encode_args: Optional[list[Field]] = None
+    wire: Optional[list[str]] = None
+    decoded_struct: Optional[list[Field]] = None
 
 
 @dataclass
 class CommandClass:
     name: str
     class_byte: int
+    wire_prefix: Optional[str] = None  # e.g. SWITCH_BINARY for BinarySwitch
     description: Optional[str] = None
     constants: list[Constant] = field(default_factory=list)
     commands: list[CcCommand] = field(default_factory=list)

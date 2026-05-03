@@ -851,3 +851,33 @@ command_classes:
       - { name: Remove,          byte: 0x04 }
       - { name: GroupingsGet,    byte: 0x05 }
       - { name: GroupingsReport, byte: 0x06 }
+
+
+# =====================================================================
+# 5. CC translation rules
+# =====================================================================
+# The cc-translator module subscribes to raw transient bus events
+# (typically ApplicationCommand), runs application/ codec decoders,
+# and republishes typed events declared under `events:` above. The
+# generator-emitted CcTranslator.gen.cpp is the only place in the
+# daemon that links a `src/zwave-protocol/application/` codec from a
+# subscriber outside `src/zwave-protocol/` -- every other module
+# stays codec-free and talks only via MessageBus.
+#
+# Adding a new typed-from-CC report is three steps and zero new C++:
+#   1. Declare the typed event under `events:` (category transient).
+#   2. Add a rule below pointing at the typed event.
+#   3. Add a `dbus.signals:` entry triggered_by the typed event.
+
+cc_translations:
+  - publishes: BinarySwitchReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: BinarySwitch.decodeReport
+      input: ccData
+      # Skip publish when the codec returns std::nullopt -- this
+      # ApplicationCommand frame wasn't a Binary Switch Report.
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      state:        "static_cast<u8>(decoded.state)"

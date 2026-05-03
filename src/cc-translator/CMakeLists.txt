@@ -1,8 +1,15 @@
 # src/cc-translator/CMakeLists.txt
 # Bridge module that subscribes to bus ApplicationCommand events,
 # runs the application/ codec decoders, and republishes typed bus
-# events (BinarySwitchReport, …). Lets the external-api thread emit
-# typed D-Bus signals without including any CC codec header — the
-# bus stays the only seam between modules.
+# events. The body lives entirely in CcTranslator.gen.cpp -- emitted
+# by scripts/codegen/ from the manifest's `cc_translations:` block.
+# This directory holds only the build glue, not source code.
 
-target_sources(zwaved PRIVATE CcTranslator.cpp)
+set_source_files_properties(
+    "${ZWAVED_GENERATED_DIR}/CcTranslator.gen.cpp"
+    PROPERTIES GENERATED TRUE
+)
+
+target_sources(zwaved PRIVATE
+    "${ZWAVED_GENERATED_DIR}/CcTranslator.gen.cpp"
+)

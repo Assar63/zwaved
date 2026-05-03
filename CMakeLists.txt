@@ -76,6 +76,7 @@ set(ZWAVED_GENERATED_SOURCES
     "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/DBusSignals.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/CcTranslator.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"
 )

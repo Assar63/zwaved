@@ -173,6 +173,25 @@ class CommandClass:
     commands: list[CcCommand] = field(default_factory=list)
 
 
+# ---- CC translation rules ------------------------------------------
+# Drive the cc-translator module: subscribe to a raw transient bus
+# event, run a codec on a named field, and republish a typed event.
+
+@dataclass
+class CcTranslationDecode:
+    codec: str            # e.g. "BinarySwitch.decodeReport"
+    input: str            # field name on the trigger event
+    on_none: str = "skip"
+
+
+@dataclass
+class CcTranslation:
+    publishes: str                  # name of the typed event the rule fills
+    triggered_by: str               # name of the raw event subscribed to
+    decode: CcTranslationDecode
+    map: dict[str, str] = field(default_factory=dict)  # typed-event field → expr
+
+
 # ---- Root -----------------------------------------------------------
 
 @dataclass
@@ -182,6 +201,7 @@ class Manifest:
     events: list[Event] = field(default_factory=list)
     dbus: Optional[DBus] = None
     command_classes: list[CommandClass] = field(default_factory=list)
+    cc_translations: list[CcTranslation] = field(default_factory=list)
 
     def event_by_name(self, name: str) -> Event:
         for ev in self.events:

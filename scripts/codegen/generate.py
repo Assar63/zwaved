@@ -33,10 +33,11 @@ from pathlib import Path
 # Each entry maps a CLI target name to (module path, "phase" tag for
 # logging). Order is the order `--target all` runs them in.
 TARGETS: list[tuple[str, str, str]] = [
-    ("messagebus",   "targets.messagebus",   "MessageBus"),
-    ("dbus-methods", "targets.dbus_methods", "D-Bus methods"),
-    ("dbus-signals", "targets.dbus_signals", "D-Bus signals"),
-    ("cc-codecs",    "targets.cc_codecs",    "CC codecs"),
+    ("messagebus",     "targets.messagebus",     "MessageBus"),
+    ("dbus-methods",   "targets.dbus_methods",   "D-Bus methods"),
+    ("dbus-signals",   "targets.dbus_signals",   "D-Bus signals"),
+    ("cc-codecs",      "targets.cc_codecs",      "CC codecs"),
+    ("cc-translator",  "targets.cc_translator",  "CC translator"),
 ]
 
 

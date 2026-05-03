@@ -38,6 +38,8 @@ from schema import (
     ActionPublishConstant,
     ActionReadCached,
     CcCommand,
+    CcTranslation,
+    CcTranslationDecode,
     CommandClass,
     Constant,
     DBus,
@@ -100,10 +102,37 @@ def _build_manifest(raw: dict, source: Path) -> Manifest:
     ccs = [_build_cc(c, source) for c in raw.get("command_classes") or []]
     _check_unique([c.name for c in ccs], "command_classes", source)
 
-    manifest = Manifest(version=version, structs=structs, events=events, dbus=dbus, command_classes=ccs)
+    translations = [_build_cc_translation(t, source) for t in raw.get("cc_translations") or []]
+
+    manifest = Manifest(
+        version=version,
+        structs=structs,
+        events=events,
+        dbus=dbus,
+        command_classes=ccs,
+        cc_translations=translations,
+    )
 
     _check_cross_refs(manifest, source)
     return manifest
+
+
+def _build_cc_translation(raw: dict, source: Path) -> CcTranslation:
+    publishes = _require(raw, "publishes", "cc_translation", source)
+    where = f"cc_translation publishes={publishes!r}"
+    triggered_by = _require(raw, "triggered_by", where, source)
+    decode_raw = _require(raw, "decode", where, source)
+    decode = CcTranslationDecode(
+        codec=_require(decode_raw, "codec", f"{where} decode", source),
+        input=_require(decode_raw, "input", f"{where} decode", source),
+        on_none=decode_raw.get("on_none", "skip"),
+    )
+    return CcTranslation(
+        publishes=publishes,
+        triggered_by=triggered_by,
+        decode=decode,
+        map=dict(raw.get("map") or {}),
+    )
 
 
 def _build_struct(raw: dict, source: Path) -> Struct:
@@ -335,6 +364,27 @@ def _check_cross_refs(manifest: Manifest, source: Path) -> None:
                 f"{source}: signal {signal.name!r} triggered_by references "
                 f"unknown event {signal.triggered_by.event!r}"
             )
+
+    for translation in manifest.cc_translations:
+        if translation.publishes not in event_names:
+            raise ManifestError(
+                f"{source}: cc_translation publishes references unknown event "
+                f"{translation.publishes!r}"
+            )
+        if translation.triggered_by not in event_names:
+            raise ManifestError(
+                f"{source}: cc_translation publishes={translation.publishes!r} "
+                f"triggered_by references unknown event "
+                f"{translation.triggered_by!r}"
+            )
+        published_event = manifest.event_by_name(translation.publishes)
+        published_field_names = {f.name for f in published_event.fields}
+        for fname in translation.map:
+            if fname not in published_field_names:
+                raise ManifestError(
+                    f"{source}: cc_translation publishes={translation.publishes!r} "
+                    f"map sets unknown field {fname!r}"
+                )
 
 
 def _check_unique(names: list[str], where: str, source: Path) -> None:

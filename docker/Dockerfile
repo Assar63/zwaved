@@ -44,9 +44,15 @@ FROM ubuntu:24.04 AS toolchain
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Toolchain + build deps from apt.
-#   * software-properties-common gives us add-apt-repository for the
-#     ubuntu-toolchain-r/test PPA (GCC 15 isn't in Noble's default
-#     repos yet).
+#   * The ubuntu-toolchain-r/test PPA is added by hand rather than via
+#     add-apt-repository — the latter calls Launchpad's REST API
+#     (launchpad.net/api/1.0/...) to look up the PPA's signing key
+#     and that endpoint returns intermittent 504s, which is enough to
+#     fail every CI run that hits one. Keyserver fetch + a hand-rolled
+#     sources.list entry don't go through that API at all.
+#   * Key fingerprint 60C317803A41BA51845E371A1E9377A2BA9EF27F is the
+#     stable signing key for `ubuntu-toolchain-r` (same one
+#     add-apt-repository would have fetched).
 #   * libsystemd-dev is the underlying sd-bus that sdbus-c++ wraps.
 #   * libgtest-dev is needed by `ZWAVED_BUILD_TESTS=ON` (default).
 #   * libncurses-dev for utils/zwave-terminal/ (`ZWAVED_BUILD_UTILS=ON`).
@@ -56,12 +62,22 @@ ARG DEBIAN_FRONTEND=noninteractive
 #     `scripts/check-format --fix` workflow.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        software-properties-common \
         ca-certificates \
+        curl \
         gnupg \
-        wget \
-    && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
-    && apt-get update \
+    && curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x60C317803A41BA51845E371A1E9377A2BA9EF27F" \
+        | gpg --dearmor -o /usr/share/keyrings/ubuntu-toolchain-r.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/ubuntu-toolchain-r.gpg] https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu noble main" \
+        > /etc/apt/sources.list.d/ubuntu-toolchain-r.list \
+    && apt-get -o Acquire::Retries=3 update \
+    && { apt-cache madison g++-15 | grep -q "g++-15"; } \
+        || { \
+            echo "ERROR: g++-15 not available — ubuntu-toolchain-r/test PPA fetch failed."; \
+            echo "Check network reachability of ppa.launchpadcontent.net and rerun."; \
+            echo "(Without this guard apt would silently regex-match 'g++-15' against"; \
+            echo " unrelated *-15 packages and produce a build with no /usr/bin/g++-15.)"; \
+            exit 1; \
+        } \
     && apt-get install -y --no-install-recommends \
         cmake \
         g++-15 \
@@ -120,19 +136,26 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # Runtime shared-library deps only — no compilers, no headers.
 #   * libstdc++6 from the toolchain PPA matches what gcc-15 produced
-#     in the build stage.
+#     in the build stage. Same hand-rolled keyserver + sources.list
+#     pattern as the toolchain stage to dodge Launchpad's REST API.
+#   * curl + gnupg are needed for the key fetch and dropped on the
+#     way out so they don't bloat the runtime image.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        software-properties-common \
         ca-certificates \
-    && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
+        curl \
+        gnupg \
+    && curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x60C317803A41BA51845E371A1E9377A2BA9EF27F" \
+        | gpg --dearmor -o /usr/share/keyrings/ubuntu-toolchain-r.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/ubuntu-toolchain-r.gpg] https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu noble main" \
+        > /etc/apt/sources.list.d/ubuntu-toolchain-r.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         libstdc++6 \
         libudev1 \
         libsqlite3-0 \
         libsystemd0 \
-    && apt-get purge -y software-properties-common \
+    && apt-get purge -y curl gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
 

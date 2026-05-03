@@ -254,11 +254,15 @@ def _build_signal(raw: dict, source: Path) -> Signal:
         decode=decode,
     )
 
+    # `map:` lives inside the `triggered_by:` block per the manifest's
+    # documented layout — it scopes to the trigger, not to the signal
+    # as a whole. Pull it up onto the Signal dataclass for ergonomic
+    # access by the codegen, but read it from the right place.
     return Signal(
         name=name,
         params=params,
         triggered_by=trigger,
-        map=dict(raw.get("map") or {}),
+        map=dict(trig_raw.get("map") or {}),
         doc=raw.get("doc"),
     )
 

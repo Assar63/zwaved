@@ -9,13 +9,22 @@ target_sources(zwaved PRIVATE
 if(ZWAVED_BUILD_DBUS)
     set_source_files_properties(
         "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.cpp"
+        "${ZWAVED_GENERATED_DIR}/DBusSignals.gen.cpp"
         PROPERTIES GENERATED TRUE
     )
     target_sources(zwaved PRIVATE
         DBusBackend.cpp
         "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.cpp"
+        "${ZWAVED_GENERATED_DIR}/DBusSignals.gen.cpp"
     )
-    target_include_directories(zwaved PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    # src/external-api -- for DBusBackendInternal.hpp from the gen TUs.
+    # src/zwave-protocol -- so the gen DBusSignals.gen.cpp can include
+    # `application/<Name>.hpp` for `decode:` codecs without paying the
+    # cmake-build-*/generated/ → src/ relative-path tax.
+    target_include_directories(zwaved PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/src/zwave-protocol"
+    )
     target_compile_definitions(zwaved PRIVATE ZWAVED_HAS_DBUS=1)
     target_link_libraries(zwaved PRIVATE PkgConfig::SDBUS_CPP)
 endif()

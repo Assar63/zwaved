@@ -67,10 +67,12 @@ set(ZWAVED_GENERATED_HEADERS
     "${ZWAVED_GENERATED_DIR}/Manifest.gen.hpp"
     "${ZWAVED_GENERATED_DIR}/MessageBus.gen.hpp"
     "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.hpp"
+    "${ZWAVED_GENERATED_DIR}/DBusSignals.gen.hpp"
 )
 set(ZWAVED_GENERATED_SOURCES
     "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/DBusMethods.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/DBusSignals.gen.cpp"
 )
 
 # Reconfigure when any generator source changes so the OUTPUT list

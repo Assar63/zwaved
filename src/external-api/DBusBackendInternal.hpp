@@ -69,16 +69,20 @@ struct DBusBackend::Impl
     std::unique_ptr<sdbus::IObject> object;
     std::atomic<bool> connected{false};
 
+    // Hand-written cache-update subscriber IDs. These five lambdas
+    // live in DBusBackend.cpp; they update impl->last* fields so the
+    // `custom: emitGet*` handlers can return cached state. Released
+    // explicitly in stop(), in reverse subscribe order.
     MessageBus::SubscriptionId dongleStatusSub{0};
     MessageBus::SubscriptionId dongleInfoSub{0};
     MessageBus::SubscriptionId initDataSub{0};
-    MessageBus::SubscriptionId applicationCommandSub{0};
     MessageBus::SubscriptionId nodeListSub{0};
-    MessageBus::SubscriptionId inclusionSub{0};
-    MessageBus::SubscriptionId exclusionSub{0};
-    MessageBus::SubscriptionId sendDataSub{0};
-    MessageBus::SubscriptionId removeFailedNodeSub{0};
     MessageBus::SubscriptionId sessionStatusSub{0};
+
+    // Generated signal-emission subscribers, populated by
+    // subscribeGeneratedSignals() in DBusSignals.gen.cpp and released
+    // by unsubscribeGeneratedSignals() in stop().
+    std::vector<MessageBus::SubscriptionId> generatedSignalSubs;
 
     // Cached state replayed to D-Bus method callers (GetDongleInfo,
     // GetInitData, GetNodes, GetNetworkStatus). Each is fed by a
@@ -101,6 +105,7 @@ struct DBusBackend::Impl
 
 // IWYU pragma: begin_exports
 #include "DBusMethods.gen.hpp"
+#include "DBusSignals.gen.hpp"
 // IWYU pragma: end_exports
 
 #endif  // ZWAVED_DBUS_BACKEND_INTERNAL_HPP

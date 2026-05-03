@@ -1,7 +1,6 @@
 #include "DBusBackend.hpp"
 
 #include "../message-bus/MessageBus.hpp"
-#include "../zwave-protocol/application/BinarySwitch.hpp"
 #include "DBusBackendInternal.hpp"
 #include "Version.hpp"
 
@@ -27,16 +26,6 @@
 
 namespace
 {
-constexpr const char* SIGNAL_INCLUSION_STATUS          = "NodeInclusionStatus";
-constexpr const char* SIGNAL_EXCLUSION_STATUS          = "NodeExclusionStatus";
-constexpr const char* SIGNAL_DONGLE_STATUS             = "DongleStatus";
-constexpr const char* SIGNAL_DONGLE_INFO               = "DongleInfo";
-constexpr const char* SIGNAL_INIT_DATA                 = "InitData";
-constexpr const char* SIGNAL_SEND_DATA_STATUS          = "SendDataStatus";
-constexpr const char* SIGNAL_APPLICATION_COMMAND       = "ApplicationCommand";
-constexpr const char* SIGNAL_SWITCH_BINARY_REPORT      = "SwitchBinaryReport";
-constexpr const char* SIGNAL_REMOVE_FAILED_NODE_STATUS = "RemoveFailedNodeStatus";
-
 constexpr int IDLE_POLL_MS = 200;
 
 // Flag-byte bits for the AddNode / RemoveNode method handlers.
@@ -94,151 +83,36 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
 
     auto& obj = *impl->object;
 
-    // Methods are emitted from InterfaceManifest.yml by
-    // scripts/codegen/. `publish:` and `publish_constant:` actions
-    // are inlined; `custom:` methods (AddNode / RemoveNode / the two
-    // MultichannelAssociation Set/Remove / GetVersion /
-    // GetNetworkStatus / GetNodes / GetDongleInfo / GetInitData)
-    // forward to the emit* helpers below.
+    // Methods + signals are emitted from InterfaceManifest.yml by
+    // scripts/codegen/. The five hand-written cache-update
+    // subscribers below feed impl->last* state for the
+    // `custom: emitGet*` handlers; subscribeGeneratedSignals()
+    // appends the signal-emission subscribers, which run after the
+    // cache-update subscribers so any field a D-Bus signal carries
+    // is already cached by the time the signal goes out.
     registerGeneratedMethods(obj, *impl);
-
-    obj.registerSignal(SIGNAL_INCLUSION_STATUS)
-        .onInterface(IFACE_NAME)
-        .withParameters<std::uint8_t,
-                        std::uint8_t,
-                        std::uint16_t,
-                        std::uint8_t,
-                        std::uint8_t,
-                        std::uint8_t,
-                        std::vector<std::uint8_t>>(
-            "sessionId", "status", "nodeId", "basicType", "genericType", "specificType", "commandClasses");
-
-    obj.registerSignal(SIGNAL_EXCLUSION_STATUS)
-        .onInterface(IFACE_NAME)
-        .withParameters<std::uint8_t,
-                        std::uint8_t,
-                        std::uint16_t,
-                        std::uint8_t,
-                        std::uint8_t,
-                        std::uint8_t,
-                        std::vector<std::uint8_t>>(
-            "sessionId", "status", "nodeId", "basicType", "genericType", "specificType", "commandClasses");
-
-    obj.registerSignal(SIGNAL_DONGLE_STATUS)
-        .onInterface(IFACE_NAME)
-        .withParameters<bool, std::string>("connected", "ttyPath");
-
-    obj.registerSignal(SIGNAL_DONGLE_INFO)
-        .onInterface(IFACE_NAME)
-        .withParameters<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>(
-            "libraryVersion", "libraryType", "homeId", "controllerNodeId");
-
-    obj.registerSignal(SIGNAL_INIT_DATA)
-        .onInterface(IFACE_NAME)
-        .withParameters<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t, std::uint8_t>(
-            "serialApiVersion", "capabilities", "nodeIds", "chipType", "chipVersion");
-
-    obj.registerSignal(SIGNAL_SEND_DATA_STATUS)
-        .onInterface(IFACE_NAME)
-        .withParameters<std::uint8_t, std::uint8_t>("callbackId", "txStatus");
-
-    obj.registerSignal(SIGNAL_APPLICATION_COMMAND)
-        .onInterface(IFACE_NAME)
-        .withParameters<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>>("rxStatus", "sourceNodeId", "ccData");
-
-    obj.registerSignal(SIGNAL_SWITCH_BINARY_REPORT)
-        .onInterface(IFACE_NAME)
-        .withParameters<std::uint8_t, std::uint8_t>("sourceNodeId", "state");
-
-    obj.registerSignal(SIGNAL_REMOVE_FAILED_NODE_STATUS)
-        .onInterface(IFACE_NAME)
-        .withParameters<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t>(
-            "nodeId", "sessionId", "phase", "status");
-
+    registerGeneratedSignals(obj);
     obj.finishRegistration();
 
     impl->dongleStatusSub = MessageBus::subscribe<MessageBus::DongleStatus>(
         [this](const MessageBus::DongleStatus& status) -> void
         {
-            {
-                std::scoped_lock const lock(impl->stateMutex);
-                impl->lastDongleStatus = status;
-            }
-            if (!impl || !impl->connected.load() || !impl->object)
-            {
-                return;
-            }
-            try
-            {
-                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_DONGLE_STATUS);
-                signal << status.connected;
-                signal << status.ttyPath;
-                impl->object->emitSignal(signal);
-            }
-            catch (const sdbus::Error& err)
-            {
-                std::cerr << "[DBusBackend] failed to emit DongleStatus: " << err.what() << '\n';
-            }
-        });
-
-    impl->sessionStatusSub = MessageBus::subscribe<MessageBus::SessionStatus>(
-        [this](const MessageBus::SessionStatus& status) -> void
-        {
             std::scoped_lock const lock(impl->stateMutex);
-            impl->lastSessionStatus = status;
+            impl->lastDongleStatus = status;
         });
 
     impl->dongleInfoSub = MessageBus::subscribe<MessageBus::DongleInfo>(
         [this](const MessageBus::DongleInfo& info) -> void
         {
-            {
-                std::scoped_lock const lock(impl->stateMutex);
-                impl->lastDongleInfo = info;
-            }
-            if (!impl || !impl->connected.load() || !impl->object)
-            {
-                return;
-            }
-            try
-            {
-                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_DONGLE_INFO);
-                signal << info.libraryVersion;
-                signal << info.libraryType;
-                signal << info.homeId;
-                signal << info.controllerNodeId;
-                impl->object->emitSignal(signal);
-            }
-            catch (const sdbus::Error& err)
-            {
-                std::cerr << "[DBusBackend] failed to emit DongleInfo: " << err.what() << '\n';
-            }
+            std::scoped_lock const lock(impl->stateMutex);
+            impl->lastDongleInfo = info;
         });
 
     impl->initDataSub = MessageBus::subscribe<MessageBus::InitData>(
         [this](const MessageBus::InitData& info) -> void
         {
-            {
-                std::scoped_lock const lock(impl->stateMutex);
-                impl->lastInitData = info;
-            }
-            if (!impl || !impl->connected.load() || !impl->object)
-            {
-                return;
-            }
-            try
-            {
-                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_INIT_DATA);
-                signal << info.serialApiVersion;
-                signal << info.capabilities;
-                signal << info.nodeIds;
-                signal << info.chipType;
-                signal << info.chipVersion;
-                impl->object->emitSignal(signal);
-            }
-            catch (const sdbus::Error& err)
-            {
-                std::cerr << "[DBusBackend] failed to emit InitData: " << err.what() << '\n';
-            }
+            std::scoped_lock const lock(impl->stateMutex);
+            impl->lastInitData = info;
         });
 
     impl->nodeListSub = MessageBus::subscribe<MessageBus::NodeListChanged>(
@@ -248,137 +122,14 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
             impl->lastNodes = event.nodes;
         });
 
-    impl->applicationCommandSub = MessageBus::subscribe<MessageBus::ApplicationCommand>(
-        [this](const MessageBus::ApplicationCommand& event) -> void
+    impl->sessionStatusSub = MessageBus::subscribe<MessageBus::SessionStatus>(
+        [this](const MessageBus::SessionStatus& status) -> void
         {
-            if (!impl || !impl->connected.load() || !impl->object)
-            {
-                return;
-            }
-            try
-            {
-                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_APPLICATION_COMMAND);
-                signal << event.rxStatus;
-                signal << event.sourceNodeId;
-                signal << event.ccData;
-                impl->object->emitSignal(signal);
-            }
-            catch (const sdbus::Error& err)
-            {
-                std::cerr << "[DBusBackend] failed to emit ApplicationCommand: " << err.what() << '\n';
-            }
-
-            // Decode CC-specific reports off the same frame so clients
-            // that prefer typed signals don't have to re-implement the
-            // codec. The raw ApplicationCommand above stays the
-            // authoritative passthrough for anything we don't decode.
-            if (auto report = BinarySwitch::decodeReport(event.ccData); report.has_value())
-            {
-                try
-                {
-                    auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_SWITCH_BINARY_REPORT);
-                    signal << event.sourceNodeId;
-                    signal << static_cast<std::uint8_t>(report->state);
-                    impl->object->emitSignal(signal);
-                }
-                catch (const sdbus::Error& err)
-                {
-                    std::cerr << "[DBusBackend] failed to emit SwitchBinaryReport: " << err.what() << '\n';
-                }
-            }
+            std::scoped_lock const lock(impl->stateMutex);
+            impl->lastSessionStatus = status;
         });
 
-    impl->inclusionSub = MessageBus::subscribe<MessageBus::NodeInclusionStatus>(
-        [this](const MessageBus::NodeInclusionStatus& event) -> void
-        {
-            if (!impl || !impl->connected.load() || !impl->object)
-            {
-                return;
-            }
-            try
-            {
-                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_INCLUSION_STATUS);
-                signal << event.sessionId;
-                signal << event.status;
-                signal << event.nodeId;
-                signal << event.basicDeviceType;
-                signal << event.genericDeviceType;
-                signal << event.specificDeviceType;
-                signal << event.commandClasses;
-                impl->object->emitSignal(signal);
-            }
-            catch (const sdbus::Error& err)
-            {
-                std::cerr << "[DBusBackend] failed to emit NodeInclusionStatus: " << err.what() << '\n';
-            }
-        });
-
-    impl->exclusionSub = MessageBus::subscribe<MessageBus::NodeExclusionStatus>(
-        [this](const MessageBus::NodeExclusionStatus& event) -> void
-        {
-            if (!impl || !impl->connected.load() || !impl->object)
-            {
-                return;
-            }
-            try
-            {
-                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_EXCLUSION_STATUS);
-                signal << event.sessionId;
-                signal << event.status;
-                signal << event.nodeId;
-                signal << event.basicDeviceType;
-                signal << event.genericDeviceType;
-                signal << event.specificDeviceType;
-                signal << event.commandClasses;
-                impl->object->emitSignal(signal);
-            }
-            catch (const sdbus::Error& err)
-            {
-                std::cerr << "[DBusBackend] failed to emit NodeExclusionStatus: " << err.what() << '\n';
-            }
-        });
-
-    impl->sendDataSub = MessageBus::subscribe<MessageBus::SendDataCallback>(
-        [this](const MessageBus::SendDataCallback& event) -> void
-        {
-            if (!impl || !impl->connected.load() || !impl->object)
-            {
-                return;
-            }
-            try
-            {
-                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_SEND_DATA_STATUS);
-                signal << event.callbackId;
-                signal << event.txStatus;
-                impl->object->emitSignal(signal);
-            }
-            catch (const sdbus::Error& err)
-            {
-                std::cerr << "[DBusBackend] failed to emit SendDataStatus: " << err.what() << '\n';
-            }
-        });
-
-    impl->removeFailedNodeSub = MessageBus::subscribe<MessageBus::RemoveFailedNodeStatus>(
-        [this](const MessageBus::RemoveFailedNodeStatus& event) -> void
-        {
-            if (!impl || !impl->connected.load() || !impl->object)
-            {
-                return;
-            }
-            try
-            {
-                auto signal = impl->object->createSignal(IFACE_NAME, SIGNAL_REMOVE_FAILED_NODE_STATUS);
-                signal << event.nodeId;
-                signal << event.sessionId;
-                signal << event.phase;
-                signal << event.status;
-                impl->object->emitSignal(signal);
-            }
-            catch (const sdbus::Error& err)
-            {
-                std::cerr << "[DBusBackend] failed to emit RemoveFailedNodeStatus: " << err.what() << '\n';
-            }
-        });
+    subscribeGeneratedSignals(*impl);
 
     impl->connection->enterEventLoopAsync();
     std::cout << "[DBusBackend] listening on system bus as " << BUS_NAME << '\n';
@@ -405,35 +156,17 @@ auto DBusBackend::stop() -> void
     {
         return;
     }
-    if (impl->removeFailedNodeSub != 0)
-    {
-        MessageBus::unsubscribe(impl->removeFailedNodeSub);
-        impl->removeFailedNodeSub = 0;
-    }
+    // Generated signal subscribers first — they read impl.connected
+    // and impl.object inside their lambdas, so unhooking them before
+    // the hand-written cache subs avoids the brief window where a
+    // signal-emit fires after `connected = false` has been observed.
+    unsubscribeGeneratedSignals(*impl);
+
+    // Cache-update subscribers, in reverse subscribe order.
     if (impl->sessionStatusSub != 0)
     {
         MessageBus::unsubscribe(impl->sessionStatusSub);
         impl->sessionStatusSub = 0;
-    }
-    if (impl->sendDataSub != 0)
-    {
-        MessageBus::unsubscribe(impl->sendDataSub);
-        impl->sendDataSub = 0;
-    }
-    if (impl->exclusionSub != 0)
-    {
-        MessageBus::unsubscribe(impl->exclusionSub);
-        impl->exclusionSub = 0;
-    }
-    if (impl->inclusionSub != 0)
-    {
-        MessageBus::unsubscribe(impl->inclusionSub);
-        impl->inclusionSub = 0;
-    }
-    if (impl->applicationCommandSub != 0)
-    {
-        MessageBus::unsubscribe(impl->applicationCommandSub);
-        impl->applicationCommandSub = 0;
     }
     if (impl->nodeListSub != 0)
     {

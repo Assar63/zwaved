@@ -28,6 +28,57 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 See the [Dependencies](#dependencies) section below for what each
 library does, where it's used, and how CMake discovers it.
 
+## Devcontainer
+
+A `.devcontainer/devcontainer.json` is provided for VS Code (and any
+editor that speaks the [devcontainer spec](https://containers.dev/) —
+JetBrains' Gateway, GitHub Codespaces, etc.). It targets the
+canonical `Dockerfile`'s `toolchain` stage so the editor environment
+is byte-for-byte the same as CI: GCC 15 from the
+`ubuntu-toolchain-r/test` PPA, sdbus-c++ 2.x and eventpp from source,
+plus `python3-yaml` / `python3-jinja2` for the codegen and
+`clang-format` / `clang-tidy` for the pre-commit hook.
+
+**Default scope: build, codegen, ctest, edit.** Open the repo in
+VS Code with the *Dev Containers* extension installed and choose
+"Reopen in Container"; the first build takes a few minutes
+(third-party libs from source) and subsequent rebuilds hit the
+Docker layer cache. The `postCreateCommand` installs the git
+pre-commit hook and runs `cmake --preset gnu` so clangd's
+`compile_commands.json` is ready before the editor finishes loading.
+
+**Linux host + Z-Wave dongle (optional):** the default config does
+*not* map the dongle's TTY through into the container. To pass it
+through for runtime testing, add a `runArgs` field to
+`.devcontainer/devcontainer.json`:
+
+```jsonc
+"runArgs": [
+    "--device=/dev/ttyACM0",  // Aeotec Z-Stick Gen5 on most Linux hosts
+    // Add the host's `dialout` GID if your user isn't already in it,
+    // or fall back to --privileged for hot-plug detect (libudev events
+    // need /run/udev mounted; --privileged is the heavy hammer that works).
+    "--privileged"
+]
+```
+
+Hot-plug detection via `libudev` inside containers is fussier than
+sending bytes — the kernel namespace boundary swallows udev monitor
+events without `--privileged` plus a `/run/udev` bind-mount. Static
+device passthrough (`--device=`) is enough for "open the TTY, send a
+frame" testing but won't see the dongle being unplugged and replugged
+mid-session.
+
+**macOS / Windows hosts:** Docker Desktop runs Linux in a VM and
+USB passthrough into that VM needs extra setup (`usbipd-win` on
+Windows; manual VM-level attach on macOS). For hardware-attached
+work, run `./cmake-build-gnu/zwaved` directly on the host instead —
+the devcontainer is still useful for build / codegen / tests.
+
+**GitHub Codespaces:** there's no physical dongle on a cloud machine.
+Codespaces is fine for editing, building, running unit tests, and
+iterating on the codegen; it can't talk to a real Z-Wave network.
+
 ## Installation
 
 ### Install Dependencies

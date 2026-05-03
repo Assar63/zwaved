@@ -1,13 +1,18 @@
 # syntax=docker/dockerfile:1.6
 #
-# Two-stage Dockerfile: a `build` stage with the full toolchain that
-# compiles + tests the daemon, and a slim `runtime` stage that carries
-# only the binary and its runtime shared-library deps.
+# Three-stage Dockerfile:
+#   * `toolchain` — full build environment, no source. Reused by
+#     `.devcontainer/devcontainer.json` so editor sessions land in a
+#     working environment without paying for a full daemon build on
+#     every image rebuild.
+#   * `build`    — `FROM toolchain`, copies the source, runs the
+#     configure / compile / ctest pipeline. CI targets this stage on
+#     every push / PR.
+#   * `runtime`  — slim ubuntu base with the daemon binary and its
+#     dynamic-library deps. Published to ghcr.io on `v*` tags.
 #
-# Used both by CI (.github/workflows/build.yml) and as the artifact
-# published to ghcr.io on `v*` tags. Single source of truth for "what
-# does zwaved need to build", so the local `docker build .` produces
-# the same artifact CI does.
+# Single source of truth for "what does zwaved need to build", so the
+# local `docker build .` produces the same artefact CI does.
 #
 # Build:  docker build -t zwaved:dev .
 # Run:    docker run --rm --privileged \
@@ -20,10 +25,18 @@
 # build-output artifact and a way to inspect a known-good build.
 
 # ---------------------------------------------------------------------
-# Stage 1: build — full toolchain, third-party deps from source where
-# the distro lags (sdbus-c++ 2.x, eventpp, GCC 15).
+# Stage 1: toolchain — full build environment, third-party deps from
+# source where the distro lags (sdbus-c++ 2.x, eventpp, GCC 15) plus
+# the dev extras the codegen and pre-commit hook need
+# (python3-yaml / jinja2 for scripts/codegen/, clang-format /
+# clang-tidy for the staged-files check). No source code copied yet —
+# this stage is the canonical "what does zwaved need to build"
+# environment, reused by the `build` stage below and by
+# `.devcontainer/devcontainer.json` (which targets this stage so an
+# editor lands in a working environment without paying for the full
+# daemon build on every rebuild).
 # ---------------------------------------------------------------------
-FROM ubuntu:24.04 AS build
+FROM ubuntu:24.04 AS toolchain
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -33,6 +46,11 @@ ARG DEBIAN_FRONTEND=noninteractive
 #     repos yet).
 #   * libsystemd-dev is the underlying sd-bus that sdbus-c++ wraps.
 #   * libgtest-dev is needed by `ZWAVED_BUILD_TESTS=ON` (default).
+#   * libncurses-dev for utils/zwave-terminal/ (`ZWAVED_BUILD_UTILS=ON`).
+#   * python3-yaml + python3-jinja2 for scripts/codegen/ — the cmake
+#     configure step probes for both and FATAL_ERRORs without them.
+#   * clang-format + clang-tidy for the pre-commit hook and the
+#     `scripts/check-format --fix` workflow.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         software-properties-common \
@@ -49,7 +67,12 @@ RUN apt-get update \
         libsqlite3-dev \
         libsystemd-dev \
         libgtest-dev \
+        libncurses-dev \
         pkg-config \
+        python3-yaml \
+        python3-jinja2 \
+        clang-format \
+        clang-tidy \
     && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-15 100 \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 100 \
     && rm -rf /var/lib/apt/lists/*
@@ -71,8 +94,13 @@ RUN git clone --depth 1 https://github.com/wqking/eventpp.git /tmp/eventpp \
     && cmake --install /tmp/eventpp/build \
     && rm -rf /tmp/eventpp
 
-# Build + test the daemon. Tests run in this stage so a broken commit
+# ---------------------------------------------------------------------
+# Stage 2: build — copy in the source and run the full configure /
+# compile / test cycle. Tests run in this stage so a broken commit
 # fails the docker build — keeps the published artifact honest.
+# ---------------------------------------------------------------------
+FROM toolchain AS build
+
 WORKDIR /src
 COPY . .
 RUN cmake --preset gnu \
@@ -80,7 +108,7 @@ RUN cmake --preset gnu \
     && ctest --test-dir cmake-build-gnu --output-on-failure
 
 # ---------------------------------------------------------------------
-# Stage 2: runtime — ubuntu base + dynamic deps + the daemon binary.
+# Stage 3: runtime — ubuntu base + dynamic deps + the daemon binary.
 # Drops the build toolchain to keep the image small.
 # ---------------------------------------------------------------------
 FROM ubuntu:24.04 AS runtime

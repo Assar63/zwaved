@@ -1,0 +1,56 @@
+{
+    // Devcontainer for zwaved development.
+    //
+    // Reuses the canonical Dockerfile's `toolchain` stage so the env
+    // matches CI exactly: GCC 15 from the ubuntu-toolchain-r/test
+    // PPA, sdbus-c++ 2.x and eventpp from source, plus the codegen
+    // (PyYAML / Jinja2) and pre-commit-hook (clang-format /
+    // clang-tidy) extras. First container build is slow (3rd-party
+    // libs from source); subsequent rebuilds hit the Docker layer
+    // cache.
+    //
+    // Default scope: build / codegen / ctest / edit. The Z-Wave
+    // dongle is *not* mapped through — see README.md's "Devcontainer"
+    // section for the Linux-host recipe (`runArgs:["--device=…"]`).
+    // macOS / Windows / Codespaces hosts can't passthrough the dongle
+    // and run the daemon outside the container against host hardware.
+    "name": "zwaved",
+    "build": {
+        "dockerfile": "../Dockerfile",
+        "context": "..",
+        "target": "toolchain"
+    },
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/zwaved,type=bind",
+    "workspaceFolder": "/workspaces/zwaved",
+    "remoteUser": "root",
+
+    // After the container starts: install the git pre-commit hook
+    // and run the GCC preset's first configure so clangd's
+    // compile_commands.json is ready.
+    "postCreateCommand": "scripts/install-hooks && cmake --preset gnu",
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "llvm-vs-code-extensions.vscode-clangd",
+                "ms-vscode.cmake-tools",
+                "twxs.cmake",
+                "ms-python.python",
+                "redhat.vscode-yaml"
+            ],
+            "settings": {
+                // Point clangd at the gnu-preset compile_commands.
+                // Disable the bundled C/C++ IntelliSense engine to
+                // avoid duplicate diagnostics.
+                "C_Cpp.intelliSenseEngine": "disabled",
+                "clangd.arguments": [
+                    "--compile-commands-dir=cmake-build-gnu",
+                    "--background-index"
+                ],
+                "files.associations": {
+                    "*.j2": "jinja"
+                }
+            }
+        }
+    }
+}

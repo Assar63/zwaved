@@ -148,47 +148,68 @@ class DBus:
     signals: list[Signal] = field(default_factory=list)
 
 
-# ---- Command classes ------------------------------------------------
+# ---- Protocol modules ----------------------------------------------
+# A module is the daemon-side codec for one protocol feature (e.g. a
+# Z-Wave Command Class, a Zigbee cluster, a KNX functional block). The
+# wire-specific bits live under a nested `wire:` block so the rest of
+# the manifest schema stays protocol-agnostic.
 
 @dataclass
-class CcCommand:
-    name: str
+class ModuleWire:
+    """Per-module wire-format identifiers. The fields here are
+    Z-Wave-shaped today (`class_byte` + `prefix`); a second-protocol
+    daemon adds its own keys (e.g. `cluster_id`) without disturbing
+    the surrounding schema."""
+    class_byte: int
+    prefix: Optional[str] = None  # e.g. SWITCH_BINARY for BinarySwitch
+
+
+@dataclass
+class CommandWire:
+    """Per-command wire-format details. `byte` is the command byte;
+    `payload` is the list of C++ expressions that go into the encoder
+    body after the (COMMAND_CLASS, command) prefix bytes."""
     byte: int
+    payload: Optional[list[str]] = None
+
+
+@dataclass
+class Command:
+    name: str
+    wire: CommandWire
     # Optional rather than default-empty-list: the codegen needs to
     # distinguish "the YAML didn't declare this command's wire shape"
     # (None — leave the encoder hand-written) from "explicitly empty"
     # (a no-arg encoder like Get).
     encode_args: Optional[list[Field]] = None
-    wire: Optional[list[str]] = None
     decoded_struct: Optional[list[Field]] = None
 
 
 @dataclass
-class CommandClass:
+class Module:
     name: str
-    class_byte: int
-    wire_prefix: Optional[str] = None  # e.g. SWITCH_BINARY for BinarySwitch
+    wire: ModuleWire
     description: Optional[str] = None
     constants: list[Constant] = field(default_factory=list)
-    commands: list[CcCommand] = field(default_factory=list)
+    commands: list[Command] = field(default_factory=list)
 
 
-# ---- CC translation rules ------------------------------------------
-# Drive the cc-translator module: subscribe to a raw transient bus
-# event, run a codec on a named field, and republish a typed event.
+# ---- Translation rules ---------------------------------------------
+# Drive the translator module: subscribe to a raw transient bus event,
+# run a codec on a named field, and republish a typed event.
 
 @dataclass
-class CcTranslationDecode:
+class TranslationDecode:
     codec: str            # e.g. "BinarySwitch.decodeReport"
     input: str            # field name on the trigger event
     on_none: str = "skip"
 
 
 @dataclass
-class CcTranslation:
+class Translation:
     publishes: str                  # name of the typed event the rule fills
     triggered_by: str               # name of the raw event subscribed to
-    decode: CcTranslationDecode
+    decode: TranslationDecode
     map: dict[str, str] = field(default_factory=dict)  # typed-event field → expr
 
 
@@ -200,8 +221,8 @@ class Manifest:
     structs: list[Struct] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
     dbus: Optional[DBus] = None
-    command_classes: list[CommandClass] = field(default_factory=list)
-    cc_translations: list[CcTranslation] = field(default_factory=list)
+    modules: list[Module] = field(default_factory=list)
+    translations: list[Translation] = field(default_factory=list)
 
     def event_by_name(self, name: str) -> Event:
         for ev in self.events:

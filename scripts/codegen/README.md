@@ -146,9 +146,9 @@ output, lowest-risk slice first.
   block and the eight signal-emit lambdas).
 
 ### Phase 5 — CC codec skeletons ✅ (commit `c75efd1`)
-- Every CC gets `application/<Name>.gen.hpp` with COMMAND_CLASS,
-  per-command byte constants (`<wire_prefix>_<CMD>`), and any
-  per-CC `constants:` block (`VALUE_OFF` / `VALUE_ON` /
+- Every module gets `application/<Name>.gen.hpp` with COMMAND_CLASS,
+  per-command byte constants (`<wire.prefix>_<CMD>`), and any
+  per-module `constants:` block (`VALUE_OFF` / `VALUE_ON` /
   `VALUE_UNKNOWN`, `MARKER`).
 - CCs with fully-expressed wire shapes (BinarySwitch, Basic) also
   get `application/<Name>.gen.cpp` with simple `encodeSet` /

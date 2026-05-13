@@ -1,7 +1,7 @@
 """
 targets.cc_translator — generate CcTranslator.gen.cpp.
 
-Reads `cc_translations:` from the manifest and emits the body of the
+Reads `translations:` from the manifest and emits the body of the
 cc-translator module: subscribers grouped by trigger event, each
 running the named codec on the inbound event field and publishing the
 typed event populated via the rule's `map:` clause.
@@ -34,7 +34,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from schema import CcTranslation, Manifest
+from schema import Manifest, Translation
 
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -54,7 +54,7 @@ def codec_namespace(codec_dotted: str) -> str:
     return codec_dotted.split(".", 1)[0]
 
 
-def map_expression(translation: CcTranslation, field_name: str) -> str:
+def map_expression(translation: Translation, field_name: str) -> str:
     """C++ expression for a typed-event field. Defaults to
     `event.<name>` when the rule's map: doesn't override it."""
     if translation.map and field_name in translation.map:
@@ -62,9 +62,9 @@ def map_expression(translation: CcTranslation, field_name: str) -> str:
     return f"event.{field_name}"
 
 
-def grouped_by_trigger(manifest: Manifest) -> "OrderedDict[str, list[CcTranslation]]":
-    grouped: "OrderedDict[str, list[CcTranslation]]" = OrderedDict()
-    for translation in manifest.cc_translations:
+def grouped_by_trigger(manifest: Manifest) -> "OrderedDict[str, list[Translation]]":
+    grouped: "OrderedDict[str, list[Translation]]" = OrderedDict()
+    for translation in manifest.translations:
         grouped.setdefault(translation.triggered_by, []).append(translation)
     return grouped
 
@@ -72,7 +72,7 @@ def grouped_by_trigger(manifest: Manifest) -> "OrderedDict[str, list[CcTranslati
 def codec_includes(manifest: Manifest) -> list[str]:
     """`application/<Name>.hpp` paths for every codec referenced by a rule."""
     seen: list[str] = []
-    for translation in manifest.cc_translations:
+    for translation in manifest.translations:
         path = f"application/{codec_namespace(translation.decode.codec)}.hpp"
         if path not in seen:
             seen.append(path)
@@ -80,7 +80,7 @@ def codec_includes(manifest: Manifest) -> list[str]:
 
 
 def generate(manifest: Manifest, out_dir: Path) -> list[Path]:
-    if not manifest.cc_translations:
+    if not manifest.translations:
         return []
 
     env = Environment(

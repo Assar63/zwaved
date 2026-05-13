@@ -1,17 +1,32 @@
-# BackendManifest.yml
+# InterfaceManifest.yml
 #
 # Canonical description of the daemon's external and internal message
 # surface. Every cross-module contract lives here -- in-process
 # MessageBus event shapes, the D-Bus method/signal surface, and the
-# Z-Wave Command Class wire frames that ride inside SendData payloads.
+# protocol-specific wire frames that ride inside SendData payloads.
 #
-# Today this is human documentation. The intent is for a CMake-time
-# code generator to consume it as the single source of truth, emitting
-# MessageBus.hpp event structs, MessageBus.cpp explicit
-# instantiations, the D-Bus method/signal bindings in DBusBackend.cpp,
-# and CC codec skeletons. Until that lands, the file is kept in sync
-# by hand alongside the modules it describes -- a discrepancy between
-# the manifest and any of those four sites is a bug in the manifest.
+# The CMake-time code generator (scripts/codegen/) reads this file and
+# emits MessageBus.{hpp,cpp} event structs, the D-Bus method/signal
+# bindings in DBusBackend.cpp, and per-module codec skeletons. A
+# discrepancy between the manifest and the generated files is a bug in
+# the manifest; a discrepancy between manifest and hand-written code
+# referencing the generated names is a bug in that hand-written code.
+#
+# ----- Schema overview ----------------------------------------------
+# Top-level sections (each described in its own block below):
+#
+#   structs:       reusable nested shapes referenced by events / DBus
+#   events:        MessageBus event definitions (state / config /
+#                  transient / command categories)
+#   dbus:          methods + signals + bus_name / object_path / interface
+#   modules:       per-feature codec definitions. Wire-specific bits
+#                  (class_byte, prefix, per-command byte) live under
+#                  nested `wire:` blocks so the surrounding schema
+#                  stays protocol-agnostic — a future second-protocol
+#                  daemon (Zigbee, KNX, …) reuses the same schema with
+#                  its own `wire:` keys.
+#   translations:  rules driving the cc-translator module — subscribe
+#                  to a raw event, run a codec, republish a typed event.
 #
 # ----- Type system ---------------------------------------------------
 # Field types map cleanly onto both C++ and D-Bus:
@@ -825,24 +840,30 @@ dbus:
         event: MultilevelSwitchReport
 
 # =====================================================================
-# 4. Application Command Class codecs
+# 4. Protocol modules
 # =====================================================================
-# CC byte/command definitions and wire shapes. The codegen target for
-# these is the `src/zwave-protocol/application/<Name>.{hpp,cpp}` pair;
-# they're consumed by ProtocolThread (encode → SendData) and by the
-# CC-decoder D-Bus signals (decode → typed signal payload).
+# A module is the daemon-side codec for one protocol feature — today a
+# Z-Wave Command Class; a second-protocol daemon would model Zigbee
+# clusters, KNX functional blocks, etc. the same way. Wire-specific
+# identifiers (`class_byte`, `prefix`, per-command `byte`) live under
+# nested `wire:` blocks so the rest of the schema stays protocol-
+# agnostic. The codegen target is the
+# `src/zwave-protocol/application/<Name>.{hpp,cpp}` pair; modules are
+# consumed by ProtocolThread (encode → SendData) and by the typed-
+# report D-Bus signals (decode → typed signal payload).
 
-command_classes:
+modules:
 
   - name: BinarySwitch
-    class_byte: 0x25
-    # Per-command byte constants are emitted as <wire_prefix>_<CMD>,
+    # Per-command byte constants are emitted as <wire.prefix>_<CMD>,
     # mirroring the Z-Wave spec naming. Without an explicit
-    # `wire_prefix:`, the codegen falls back to camelCase-to-
-    # SCREAMING_SNAKE on the CC name (which differs from spec for
+    # `wire.prefix:`, the codegen falls back to camelCase-to-
+    # SCREAMING_SNAKE on the module name (which differs from spec for
     # several CCs — e.g. BinarySwitch's wire name is SWITCH_BINARY,
     # MultichannelAssociation's is MULTI_CHANNEL_ASSOCIATION).
-    wire_prefix: SWITCH_BINARY
+    wire:
+      class_byte: 0x25
+      prefix: SWITCH_BINARY
     description: |
       Binary on/off control. SET takes a single value byte
       (0=off, 0xFF=on); REPORT carries the current state.
@@ -852,24 +873,28 @@ command_classes:
       - { name: VALUE_UNKNOWN, value: 0xFE }
     commands:
       - name: Set
-        byte: 0x01
+        wire:
+          byte: 0x01
+          payload:
+            - "turnOn ? VALUE_ON : VALUE_OFF"
         encode_args:
           - { name: turnOn, type: bool }
-        wire:
-          - "turnOn ? VALUE_ON : VALUE_OFF"
       - name: Get
-        byte: 0x02
+        wire:
+          byte: 0x02
+          payload: []
         encode_args: []
-        wire: []
       - name: Report
-        byte: 0x03
+        wire:
+          byte: 0x03
         decoded_struct:
           - { name: rawValue, type: u8 }
           - { name: state,    type: enum, doc: "Off | On | Unknown" }
 
   - name: MultilevelSwitch
-    class_byte: 0x26
-    wire_prefix: SWITCH_MULTILEVEL
+    wire:
+      class_byte: 0x26
+      prefix: SWITCH_MULTILEVEL
     description: |
       Multilevel control — dimmers, blinds, fan speed. SET takes a
       value byte plus (v2+) a duration byte; the daemon always emits
@@ -884,19 +909,22 @@ command_classes:
       - { name: DURATION_DEFAULT, value: 0xFF }
     commands:
       - name: Set
-        byte: 0x01
+        wire:
+          byte: 0x01
+          payload:
+            - "value"
+            - "duration"
         encode_args:
           - { name: value,    type: u8 }
           - { name: duration, type: u8 }
-        wire:
-          - "value"
-          - "duration"
       - name: Get
-        byte: 0x02
+        wire:
+          byte: 0x02
+          payload: []
         encode_args: []
-        wire: []
       - name: Report
-        byte: 0x03
+        wire:
+          byte: 0x03
         decoded_struct:
           - { name: currentValue, type: u8 }
           - { name: targetValue,  type: u8 }
@@ -904,8 +932,9 @@ command_classes:
           - { name: wireFormatV2, type: bool, doc: "true if 5-byte v2+ wire form" }
 
   - name: Basic
-    class_byte: 0x20
-    wire_prefix: BASIC
+    wire:
+      class_byte: 0x20
+      prefix: BASIC
     description: |
       Universal-fallback CC. Devices without a more specific CC for
       their primary behaviour map Basic onto whatever does make
@@ -916,17 +945,20 @@ command_classes:
       - { name: VALUE_UNKNOWN, value: 0xFE }
     commands:
       - name: Set
-        byte: 0x01
+        wire:
+          byte: 0x01
+          payload:
+            - "value"
         encode_args:
           - { name: value, type: u8 }
-        wire:
-          - "value"
       - name: Get
-        byte: 0x02
+        wire:
+          byte: 0x02
+          payload: []
         encode_args: []
-        wire: []
       - name: Report
-        byte: 0x03
+        wire:
+          byte: 0x03
         decoded_struct:
           - { name: currentValue, type: u8 }
           - { name: targetValue,  type: u8 }
@@ -934,22 +966,24 @@ command_classes:
           - { name: wireFormatV2, type: bool, doc: "true if 5-byte v2+ wire form" }
 
   - name: Association
-    class_byte: 0x85
-    wire_prefix: ASSOCIATION
+    wire:
+      class_byte: 0x85
+      prefix: ASSOCIATION
     description: |
       Per-group association lists -- group 1 is conventionally the
       lifeline, owned by the primary controller.
     commands:
-      - { name: Set,             byte: 0x01 }
-      - { name: Get,             byte: 0x02 }
-      - { name: Report,          byte: 0x03 }
-      - { name: Remove,          byte: 0x04 }
-      - { name: GroupingsGet,    byte: 0x05 }
-      - { name: GroupingsReport, byte: 0x06 }
+      - { name: Set,             wire: { byte: 0x01 } }
+      - { name: Get,             wire: { byte: 0x02 } }
+      - { name: Report,          wire: { byte: 0x03 } }
+      - { name: Remove,          wire: { byte: 0x04 } }
+      - { name: GroupingsGet,    wire: { byte: 0x05 } }
+      - { name: GroupingsReport, wire: { byte: 0x06 } }
 
   - name: MultichannelAssociation
-    class_byte: 0x8E
-    wire_prefix: MULTI_CHANNEL_ASSOCIATION
+    wire:
+      class_byte: 0x8E
+      prefix: MULTI_CHANNEL_ASSOCIATION
     description: |
       Like plain Association but each group can hold both whole-node
       members and (nodeId, endpoint) pair members, separated on the
@@ -958,16 +992,16 @@ command_classes:
     constants:
       - { name: MARKER, value: 0x00 }
     commands:
-      - { name: Set,             byte: 0x01 }
-      - { name: Get,             byte: 0x02 }
-      - { name: Report,          byte: 0x03 }
-      - { name: Remove,          byte: 0x04 }
-      - { name: GroupingsGet,    byte: 0x05 }
-      - { name: GroupingsReport, byte: 0x06 }
+      - { name: Set,             wire: { byte: 0x01 } }
+      - { name: Get,             wire: { byte: 0x02 } }
+      - { name: Report,          wire: { byte: 0x03 } }
+      - { name: Remove,          wire: { byte: 0x04 } }
+      - { name: GroupingsGet,    wire: { byte: 0x05 } }
+      - { name: GroupingsReport, wire: { byte: 0x06 } }
 
 
 # =====================================================================
-# 5. CC translation rules
+# 5. Translation rules
 # =====================================================================
 # The cc-translator module subscribes to raw transient bus events
 # (typically ApplicationCommand), runs application/ codec decoders,
@@ -977,12 +1011,12 @@ command_classes:
 # subscriber outside `src/zwave-protocol/` -- every other module
 # stays codec-free and talks only via MessageBus.
 #
-# Adding a new typed-from-CC report is three steps and zero new C++:
+# Adding a new typed-from-module report is three steps and zero new C++:
 #   1. Declare the typed event under `events:` (category transient).
 #   2. Add a rule below pointing at the typed event.
 #   3. Add a `dbus.signals:` entry triggered_by the typed event.
 
-cc_translations:
+translations:
   - publishes: BinarySwitchReport
     triggered_by: ApplicationCommand
     decode:

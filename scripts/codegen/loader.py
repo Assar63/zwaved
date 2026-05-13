@@ -8,7 +8,7 @@ Validation rules enforced here (Phase 1, kept deliberately tight):
   schema version (1 today).
 * Required keys per section: events need `name` + `category` + `fields`;
   methods need `name`; signals need `name` + `params` + `triggered_by`;
-  command classes need `name` + `class_byte`.
+  modules need `name` + a `wire:` block with `class_byte`.
 * Categories restricted to {state, config, transient, command}.
 * Action shapes: every `methods[].action` must contain exactly one of
   the four documented keys (publish / publish_constant / read_cached /
@@ -17,6 +17,8 @@ Validation rules enforced here (Phase 1, kept deliberately tight):
   signal trigger, or constant override exists in `events:`.
 * Names within a section are unique (no two events with the same name,
   etc.).
+* The pre-#57 top-level keys `command_classes:` / `cc_translations:`
+  raise a clear migration error.
 
 Errors carry the manifest path and the bad line/column when PyYAML
 exposes one. Anything that escapes validation here is the loader's
@@ -37,10 +39,8 @@ from schema import (
     ActionPublish,
     ActionPublishConstant,
     ActionReadCached,
-    CcCommand,
-    CcTranslation,
-    CcTranslationDecode,
-    CommandClass,
+    Command,
+    CommandWire,
     Constant,
     DBus,
     DBusParam,
@@ -50,10 +50,14 @@ from schema import (
     Manifest,
     Method,
     MethodReturn,
+    Module,
+    ModuleWire,
     Signal,
     SignalDecode,
     SignalTrigger,
     Struct,
+    Translation,
+    TranslationDecode,
 )
 
 
@@ -77,7 +81,31 @@ def load(path: Path) -> Manifest:
     if not isinstance(raw, dict):
         raise ManifestError(f"{path}: top-level must be a mapping")
 
+    _check_legacy_keys(raw, source=path)
     return _build_manifest(raw, source=path)
+
+
+# Pre-#57 top-level keys. Detect them up front and refuse with a
+# migration hint rather than letting the loader run on a half-migrated
+# manifest and produce confusing downstream errors.
+_LEGACY_TOP_LEVEL = {
+    "command_classes": "modules",
+    "cc_translations": "translations",
+}
+
+
+def _check_legacy_keys(raw: dict, source: Path) -> None:
+    bad = [k for k in _LEGACY_TOP_LEVEL if k in raw]
+    if not bad:
+        return
+    hints = ", ".join(f"{k!r} → {_LEGACY_TOP_LEVEL[k]!r}" for k in bad)
+    raise ManifestError(
+        f"{source}: legacy top-level key(s) ({hints}). "
+        f"This manifest was written against the pre-#57 schema. Rename the "
+        f"section(s) and group per-module wire fields (class_byte, prefix) "
+        f"under a nested 'wire:' block; per-command 'byte' + payload list go "
+        f"under a per-command 'wire:' block."
+    )
 
 
 # ---- Internal builders ----------------------------------------------
@@ -99,35 +127,35 @@ def _build_manifest(raw: dict, source: Path) -> Manifest:
     dbus_raw = raw.get("dbus")
     dbus = _build_dbus(dbus_raw, source) if dbus_raw is not None else None
 
-    ccs = [_build_cc(c, source) for c in raw.get("command_classes") or []]
-    _check_unique([c.name for c in ccs], "command_classes", source)
+    modules = [_build_module(m, source) for m in raw.get("modules") or []]
+    _check_unique([m.name for m in modules], "modules", source)
 
-    translations = [_build_cc_translation(t, source) for t in raw.get("cc_translations") or []]
+    translations = [_build_translation(t, source) for t in raw.get("translations") or []]
 
     manifest = Manifest(
         version=version,
         structs=structs,
         events=events,
         dbus=dbus,
-        command_classes=ccs,
-        cc_translations=translations,
+        modules=modules,
+        translations=translations,
     )
 
     _check_cross_refs(manifest, source)
     return manifest
 
 
-def _build_cc_translation(raw: dict, source: Path) -> CcTranslation:
-    publishes = _require(raw, "publishes", "cc_translation", source)
-    where = f"cc_translation publishes={publishes!r}"
+def _build_translation(raw: dict, source: Path) -> Translation:
+    publishes = _require(raw, "publishes", "translation", source)
+    where = f"translation publishes={publishes!r}"
     triggered_by = _require(raw, "triggered_by", where, source)
     decode_raw = _require(raw, "decode", where, source)
-    decode = CcTranslationDecode(
+    decode = TranslationDecode(
         codec=_require(decode_raw, "codec", f"{where} decode", source),
         input=_require(decode_raw, "input", f"{where} decode", source),
         on_none=decode_raw.get("on_none", "skip"),
     )
-    return CcTranslation(
+    return Translation(
         publishes=publishes,
         triggered_by=triggered_by,
         decode=decode,
@@ -296,36 +324,50 @@ def _build_signal(raw: dict, source: Path) -> Signal:
     )
 
 
-def _build_cc(raw: dict, source: Path) -> CommandClass:
-    name = _require(raw, "name", "command_class", source)
-    where = f"command_class {name}"
-    return CommandClass(
+def _build_module(raw: dict, source: Path) -> Module:
+    name = _require(raw, "name", "module", source)
+    where = f"module {name}"
+    wire_raw = _require(raw, "wire", where, source)
+    if not isinstance(wire_raw, dict):
+        raise ManifestError(f"{source}: {where}: 'wire' must be a mapping")
+    wire = ModuleWire(
+        class_byte=_to_int(_require(wire_raw, "class_byte", f"{where} wire", source),
+                           f"{where} wire", source),
+        prefix=wire_raw.get("prefix"),
+    )
+    return Module(
         name=name,
-        class_byte=_to_int(_require(raw, "class_byte", where, source), where, source),
-        wire_prefix=raw.get("wire_prefix"),
+        wire=wire,
         description=raw.get("description"),
         constants=[_build_constant(c, where, source) for c in raw.get("constants") or []],
-        commands=[_build_cc_command(c, where, source) for c in raw.get("commands") or []],
+        commands=[_build_command(c, where, source) for c in raw.get("commands") or []],
     )
 
 
-def _build_cc_command(raw: dict, where: str, source: Path) -> CcCommand:
+def _build_command(raw: dict, where: str, source: Path) -> Command:
     name = _require(raw, "name", f"{where} command", source)
     sub_where = f"{where} command {name}"
+    wire_raw = _require(raw, "wire", sub_where, source)
+    if not isinstance(wire_raw, dict):
+        raise ManifestError(f"{source}: {sub_where}: 'wire' must be a mapping")
+    payload = None
+    if "payload" in wire_raw:
+        payload = list(wire_raw["payload"]) if wire_raw["payload"] is not None else []
+    wire = CommandWire(
+        byte=_to_int(_require(wire_raw, "byte", f"{sub_where} wire", source),
+                     f"{sub_where} wire", source),
+        payload=payload,
+    )
     encode_args = None
     if "encode_args" in raw:
         encode_args = [_build_field(f, sub_where, source) for f in raw["encode_args"] or []]
-    wire = list(raw["wire"]) if "wire" in raw and raw["wire"] is not None else (
-        [] if "wire" in raw else None
-    )
     decoded_struct = None
     if "decoded_struct" in raw:
         decoded_struct = [_build_field(f, sub_where, source) for f in raw["decoded_struct"] or []]
-    return CcCommand(
+    return Command(
         name=name,
-        byte=_to_int(_require(raw, "byte", sub_where, source), sub_where, source),
-        encode_args=encode_args,
         wire=wire,
+        encode_args=encode_args,
         decoded_struct=decoded_struct,
     )
 
@@ -365,15 +407,15 @@ def _check_cross_refs(manifest: Manifest, source: Path) -> None:
                 f"unknown event {signal.triggered_by.event!r}"
             )
 
-    for translation in manifest.cc_translations:
+    for translation in manifest.translations:
         if translation.publishes not in event_names:
             raise ManifestError(
-                f"{source}: cc_translation publishes references unknown event "
+                f"{source}: translation publishes references unknown event "
                 f"{translation.publishes!r}"
             )
         if translation.triggered_by not in event_names:
             raise ManifestError(
-                f"{source}: cc_translation publishes={translation.publishes!r} "
+                f"{source}: translation publishes={translation.publishes!r} "
                 f"triggered_by references unknown event "
                 f"{translation.triggered_by!r}"
             )
@@ -382,7 +424,7 @@ def _check_cross_refs(manifest: Manifest, source: Path) -> None:
         for fname in translation.map:
             if fname not in published_field_names:
                 raise ManifestError(
-                    f"{source}: cc_translation publishes={translation.publishes!r} "
+                    f"{source}: translation publishes={translation.publishes!r} "
                     f"map sets unknown field {fname!r}"
                 )
 

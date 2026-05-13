@@ -21,6 +21,7 @@ set(GENERATED_APPLICATION_DIR "${ZWAVED_GENERATED_DIR}/application")
 
 set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/BinarySwitch.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/MultilevelSwitch.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/Basic.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
@@ -74,6 +75,20 @@ target_include_directories(Basic_test PRIVATE
 target_link_libraries(Basic_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Basic_test)
 gtest_discover_tests(Basic_test)
+
+# ---- MultilevelSwitch -----------------------------------------------
+add_executable(MultilevelSwitch_test
+    MultilevelSwitch_test.cpp
+    "${SRC_DIR}/application/MultilevelSwitch.cpp"
+    "${GENERATED_APPLICATION_DIR}/MultilevelSwitch.gen.cpp"
+)
+target_include_directories(MultilevelSwitch_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(MultilevelSwitch_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(MultilevelSwitch_test)
+gtest_discover_tests(MultilevelSwitch_test)
 
 # ---- Association ----------------------------------------------------
 add_executable(Association_test

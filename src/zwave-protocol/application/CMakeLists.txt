@@ -14,6 +14,7 @@
 
 set_source_files_properties(
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/MultilevelSwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
@@ -21,9 +22,11 @@ set_source_files_properties(
 target_sources(zwaved PRIVATE
     Basic.cpp
     BinarySwitch.cpp
+    MultilevelSwitch.cpp
     Association.cpp
     MultichannelAssociation.cpp
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/MultilevelSwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"
 )
 

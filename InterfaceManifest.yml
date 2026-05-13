@@ -249,6 +249,32 @@ events:
       - { name: sourceNodeId, type: u8, default: 0 }
       - { name: state,        type: u8, default: 0, doc: "0=Off, 1=On, 2=Unknown" }
 
+  - name: MultilevelSwitchReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Multilevel Switch (CC 0x26) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose
+      ccData parses as a Multilevel Switch Report. v1 wire form
+      carries only currentValue (targetValue mirrors current,
+      wireFormatV2 = false); v2+ carries the full transition triple.
+      Value byte semantics:
+        0x00       = off / level 0
+        0x01..0x63 = level 1..99
+        0xFE       = unknown (Report-only)
+        0xFF       = on / "restore last level" (Set-only)
+      Duration byte:
+        0x00       = instant
+        0x01..0x7F = seconds
+        0x80..0xFE = minutes (count = byte - 0x7F)
+        0xFF       = factory default duration
+    fields:
+      - { name: sourceNodeId, type: u8,   default: 0 }
+      - { name: currentValue, type: u8,   default: 0 }
+      - { name: targetValue,  type: u8,   default: 0 }
+      - { name: duration,     type: u8,   default: 0 }
+      - { name: wireFormatV2, type: bool, default: false }
+
   # ---- 2d. Command events (D-Bus → ProtocolThread) ----------------
   # External transports translate semantic D-Bus calls into one of
   # these and publish; ProtocolThread subscribes and dispatches.
@@ -321,6 +347,32 @@ events:
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: value,      type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: SetMultilevelSwitchCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Send a Multilevel Switch (CC 0x26) Set. Value semantics:
+      0x00 off, 0x01..0x63 level 1..99, 0xFF "restore last level".
+      Duration byte: 0x00 instant, 0x01..0x7F seconds,
+      0x80..0xFE minutes (count = byte - 0x7F), 0xFF factory default.
+      The daemon always emits the v2 wire form (value + duration);
+      v1-only devices ignore the trailing duration byte per spec.
+    constants:
+      - { name: DURATION_DEFAULT, value: 0xFF }
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: value,      type: u8, default: 0 }
+      - { name: duration,   type: u8, default: DURATION_DEFAULT }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetMultilevelSwitchCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's Multilevel Switch value.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
 
   - name: GetBasicCommand
@@ -514,6 +566,22 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetBasicCommand
+
+    - name: SetMultilevelSwitch
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: value,      dbus: y, cpp: u8 }
+        - { name: duration,   dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: SetMultilevelSwitchCommand
+
+    - name: GetMultilevelSwitch
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetMultilevelSwitchCommand
 
     - name: SetAssociation
       params:
@@ -747,6 +815,15 @@ dbus:
       triggered_by:
         event: BinarySwitchReport
 
+    - name: SwitchMultilevelReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: currentValue, dbus: y, doc: "0=off, 0x01..0x63=level 1..99, 0xFE=unknown, 0xFF=on" }
+        - { name: targetValue,  dbus: y, doc: "same encoding as currentValue; mirrors current on v1 wire form" }
+        - { name: duration,     dbus: y, doc: "0=instant, 0x01..0x7F=sec, 0x80..0xFE=min, 0xFF=default" }
+      triggered_by:
+        event: MultilevelSwitchReport
+
 # =====================================================================
 # 4. Application Command Class codecs
 # =====================================================================
@@ -789,6 +866,42 @@ command_classes:
         decoded_struct:
           - { name: rawValue, type: u8 }
           - { name: state,    type: enum, doc: "Off | On | Unknown" }
+
+  - name: MultilevelSwitch
+    class_byte: 0x26
+    wire_prefix: SWITCH_MULTILEVEL
+    description: |
+      Multilevel control — dimmers, blinds, fan speed. SET takes a
+      value byte plus (v2+) a duration byte; the daemon always emits
+      the v2 wire form so v1-only devices ignore the trailing byte
+      per spec.
+    constants:
+      - { name: VALUE_OFF,        value: 0x00 }
+      - { name: VALUE_MAX,        value: 0x63 }
+      - { name: VALUE_UNKNOWN,    value: 0xFE }
+      - { name: VALUE_RESTORE,    value: 0xFF }
+      - { name: DURATION_INSTANT, value: 0x00 }
+      - { name: DURATION_DEFAULT, value: 0xFF }
+    commands:
+      - name: Set
+        byte: 0x01
+        encode_args:
+          - { name: value,    type: u8 }
+          - { name: duration, type: u8 }
+        wire:
+          - "value"
+          - "duration"
+      - name: Get
+        byte: 0x02
+        encode_args: []
+        wire: []
+      - name: Report
+        byte: 0x03
+        decoded_struct:
+          - { name: currentValue, type: u8 }
+          - { name: targetValue,  type: u8 }
+          - { name: duration,     type: u8 }
+          - { name: wireFormatV2, type: bool, doc: "true if 5-byte v2+ wire form" }
 
   - name: Basic
     class_byte: 0x20
@@ -881,3 +994,16 @@ cc_translations:
     map:
       sourceNodeId: event.sourceNodeId
       state:        "static_cast<u8>(decoded.state)"
+
+  - publishes: MultilevelSwitchReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: MultilevelSwitch.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      currentValue: decoded.currentValue
+      targetValue:  decoded.targetValue
+      duration:     decoded.duration
+      wireFormatV2: decoded.wireFormatV2

@@ -38,17 +38,18 @@ busctl --system list | grep ZWaved
 busctl --system introspect com.tiunda.ZWaved /com/tiunda/ZWaved
 ```
 
-The introspection should list twenty methods (`AddNode`, `StopAddNode`,
+The introspection should list twenty-two methods (`AddNode`, `StopAddNode`,
 `RemoveNode`, `StopRemoveNode`, `RemoveFailedNode`, `SetSwitchBinary`,
-`GetSwitchBinary`, `SetBasic`, `GetBasic`, `GetNodes`, `GetDongleInfo`,
-`GetInitData`, `SetAssociation`, `RemoveAssociation`, `GetAssociation`,
+`GetSwitchBinary`, `SetBasic`, `GetBasic`, `SetMultilevelSwitch`,
+`GetMultilevelSwitch`, `GetNodes`, `GetDongleInfo`, `GetInitData`,
+`SetAssociation`, `RemoveAssociation`, `GetAssociation`,
 `GetAssociationGroupings`, `SetMultichannelAssociation`,
 `RemoveMultichannelAssociation`, `GetMultichannelAssociation`,
 `GetMultichannelAssociationGroupings`) and
-eleven signals (`NodeInclusionStatus`, `NodeExclusionStatus`,
+twelve signals (`NodeInclusionStatus`, `NodeExclusionStatus`,
 `DongleStatus`, `DongleInfo`, `InitData`, `SendDataStatus`,
-`ApplicationCommand`, `SwitchBinaryReport`, `AssociationReport`,
-`AssociationGroupingsReport`, `RemoveFailedNodeStatus`).
+`ApplicationCommand`, `SwitchBinaryReport`, `SwitchMultilevelReport`,
+`AssociationReport`, `AssociationGroupingsReport`, `RemoveFailedNodeStatus`).
 
 ### Always monitor signals in another terminal
 
@@ -90,6 +91,8 @@ or wait for the next hot-plug to determine current state.
 | `GetSwitchBinary`                     | `y y` (nodeId, callbackId)                                                                                                                         | Send a Binary Switch GET; the node's reply lands as a typed `SwitchBinaryReport(sourceNodeId, state)` signal alongside the raw `ApplicationCommand`                          |
 | `SetBasic`                            | `y y y` (nodeId, value, callbackId)                                                                                                                | Send a Basic SET (CC 0x20) — `value=0` off, `value=0xFF` on, `value=1..99` (`0x01..0x63`) dimmer level. Universal fallback for devices without a specific CC                 |
 | `GetBasic`                            | `y y` (nodeId, callbackId)                                                                                                                         | Send a Basic GET; the node's reply lands as a raw `ApplicationCommand` signal carrying the Basic Report (`ccData[0] == 0x20`, `ccData[1] == 0x03`)                           |
+| `SetMultilevelSwitch`                 | `y y y y` (nodeId, value, duration, callbackId)                                                                                                    | Send a Multilevel Switch SET (CC 0x26) — `value=0` off, `value=1..99` (`0x01..0x63`) dimmer level, `value=0xFF` restore-last. `duration=0` instant, `0xFF` factory default   |
+| `GetMultilevelSwitch`                 | `y y` (nodeId, callbackId)                                                                                                                         | Send a Multilevel Switch GET; the node's reply lands as a typed `SwitchMultilevelReport(sourceNodeId, currentValue, targetValue, duration)` signal alongside the raw `ApplicationCommand` |
 | `GetNodes`                            | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes)                                                                                 | Return the in-memory list of currently-included nodes                                                                                                                        |
 | `GetDongleInfo`                       | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId)                                                                             | Return the dongle introspection captured when the serial port opened                                                                                                         |
 | `GetInitData`                         | `→ (y y ay y y)` (serialApiVersion, capabilities, nodeIds, chipType, chipVersion)                                                                  | Return the SERIAL_API_GET_INIT_DATA response captured at startup; `nodeIds` is the expanded node bitmap                                                                      |
@@ -388,6 +391,64 @@ stream on `ccData[0] == 0x20 && ccData[1] == 0x03` (Basic REPORT) and
 read `ccData[2]` (current value), optionally `ccData[3]` (target) and
 `ccData[4]` (duration) for v2+ frames.
 
+## 11c. Driving a Multilevel Switch (CC 0x26)
+
+`SetMultilevelSwitch` sends a Multilevel Switch SET (Command Class
+`0x26`, command `0x01`) to an already-included dimmer, blinds
+controller, or fan-speed regulator. `value` is the wire byte:
+
+| `value`          | Meaning                                            |
+|------------------|----------------------------------------------------|
+| `0x00`           | off / level 0                                      |
+| `0x01..0x63`     | level 1..99 (`0x63` is the spec maximum, not 100)  |
+| `0xFF`           | "restore last level" — node decides which          |
+
+`duration` is the transition byte:
+
+| `duration`       | Meaning                                            |
+|------------------|----------------------------------------------------|
+| `0x00`           | instant — change immediately                       |
+| `0x01..0x7F`     | seconds                                            |
+| `0x80..0xFE`     | minutes (count = byte − `0x7F`, so `0x80` = 1 min) |
+| `0xFF`           | factory-default duration for the device            |
+
+The daemon always emits the v2 wire form (value + duration). v1-only
+devices ignore the trailing duration byte per spec.
+
+```bash
+# Set node 5 to 50 % (decimal 50 → 0x32) instantly, callback id 7:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetMultilevelSwitch yyyy 5 50 0 7
+
+# Ramp node 5 to 99 % over 5 seconds, callback id 8:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetMultilevelSwitch yyyy 5 99 5 8
+
+# Restore node 5's last level with the device's default ramp:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetMultilevelSwitch yyyy 5 0xFF 0xFF 9
+```
+
+Completion uses the same `SendDataStatus(callbackId, txStatus)` table
+as `SetSwitchBinary`.
+
+To read the current state, call `GetMultilevelSwitch`. The node's
+reply arrives asynchronously as a typed `SwitchMultilevelReport(
+sourceNodeId, currentValue, targetValue, duration)` signal alongside
+the raw `ApplicationCommand`. For v1 wire-form reports `targetValue`
+mirrors `currentValue` and `duration` is `0`; for v2+ reports the
+three fields carry the live transition triple.
+
+```bash
+# Query node 5's current Multilevel Switch value, callback id 9:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetMultilevelSwitch yy 5 9
+```
+
+The same typed signal also fires whenever the node sends an
+unsolicited Report after a manual dim, programmed scene change, or
+the tail end of an in-flight transition.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a
@@ -402,10 +463,16 @@ frame and re-broadcasts it on D-Bus in two parallel forms:
 - **`SwitchBinaryReport(y y)`** — `(sourceNodeId, state)` where `state`
   is `0` Off, `1` On, `2` Unknown. Emitted only when the CC bytes parse
   as a Binary Switch Report (CC `0x25`, command `0x03`).
+- **`SwitchMultilevelReport(y y y y)`** — `(sourceNodeId, currentValue,
+  targetValue, duration)`. Emitted only when the CC bytes parse as a
+  Multilevel Switch Report (CC `0x26`, command `0x03`). For v1 wire
+  form the decoder mirrors `currentValue` into `targetValue` and
+  leaves `duration` at `0`.
 
-Both are visible in `busctl --system monitor com.tiunda.ZWaved`. Use
-the typed signal when you only care about Binary Switch state changes;
-use the raw signal when you need to handle arbitrary CCs.
+Both typed signals are visible in `busctl --system monitor com.tiunda.ZWaved`
+alongside the raw `ApplicationCommand`. Use the typed signal when you
+only care about that specific CC; use the raw signal when you need to
+handle arbitrary CCs.
 
 ## 13. Listing nodes
 

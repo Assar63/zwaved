@@ -10,6 +10,7 @@
 #include "application/Basic.hpp"
 #include "application/BinarySwitch.hpp"
 #include "application/MultichannelAssociation.hpp"
+#include "application/MultilevelSwitch.hpp"
 
 #include <array>
 #include <atomic>
@@ -130,6 +131,8 @@ struct ZwaveProtocolState
     MessageBus::SubscriptionId getSwitchBinarySubscription{0};
     MessageBus::SubscriptionId setBasicSubscription{0};
     MessageBus::SubscriptionId getBasicSubscription{0};
+    MessageBus::SubscriptionId setMultilevelSwitchSubscription{0};
+    MessageBus::SubscriptionId getMultilevelSwitchSubscription{0};
     MessageBus::SubscriptionId setAssociationSubscription{0};
     MessageBus::SubscriptionId removeAssociationSubscription{0};
     MessageBus::SubscriptionId getAssociationSubscription{0};
@@ -315,6 +318,26 @@ auto onGetBasic(const MessageBus::GetBasicCommand& cmd) -> void
     HostApi::SendDataRequest req{};
     req.nodeId     = cmd.nodeId;
     req.data       = Basic::encodeGet();
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onSetMultilevelSwitch(const MessageBus::SetMultilevelSwitchCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = MultilevelSwitch::encodeSet(cmd.value, cmd.duration);
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
+auto onGetMultilevelSwitch(const MessageBus::GetMultilevelSwitchCommand& cmd) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = cmd.nodeId;
+    req.data       = MultilevelSwitch::encodeGet();
     req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
     req.callbackId = cmd.callbackId;
     pushRequest(req);
@@ -899,7 +922,11 @@ auto subscribeBus() -> void
     state().getSwitchBinarySubscription = MessageBus::subscribe<MessageBus::GetSwitchBinaryCommand>(onGetSwitchBinary);
     state().setBasicSubscription        = MessageBus::subscribe<MessageBus::SetBasicCommand>(onSetBasic);
     state().getBasicSubscription        = MessageBus::subscribe<MessageBus::GetBasicCommand>(onGetBasic);
-    state().setAssociationSubscription  = MessageBus::subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
+    state().setMultilevelSwitchSubscription =
+        MessageBus::subscribe<MessageBus::SetMultilevelSwitchCommand>(onSetMultilevelSwitch);
+    state().getMultilevelSwitchSubscription =
+        MessageBus::subscribe<MessageBus::GetMultilevelSwitchCommand>(onGetMultilevelSwitch);
+    state().setAssociationSubscription = MessageBus::subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
     state().removeAssociationSubscription =
         MessageBus::subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
     state().getAssociationSubscription = MessageBus::subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);
@@ -930,6 +957,8 @@ auto unsubscribeBus() -> void
     MessageBus::unsubscribe(state().getAssociationSubscription);
     MessageBus::unsubscribe(state().removeAssociationSubscription);
     MessageBus::unsubscribe(state().setAssociationSubscription);
+    MessageBus::unsubscribe(state().getMultilevelSwitchSubscription);
+    MessageBus::unsubscribe(state().setMultilevelSwitchSubscription);
     MessageBus::unsubscribe(state().getBasicSubscription);
     MessageBus::unsubscribe(state().setBasicSubscription);
     MessageBus::unsubscribe(state().getSwitchBinarySubscription);
@@ -946,6 +975,8 @@ auto unsubscribeBus() -> void
     state().getAssociationSubscription                      = 0;
     state().removeAssociationSubscription                   = 0;
     state().setAssociationSubscription                      = 0;
+    state().getMultilevelSwitchSubscription                 = 0;
+    state().setMultilevelSwitchSubscription                 = 0;
     state().getBasicSubscription                            = 0;
     state().setBasicSubscription                            = 0;
     state().getSwitchBinarySubscription                     = 0;

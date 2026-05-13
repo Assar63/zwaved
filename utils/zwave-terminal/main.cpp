@@ -84,6 +84,13 @@ constexpr std::uint8_t CALLBACK_ID_NONE = 0;
 constexpr int NODE_ID_MIN = 1;
 constexpr int NODE_ID_MAX = 232;
 
+// Full byte range for the Multilevel Switch level / duration prompts.
+// The spec semantics ride on the sentinel values (0xFE = unknown,
+// 0xFF = restore-last / default-duration), so we accept any byte and
+// let the device interpret it.
+constexpr int BYTE_MIN = 0x00;
+constexpr int BYTE_MAX = 0xFF;
+
 // Association group IDs are 1..255 per spec (0 reserved).
 constexpr int GROUP_ID_MIN = 1;
 constexpr int GROUP_ID_MAX = 255;
@@ -288,6 +295,8 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [2] Remove zwave node");
     mvprintw(row++, 0, "  [3] Switch binary ON  (prompts for node id)");
     mvprintw(row++, 0, "  [4] Switch binary OFF (prompts for node id)");
+    mvprintw(row++, 0, "  [5] Switch multilevel set (prompts for node, level, duration)");
+    mvprintw(row++, 0, "  [6] Switch multilevel get (prompts for node id)");
     mvprintw(row++, 0, "  [a] Get association group members");
     mvprintw(row++, 0, "  [g] Get association group count");
     mvprintw(row++, 0, "  [L] Set lifeline (controller -> group 1)");
@@ -385,6 +394,21 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 std::ostringstream stream;
                 stream << "SwitchBinaryReport node=" << static_cast<unsigned>(sourceNodeId)
                        << " state=" << formatSwitchState(state);
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("SwitchMultilevelReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId, std::uint8_t currentValue, std::uint8_t targetValue, std::uint8_t duration)
+                -> void
+            {
+                std::ostringstream stream;
+                stream << "SwitchMultilevelReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " current=" << static_cast<unsigned>(currentValue)
+                       << " target=" << static_cast<unsigned>(targetValue) << " duration=0x" << std::hex << std::setw(2)
+                       << std::setfill('0') << static_cast<unsigned>(duration) << std::dec;
                 logLine(stream.str());
             });
 
@@ -546,6 +570,58 @@ auto handleSwitchBinary(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, bool
     proxy.callMethod("SetSwitchBinary").onInterface(IFACE_NAME).withArguments(*nodeId, turnOn, sessionCounter);
     std::ostringstream stream;
     stream << "SetSwitchBinary node=" << static_cast<unsigned>(*nodeId) << " " << (turnOn ? "ON" : "OFF")
+           << " callback=" << static_cast<unsigned>(sessionCounter);
+    logLine(stream.str());
+}
+
+auto handleSetMultilevelSwitch(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("SetMultilevelSwitch: cancelled or invalid node id");
+        return;
+    }
+    // Level range covers 0=off, 1..99=dimmer level, plus 0xFF=restore-last
+    // and 0xFE=unknown sentinel. promptByte's [0,255] is the simplest
+    // bound; we let the user pick any byte and the spec semantics do
+    // the rest.
+    auto level = promptByte("Level (0=off, 1-99=dim, 255=restore):", BYTE_MIN, BYTE_MAX);
+    if (!level.has_value())
+    {
+        logLine("SetMultilevelSwitch: cancelled or invalid level");
+        return;
+    }
+    auto duration = promptByte("Duration (0=instant, 1-127=sec, 128-254=min, 255=default):", BYTE_MIN, BYTE_MAX);
+    if (!duration.has_value())
+    {
+        logLine("SetMultilevelSwitch: cancelled or invalid duration");
+        return;
+    }
+    ++sessionCounter;
+    proxy.callMethod("SetMultilevelSwitch")
+        .onInterface(IFACE_NAME)
+        .withArguments(*nodeId, *level, *duration, sessionCounter);
+    std::ostringstream stream;
+    stream << "SetMultilevelSwitch node=" << static_cast<unsigned>(*nodeId)
+           << " level=" << static_cast<unsigned>(*level) << " duration=0x" << std::hex << std::setw(2)
+           << std::setfill('0') << static_cast<unsigned>(*duration) << std::dec
+           << " callback=" << static_cast<unsigned>(sessionCounter);
+    logLine(stream.str());
+}
+
+auto handleGetMultilevelSwitch(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("GetMultilevelSwitch: cancelled or invalid node id");
+        return;
+    }
+    ++sessionCounter;
+    proxy.callMethod("GetMultilevelSwitch").onInterface(IFACE_NAME).withArguments(*nodeId, sessionCounter);
+    std::ostringstream stream;
+    stream << "GetMultilevelSwitch node=" << static_cast<unsigned>(*nodeId)
            << " callback=" << static_cast<unsigned>(sessionCounter);
     logLine(stream.str());
 }
@@ -1038,6 +1114,14 @@ auto main() -> int
             else if (key == '3' || key == '4')
             {
                 handleSwitchBinary(*proxy, sessionCounter, key == '3');
+            }
+            else if (key == '5')
+            {
+                handleSetMultilevelSwitch(*proxy, sessionCounter);
+            }
+            else if (key == '6')
+            {
+                handleGetMultilevelSwitch(*proxy, sessionCounter);
             }
             else if (key == 'l' || key == 'L')
             {

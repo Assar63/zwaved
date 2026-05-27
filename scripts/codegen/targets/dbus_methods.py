@@ -105,6 +105,7 @@ def _dbus_to_cpp(dbus_sig: str) -> str:
         "q":  "std::uint16_t",
         "u":  "std::uint32_t",
         "t":  "std::uint64_t",
+        "i":  "std::int32_t",
         "b":  "bool",
         "s":  "std::string",
         "ay": "std::vector<std::uint8_t>",

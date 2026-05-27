@@ -38,7 +38,7 @@ Implementation order (each shippable independently):
 1. ~~[Wake Up CC `0x84`](https://github.com/Assar63/zwaved/issues/15)~~ — **done**; codec + 3 bus commands + 2 typed signals (`WakeUpIntervalReport`, `WakeUpNotification`). 24-bit BE seconds field clamps on encode so a too-large `seconds` doesn't truncate to ~0.
 2. [Per-node pending-command queue (SQLite)](https://github.com/Assar63/zwaved/issues/65) — durable buffer for sleeping nodes
 3. [WakeUpOrchestrator](https://github.com/Assar63/zwaved/issues/68) — proves the `src/orchestrator/` module shape with the simpler flow first
-4. [Configuration CC `0x70`](https://github.com/Assar63/zwaved/issues/16) — adds `SetConfigurationCommand`
+4. ~~[Configuration CC `0x70`](https://github.com/Assar63/zwaved/issues/16)~~ — **done**; `SetConfigurationCommand` + `GetConfigurationCommand` + typed `ConfigurationReport`. Codegen extended with `i32` support so `value` doesn't have to be smuggled through a `u32`.
 5. [Device + per-node policy register (SQLite)](https://github.com/Assar63/zwaved/issues/66) — device default + per-node override merge
 6. [InclusionOrchestrator](https://github.com/Assar63/zwaved/issues/67) — moves auto-lifeline out of ProtocolThread; adds policy + wake-up interval steps
 7. [D-Bus surface for policy CRUD](https://github.com/Assar63/zwaved/issues/69) — Set/Get/Delete/List for device + per-node policies
@@ -60,7 +60,7 @@ Implementation order (each shippable independently):
 - [ ] [Multi Channel (CC 0x60)](https://github.com/Assar63/zwaved/issues/13)
 - [ ] [Supervision (CC 0x6C)](https://github.com/Assar63/zwaved/issues/14)
 - [x] **Wake Up (CC `0x84`)** — `SetWakeUpInterval` / `GetWakeUpInterval` / `SendWakeUpNoMoreInformation` over D-Bus. Codec: 24-bit big-endian `seconds` field + `controllerNodeId` byte; `encodeIntervalSet` clamps to 0x00FFFFFF on overflow so a too-large value can't truncate to 0 (stay-awake). Empty-payload `encodeIntervalGet` / `encodeNoMoreInformation` come from `.gen.cpp`. Inbound Reports + Notifications are republished by the cc-translator as typed `WakeUpIntervalReport` / `WakeUpNotification` D-Bus signals; the latter is the hook WakeUpOrchestrator (#68) will subscribe to.
-- [ ] [Configuration (CC 0x70)](https://github.com/Assar63/zwaved/issues/16)
+- [x] **Configuration (CC `0x70`)** — `SetConfiguration` / `GetConfiguration` over D-Bus, value as i32 + size byte (1/2/4). Encoder truncates low `size` bytes BE so signed and unsigned reinterpretations produce identical wire bytes (`-1` / `0xFFFFFFFF` both become `0xFF…` in the field). Decoder sign-extends from `size`'s MSB and rejects invalid `size` values. Inbound Reports republished by the cc-translator as typed `ConfigurationReport` D-Bus signal. v4 Bulk variants + default-value flag are follow-ups. Codegen extended with `i32` type support so the bus event's `value` field is `std::int32_t` directly instead of being smuggled through `u32`.
 - [ ] [Sensor Multilevel (CC 0x31)](https://github.com/Assar63/zwaved/issues/17)
 - [ ] [Sensor Binary (CC 0x30)](https://github.com/Assar63/zwaved/issues/18)
 - [ ] [Notification (CC 0x71)](https://github.com/Assar63/zwaved/issues/19)

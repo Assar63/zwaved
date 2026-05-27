@@ -24,10 +24,14 @@ set_source_files_properties(
     PROPERTIES GENERATED TRUE
 )
 
+# Configuration.gen.cpp is not emitted (no encode_args; the codegen
+# only generates a header with constants).
+
 target_sources(zwaved PRIVATE
     Basic.cpp
     Battery.cpp
     BinarySwitch.cpp
+    Configuration.cpp
     ManufacturerSpecific.cpp
     MultilevelSwitch.cpp
     NodeVersion.cpp

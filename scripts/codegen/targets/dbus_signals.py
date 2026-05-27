@@ -58,6 +58,7 @@ TYPE_ALIAS_REPLACEMENTS = (
     (re.compile(r"\bu16\b"),    "std::uint16_t"),
     (re.compile(r"\bu32\b"),    "std::uint32_t"),
     (re.compile(r"\bu64\b"),    "std::uint64_t"),
+    (re.compile(r"\bi32\b"),    "std::int32_t"),
     (re.compile(r"\bbytes\b"),  "std::vector<std::uint8_t>"),
     (re.compile(r"\bstring\b"), "std::string"),
 )
@@ -79,6 +80,7 @@ def cpp_param_type(param) -> str:
         "q":  "std::uint16_t",
         "u":  "std::uint32_t",
         "t":  "std::uint64_t",
+        "i":  "std::int32_t",
         "b":  "bool",
         "s":  "std::string",
         "ay": "std::vector<std::uint8_t>",

@@ -74,6 +74,7 @@ PRIMITIVE_CPP = {
     "u16":  "std::uint16_t",
     "u32":  "std::uint32_t",
     "u64":  "std::uint64_t",
+    "i32":  "std::int32_t",
 }
 
 

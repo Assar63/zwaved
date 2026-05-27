@@ -11,6 +11,7 @@
 #include "application/Basic.hpp"
 #include "application/Battery.hpp"
 #include "application/BinarySwitch.hpp"
+#include "application/Configuration.hpp"
 #include "application/ManufacturerSpecific.hpp"
 #include "application/MultichannelAssociation.hpp"
 #include "application/MultilevelSwitch.hpp"
@@ -367,6 +368,19 @@ auto onGetWakeUpInterval(const MessageBus::GetWakeUpIntervalCommand& cmd) -> voi
 auto onSendWakeUpNoMoreInformation(const MessageBus::SendWakeUpNoMoreInformationCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, WakeUp::encodeNoMoreInformation());
+}
+
+auto onSetConfiguration(const MessageBus::SetConfigurationCommand& cmd) -> void
+{
+    // `isSigned` is advisory metadata for downstream tooling; the
+    // encoder truncates the low `size` bytes either way, so the
+    // wire bytes are the same.
+    pushSendData(cmd.nodeId, cmd.callbackId, Configuration::encodeSet(cmd.parameter, cmd.size, cmd.value));
+}
+
+auto onGetConfiguration(const MessageBus::GetConfigurationCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, Configuration::encodeGet(cmd.parameter));
 }
 
 auto onSetAssociation(const MessageBus::SetAssociationCommand& cmd) -> void
@@ -1010,7 +1024,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 27;
+constexpr std::size_t SUBSCRIPTION_COUNT = 29;
 
 auto subscribeBus() -> void
 {
@@ -1034,6 +1048,8 @@ auto subscribeBus() -> void
     subscribe<MessageBus::SetWakeUpIntervalCommand>(onSetWakeUpInterval);
     subscribe<MessageBus::GetWakeUpIntervalCommand>(onGetWakeUpInterval);
     subscribe<MessageBus::SendWakeUpNoMoreInformationCommand>(onSendWakeUpNoMoreInformation);
+    subscribe<MessageBus::SetConfigurationCommand>(onSetConfiguration);
+    subscribe<MessageBus::GetConfigurationCommand>(onGetConfiguration);
     subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
     subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
     subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);

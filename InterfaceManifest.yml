@@ -36,6 +36,7 @@
 #   u16          cpp: std::uint16_t                 dbus: q
 #   u32          cpp: std::uint32_t                 dbus: u
 #   u64          cpp: std::uint64_t                 dbus: t
+#   i32          cpp: std::int32_t                  dbus: i
 #   string       cpp: std::string                   dbus: s
 #   bytes        cpp: std::vector<std::uint8_t>     dbus: ay
 #   array<T, N>  cpp: std::array<T, N>              dbus: a<T> (no length check)
@@ -392,6 +393,27 @@ events:
     fields:
       - { name: sourceNodeId, type: u8, default: 0 }
 
+  - name: ConfigurationReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api, orchestrator] }
+    doc: |
+      Typed Configuration (CC 0x70) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose
+      ccData parses as a Configuration Report. `value` is the
+      sign-extended 32-bit form of the wire bytes — `size` (1, 2,
+      or 4) says how many bytes were on the wire and whether the
+      caller should reinterpret as unsigned. The Z-Wave spec
+      treats configuration values as two's-complement signed by
+      convention; callers who know their parameter is unsigned
+      can `static_cast<std::uint32_t>(value)`.
+
+      v4 adds Bulk variants (0x07/0x08/0x09); not decoded today.
+    fields:
+      - { name: sourceNodeId, type: u8,  default: 0 }
+      - { name: parameter,    type: u8,  default: 0 }
+      - { name: size,         type: u8,  default: 0, doc: "1, 2, or 4" }
+      - { name: value,        type: i32, default: 0, doc: "sign-extended from size's MSB" }
+
   - name: NodeVersionReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -631,6 +653,34 @@ events:
       returns the daemon's own semver / git-describe).
     fields:
       - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: SetConfigurationCommand
+    category: command
+    direction: { publishers: [external-api, orchestrator], subscribers: [zwave-protocol] }
+    doc: |
+      Send Configuration Set (CC 0x70) to a node. `size` must be 1,
+      2, or 4; the encoder truncates `value` to the low `size` bytes
+      big-endian (so a -1 / 0xFFFFFFFF in size=1 becomes 0xFF on the
+      wire). `signed` is advisory metadata for the policy register
+      (#66) and downstream tooling — it does not change the encoded
+      bytes. Published by InclusionOrchestrator (#67) with one
+      publish per parameter in the resolved per-device policy.
+    fields:
+      - { name: nodeId,     type: u8,   default: 0 }
+      - { name: parameter,  type: u8,   default: 0 }
+      - { name: size,       type: u8,   default: 1, doc: "1, 2, or 4" }
+      - { name: isSigned,   type: bool, default: false, doc: "advisory; doesn't affect encoded bytes (`signed` is a C++ keyword)" }
+      - { name: value,      type: i32,  default: 0 }
+      - { name: callbackId, type: u8,   default: 0 }
+
+  - name: GetConfigurationCommand
+    category: command
+    direction: { publishers: [external-api, orchestrator], subscribers: [zwave-protocol] }
+    doc: Query a single Configuration parameter from a node.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: parameter,  type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
 
   - name: SetWakeUpIntervalCommand
@@ -911,6 +961,25 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetNodeVersionCommand
+
+    - name: SetConfiguration
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: parameter,  dbus: y, cpp: u8 }
+        - { name: size,       dbus: y, cpp: u8, doc: "1, 2, or 4" }
+        - { name: isSigned,   dbus: b, cpp: bool, doc: "advisory; doesn't affect encoded bytes" }
+        - { name: value,      dbus: i, cpp: i32 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: SetConfigurationCommand
+
+    - name: GetConfiguration
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: parameter,  dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetConfigurationCommand
 
     - name: SetWakeUpInterval
       params:
@@ -1240,6 +1309,15 @@ dbus:
       triggered_by:
         event: NodeVersionReport
 
+    - name: ConfigurationReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: parameter,    dbus: y }
+        - { name: size,         dbus: y, doc: "1, 2, or 4" }
+        - { name: value,        dbus: i, doc: "sign-extended from size's MSB; cast to uint32 if your parameter is unsigned" }
+      triggered_by:
+        event: ConfigurationReport
+
     - name: WakeUpIntervalReport
       params:
         - { name: sourceNodeId,     dbus: y }
@@ -1370,6 +1448,41 @@ modules:
         decoded_struct:
           - { name: level,      type: u8,   doc: "raw wire byte: 0x00..0x64 = 0..100%, 0xFF = low" }
           - { name: lowBattery, type: bool, doc: "true iff level == LEVEL_LOW_WARNING" }
+
+  - name: Configuration
+    wire:
+      class_byte: 0x70
+      prefix: CONFIGURATION
+    description: |
+      Vendor-defined parameter store. v1 carries a single
+      `(parameter, size, value)` triple per frame; the size byte
+      selects a 1, 2, or 4-byte big-endian value. The Z-Wave spec
+      treats values as two's-complement signed by convention — the
+      codec sign-extends on decode and truncates the low `size`
+      bytes on encode, so a caller who knows their parameter is
+      unsigned can pass the value as the signed reinterpretation
+      and read it back the same way.
+
+      v4 adds Bulk Set/Get/Report (0x07/0x08/0x09) and a default-
+      value flag; not implemented today.
+
+      Set/Get/Report all carry irregular variable-width payloads
+      that the simple-encoder generator can't express, so all
+      three live in the hand-written Configuration.cpp.
+    commands:
+      - name: Set
+        wire:
+          byte: 0x04
+      - name: Get
+        wire:
+          byte: 0x05
+      - name: Report
+        wire:
+          byte: 0x06
+        decoded_struct:
+          - { name: parameter, type: u8 }
+          - { name: size,      type: u8 }
+          - { name: value,     type: i32, doc: "sign-extended from size's MSB" }
 
   - name: WakeUp
     wire:
@@ -1655,6 +1768,18 @@ translations:
       protocolSubVersion:    decoded.protocolSubVersion
       applicationVersion:    decoded.applicationVersion
       applicationSubVersion: decoded.applicationSubVersion
+
+  - publishes: ConfigurationReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: Configuration.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      parameter:    decoded.parameter
+      size:         decoded.size
+      value:        decoded.value
 
   - publishes: WakeUpIntervalReport
     triggered_by: ApplicationCommand

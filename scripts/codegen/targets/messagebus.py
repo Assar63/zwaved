@@ -46,11 +46,12 @@ PRIMITIVE_CPP = {
     "u16":    "std::uint16_t",
     "u32":    "std::uint32_t",
     "u64":    "std::uint64_t",
+    "i32":    "std::int32_t",
     "string": "std::string",
     "bytes":  "std::vector<std::uint8_t>",
 }
 
-INTEGER_TYPES = {"u8", "u16", "u32", "u64"}
+INTEGER_TYPES = {"u8", "u16", "u32", "u64", "i32"}
 
 
 def cpp_type(type_str: str) -> str:

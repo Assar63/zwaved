@@ -59,7 +59,7 @@ Implementation order (each shippable independently):
 
 - [ ] [Multi Channel (CC 0x60)](https://github.com/Assar63/zwaved/issues/13)
 - [ ] [Supervision (CC 0x6C)](https://github.com/Assar63/zwaved/issues/14)
-- [ ] [Wake Up (CC 0x84)](https://github.com/Assar63/zwaved/issues/15)
+- [x] **Wake Up (CC `0x84`)** — `SetWakeUpInterval` / `GetWakeUpInterval` / `SendWakeUpNoMoreInformation` over D-Bus. Codec: 24-bit big-endian `seconds` field + `controllerNodeId` byte; `encodeIntervalSet` clamps to 0x00FFFFFF on overflow so a too-large value can't truncate to 0 (stay-awake). Empty-payload `encodeIntervalGet` / `encodeNoMoreInformation` come from `.gen.cpp`. Inbound Reports + Notifications are republished by the cc-translator as typed `WakeUpIntervalReport` / `WakeUpNotification` D-Bus signals; the latter is the hook WakeUpOrchestrator (#68) will subscribe to.
 - [ ] [Configuration (CC 0x70)](https://github.com/Assar63/zwaved/issues/16)
 - [ ] [Sensor Multilevel (CC 0x31)](https://github.com/Assar63/zwaved/issues/17)
 - [ ] [Sensor Binary (CC 0x30)](https://github.com/Assar63/zwaved/issues/18)

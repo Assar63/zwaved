@@ -1,12 +1,13 @@
 #include "NodeRegistry.hpp"
 
+#include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
 
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>
-#include <iostream>
+#include <ios>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -109,6 +110,87 @@ auto state() -> State&
     return instance;
 }
 
+/// RAII wrapper around `sqlite3_stmt*`. Prepares on construction
+/// (logging on failure), finalizes on destruction. Bind methods
+/// chain. `valid()` reports whether prepare succeeded — callers
+/// must check before stepping.
+class Stmt
+{
+  public:
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): SQL and label are clearly distinct at call sites
+    Stmt(sqlite3* database, const char* sql, const char* label)
+        : database_(database),
+          label_(label)
+    {
+        if (sqlite3_prepare_v2(database, sql, -1, &stmt_, nullptr) != SQLITE_OK)
+        {
+            Logger::error(std::string("[NodeRegistry] prepare ") + label + " failed: " + sqlite3_errmsg(database));
+            stmt_ = nullptr;
+        }
+    }
+
+    ~Stmt()
+    {
+        if (stmt_ != nullptr)
+        {
+            sqlite3_finalize(stmt_);
+        }
+    }
+
+    Stmt(const Stmt&)                        = delete;
+    auto operator=(const Stmt&) -> Stmt&     = delete;
+    Stmt(Stmt&&) noexcept                    = delete;
+    auto operator=(Stmt&&) noexcept -> Stmt& = delete;
+
+    [[nodiscard]] auto valid() const -> bool
+    {
+        return stmt_ != nullptr;
+    }
+
+    auto bindText(int pos, const std::string& value) -> Stmt&
+    {
+        sqlite3_bind_text(stmt_, pos, value.c_str(), -1, SQLITE_TRANSIENT);
+        return *this;
+    }
+
+    auto bindInt(int pos, int value) -> Stmt&
+    {
+        sqlite3_bind_int(stmt_, pos, value);
+        return *this;
+    }
+
+    auto bindBlob(int pos, const void* data, int size) -> Stmt&
+    {
+        sqlite3_bind_blob(stmt_, pos, data, size, SQLITE_TRANSIENT);
+        return *this;
+    }
+
+    auto step() -> int
+    {
+        return sqlite3_step(stmt_);
+    }
+
+    /// Execute a statement expected to terminate with SQLITE_DONE.
+    /// Logs the SQLite error message if it doesn't.
+    auto execDone() -> void
+    {
+        if (sqlite3_step(stmt_) != SQLITE_DONE)
+        {
+            Logger::error(std::string("[NodeRegistry] ") + label_ + " failed: " + sqlite3_errmsg(database_));
+        }
+    }
+
+    [[nodiscard]] auto raw() const -> sqlite3_stmt*
+    {
+        return stmt_;
+    }
+
+  private:
+    sqlite3_stmt* stmt_ = nullptr;
+    sqlite3* database_  = nullptr;
+    const char* label_  = nullptr;
+};
+
 auto resolveDbPath() -> std::filesystem::path
 {
     // Resolution order:
@@ -140,18 +222,16 @@ auto formatHomeId(const std::vector<std::uint8_t>& bytes) -> std::string
 
 auto readSchemaVersion(sqlite3* database) -> int
 {
-    sqlite3_stmt* stmt = nullptr;
-    int result         = 0;
-    if (sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &stmt, nullptr) != SQLITE_OK)
+    Stmt stmt(database, "PRAGMA user_version", "PRAGMA user_version");
+    if (!stmt.valid())
     {
         return 0;
     }
-    if (sqlite3_step(stmt) == SQLITE_ROW)
+    if (stmt.step() == SQLITE_ROW)
     {
-        result = sqlite3_column_int(stmt, 0);
+        return sqlite3_column_int(stmt.raw(), 0);
     }
-    sqlite3_finalize(stmt);
-    return result;
+    return 0;
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): SQL and label are clearly distinct at call sites
@@ -160,7 +240,7 @@ auto execOrLog(sqlite3* database, const char* sql, const char* what) -> bool
     char* err = nullptr;
     if (sqlite3_exec(database, sql, nullptr, nullptr, &err) != SQLITE_OK)
     {
-        std::cerr << "[NodeRegistry] " << what << " failed: " << (err != nullptr ? err : "?") << '\n';
+        Logger::error(std::string("[NodeRegistry] ") + what + " failed: " + (err != nullptr ? err : "?"));
         sqlite3_free(err);
         return false;
     }
@@ -188,37 +268,35 @@ auto migrateSchema(sqlite3* database) -> bool
     {
         return false;
     }
-    std::cout << "[NodeRegistry] migrated schema to version " << CURRENT_SCHEMA_VERSION << '\n';
+    Logger::info("[NodeRegistry] migrated schema to version " + std::to_string(CURRENT_SCHEMA_VERSION));
     return true;
 }
 
 auto loadNodesForHome(sqlite3* database, const std::string& homeId) -> std::map<std::uint8_t, NodeRegistry::NodeInfo>
 {
     std::map<std::uint8_t, NodeRegistry::NodeInfo> result;
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(database, SELECT_FOR_HOME_SQL, -1, &stmt, nullptr) != SQLITE_OK)
+    Stmt stmt(database, SELECT_FOR_HOME_SQL, "SELECT");
+    if (!stmt.valid())
     {
-        std::cerr << "[NodeRegistry] prepare SELECT failed: " << sqlite3_errmsg(database) << '\n';
         return result;
     }
-    sqlite3_bind_text(stmt, 1, homeId.c_str(), -1, SQLITE_TRANSIENT);
-    while (sqlite3_step(stmt) == SQLITE_ROW)
+    stmt.bindText(1, homeId);
+    while (stmt.step() == SQLITE_ROW)
     {
         NodeRegistry::NodeInfo info;
-        info.nodeId       = static_cast<std::uint8_t>(sqlite3_column_int(stmt, COL_NODE_ID));
-        info.basicType    = static_cast<std::uint8_t>(sqlite3_column_int(stmt, COL_BASIC));
-        info.genericType  = static_cast<std::uint8_t>(sqlite3_column_int(stmt, COL_GENERIC));
-        info.specificType = static_cast<std::uint8_t>(sqlite3_column_int(stmt, COL_SPECIFIC));
+        info.nodeId       = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_NODE_ID));
+        info.basicType    = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_BASIC));
+        info.genericType  = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_GENERIC));
+        info.specificType = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_SPECIFIC));
 
-        const auto* blob   = static_cast<const std::uint8_t*>(sqlite3_column_blob(stmt, COL_CCS));
-        const int blobSize = sqlite3_column_bytes(stmt, COL_CCS);
+        const auto* blob   = static_cast<const std::uint8_t*>(sqlite3_column_blob(stmt.raw(), COL_CCS));
+        const int blobSize = sqlite3_column_bytes(stmt.raw(), COL_CCS);
         if (blob != nullptr && blobSize > 0)
         {
             info.commandClasses.assign(blob, blob + blobSize);
         }
         result.emplace(info.nodeId, info);
     }
-    sqlite3_finalize(stmt);
     return result;
 }
 
@@ -241,14 +319,14 @@ auto initIfNeeded() -> void
             std::filesystem::create_directories(path.parent_path(), errorCode);
             if (errorCode)
             {
-                std::cerr << "[NodeRegistry] cannot create state dir " << path.parent_path() << ": "
-                          << errorCode.message() << " — falling back to in-memory only\n";
+                Logger::error("[NodeRegistry] cannot create state dir " + path.parent_path().string() + ": " +
+                              errorCode.message() + " — falling back to in-memory only");
                 return;
             }
             if (sqlite3_open(path.c_str(), &state().db) != SQLITE_OK)
             {
-                std::cerr << "[NodeRegistry] cannot open " << path << ": " << sqlite3_errmsg(state().db)
-                          << " — falling back to in-memory only\n";
+                Logger::error("[NodeRegistry] cannot open " + path.string() + ": " + sqlite3_errmsg(state().db) +
+                              " — falling back to in-memory only");
                 sqlite3_close(state().db);
                 state().db = nullptr;
                 return;
@@ -259,7 +337,7 @@ auto initIfNeeded() -> void
                 state().db = nullptr;
                 return;
             }
-            std::cout << "[NodeRegistry] db ready at " << path << '\n';
+            Logger::info("[NodeRegistry] db ready at " + path.string());
         });
 }
 
@@ -269,24 +347,18 @@ auto persistAdd(const std::string& homeId, const NodeRegistry::NodeInfo& info) -
     {
         return;
     }
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(state().db, UPSERT_SQL, -1, &stmt, nullptr) != SQLITE_OK)
+    Stmt stmt(state().db, UPSERT_SQL, "UPSERT");
+    if (!stmt.valid())
     {
-        std::cerr << "[NodeRegistry] prepare UPSERT failed: " << sqlite3_errmsg(state().db) << '\n';
         return;
     }
-    sqlite3_bind_text(stmt, BIND_HOME, homeId.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int(stmt, BIND_NODE_ID, info.nodeId);
-    sqlite3_bind_int(stmt, BIND_BASIC, info.basicType);
-    sqlite3_bind_int(stmt, BIND_GENERIC, info.genericType);
-    sqlite3_bind_int(stmt, BIND_SPECIFIC, info.specificType);
-    sqlite3_bind_blob(
-        stmt, BIND_CCS, info.commandClasses.data(), static_cast<int>(info.commandClasses.size()), SQLITE_TRANSIENT);
-    if (sqlite3_step(stmt) != SQLITE_DONE)
-    {
-        std::cerr << "[NodeRegistry] UPSERT failed: " << sqlite3_errmsg(state().db) << '\n';
-    }
-    sqlite3_finalize(stmt);
+    stmt.bindText(BIND_HOME, homeId)
+        .bindInt(BIND_NODE_ID, info.nodeId)
+        .bindInt(BIND_BASIC, info.basicType)
+        .bindInt(BIND_GENERIC, info.genericType)
+        .bindInt(BIND_SPECIFIC, info.specificType)
+        .bindBlob(BIND_CCS, info.commandClasses.data(), static_cast<int>(info.commandClasses.size()))
+        .execDone();
 }
 
 auto persistRemove(const std::string& homeId, std::uint8_t nodeId) -> void
@@ -295,19 +367,12 @@ auto persistRemove(const std::string& homeId, std::uint8_t nodeId) -> void
     {
         return;
     }
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(state().db, DELETE_SQL, -1, &stmt, nullptr) != SQLITE_OK)
+    Stmt stmt(state().db, DELETE_SQL, "DELETE");
+    if (!stmt.valid())
     {
-        std::cerr << "[NodeRegistry] prepare DELETE failed: " << sqlite3_errmsg(state().db) << '\n';
         return;
     }
-    sqlite3_bind_text(stmt, 1, homeId.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int(stmt, 2, nodeId);
-    if (sqlite3_step(stmt) != SQLITE_DONE)
-    {
-        std::cerr << "[NodeRegistry] DELETE failed: " << sqlite3_errmsg(state().db) << '\n';
-    }
-    sqlite3_finalize(stmt);
+    stmt.bindText(1, homeId).bindInt(2, nodeId).execDone();
 }
 
 /// Build a NodeListChanged from the in-memory map. Caller holds the
@@ -325,6 +390,34 @@ auto snapshotEvent() -> MessageBus::NodeListChanged
                                .commandClasses = info.commandClasses});
     }
     return event;
+}
+
+/// Common scaffold for add/remove/seed/updateDeviceClass: init, lock,
+/// require a bound home, run the mutator, snapshot, and publish the
+/// resulting NodeListChanged outside the lock.
+///
+/// The mutator returns `true` to request publication (state actually
+/// changed) or `false` to skip — used by `seed`, which is a no-op when
+/// the entry already exists, and by `updateDeviceClass`, which is a
+/// no-op when the entry is missing.
+template <typename Mutator> auto withBoundHome(Mutator mutator) -> void
+{
+    initIfNeeded();
+    std::optional<MessageBus::NodeListChanged> event;
+    {
+        std::scoped_lock const lock(state().mutex);
+        const auto& home = state().currentHomeId;
+        if (!home.has_value())
+        {
+            return;
+        }
+        if (!mutator(*home))
+        {
+            return;
+        }
+        event = snapshotEvent();
+    }
+    MessageBus::publish(*event);
 }
 }  // namespace
 
@@ -345,8 +438,8 @@ auto NodeRegistry::setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -> vo
         {
             state().nodes = loadNodesForHome(state().db, homeIdStr);
         }
-        std::cout << "[NodeRegistry] bound to home " << homeIdStr << " (" << state().nodes.size()
-                  << " node(s) loaded)\n";
+        Logger::info("[NodeRegistry] bound to home " + homeIdStr + " (" + std::to_string(state().nodes.size()) +
+                     " node(s) loaded)");
         event = snapshotEvent();
     }
     MessageBus::publish(*event);
@@ -354,62 +447,41 @@ auto NodeRegistry::setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -> vo
 
 auto NodeRegistry::add(const NodeInfo& info) -> void
 {
-    initIfNeeded();
-    std::optional<MessageBus::NodeListChanged> event;
-    {
-        std::scoped_lock const lock(state().mutex);
-        const auto home = state().currentHomeId;
-        if (!home.has_value())
+    withBoundHome(
+        [&](const std::string& home) -> bool
         {
-            return;
-        }
-        state().nodes[info.nodeId] = info;
-        persistAdd(*home, info);
-        event = snapshotEvent();
-    }
-    MessageBus::publish(*event);
+            state().nodes[info.nodeId] = info;
+            persistAdd(home, info);
+            return true;
+        });
 }
 
 auto NodeRegistry::remove(std::uint8_t nodeId) -> void
 {
-    initIfNeeded();
-    std::optional<MessageBus::NodeListChanged> event;
-    {
-        std::scoped_lock const lock(state().mutex);
-        const auto home = state().currentHomeId;
-        if (!home.has_value())
+    withBoundHome(
+        [&](const std::string& home) -> bool
         {
-            return;
-        }
-        state().nodes.erase(nodeId);
-        persistRemove(*home, nodeId);
-        event = snapshotEvent();
-    }
-    MessageBus::publish(*event);
+            state().nodes.erase(nodeId);
+            persistRemove(home, nodeId);
+            return true;
+        });
 }
 
 auto NodeRegistry::seed(std::uint8_t nodeId) -> void
 {
-    initIfNeeded();
-    std::optional<MessageBus::NodeListChanged> event;
-    {
-        std::scoped_lock const lock(state().mutex);
-        const auto home = state().currentHomeId;
-        if (!home.has_value())
+    withBoundHome(
+        [&](const std::string& home) -> bool
         {
-            return;
-        }
-        if (state().nodes.find(nodeId) != state().nodes.end())
-        {
-            return;
-        }
-        NodeInfo info;
-        info.nodeId           = nodeId;
-        state().nodes[nodeId] = info;
-        persistAdd(*home, info);
-        event = snapshotEvent();
-    }
-    MessageBus::publish(*event);
+            if (state().nodes.find(nodeId) != state().nodes.end())
+            {
+                return false;
+            }
+            NodeInfo info;
+            info.nodeId           = nodeId;
+            state().nodes[nodeId] = info;
+            persistAdd(home, info);
+            return true;
+        });
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire shape fixed by FUNC_ID_GET_NODE_PROTOCOL_INFO
@@ -418,33 +490,26 @@ auto NodeRegistry::updateDeviceClass(std::uint8_t nodeId,
                                      std::uint8_t genericType,
                                      std::uint8_t specificType) -> void
 {
-    initIfNeeded();
-    std::optional<MessageBus::NodeListChanged> event;
-    {
-        std::scoped_lock const lock(state().mutex);
-        const auto home = state().currentHomeId;
-        if (!home.has_value())
+    withBoundHome(
+        [&](const std::string& home) -> bool
         {
-            return;
-        }
-        const auto iter = state().nodes.find(nodeId);
-        if (iter == state().nodes.end())
-        {
-            return;
-        }
-        // Persistence intentionally goes through `persistAdd` rather
-        // than a partial UPDATE — the schema is keyed by
-        // (home_id, node_id) and `persistAdd` is an UPSERT, so a
-        // single call covers both "row exists" (overwrite the three
-        // fields, preserve commandClasses) and the unreachable-but-
-        // safe "row missing" case.
-        iter->second.basicType    = basicType;
-        iter->second.genericType  = genericType;
-        iter->second.specificType = specificType;
-        persistAdd(*home, iter->second);
-        event = snapshotEvent();
-    }
-    MessageBus::publish(*event);
+            const auto iter = state().nodes.find(nodeId);
+            if (iter == state().nodes.end())
+            {
+                return false;
+            }
+            // Persistence intentionally goes through `persistAdd` rather
+            // than a partial UPDATE — the schema is keyed by
+            // (home_id, node_id) and `persistAdd` is an UPSERT, so a
+            // single call covers both "row exists" (overwrite the three
+            // fields, preserve commandClasses) and the unreachable-but-
+            // safe "row missing" case.
+            iter->second.basicType    = basicType;
+            iter->second.genericType  = genericType;
+            iter->second.specificType = specificType;
+            persistAdd(home, iter->second);
+            return true;
+        });
 }
 
 auto NodeRegistry::snapshot() -> std::vector<NodeInfo>

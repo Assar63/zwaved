@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <iostream>
+#include <string>
 
 #include <signal.h>  // NOLINT(modernize-deprecated-headers): <csignal> lacks POSIX sigaction/sigemptyset
 
@@ -49,35 +50,25 @@ auto handleSignalINT(const int signum) -> void
     stopApplication();
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): signum and name carry distinct meaning at every call site
+auto registerHandler(int signum, void (*handler)(int), const char* name) -> void
+{
+    struct sigaction action = {};
+    action.sa_handler       = handler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+    sigaction(signum, &action, nullptr);
+    Logger::info(std::string("[SignalHandler] Registered ") + name + " handler");
+}
+
 // Constructor (priority 102) runs *after* the Logger constructor
 // (priority 101) per src/zwaved.h, so the queue and consumer thread
 // are guaranteed up before the first Logger::info call below.
 __attribute__((constructor(CONFIG_ZWAVE_STARTUP_PRIO))) auto constructor() -> void
 {
-    // Register SIGHUP handler
-    struct sigaction actionHup = {};
-    actionHup.sa_handler       = handleSignalHUP;
-    sigemptyset(&actionHup.sa_mask);
-    actionHup.sa_flags = 0;
-    sigaction(SIGHUP, &actionHup, nullptr);
-    Logger::info("[SignalHandler] Registered SIGHUP handler");
-
-    // Register SIGTERM handler
-    struct sigaction actionTerm = {};
-    actionTerm.sa_handler       = handleSignalTERM;
-    sigemptyset(&actionTerm.sa_mask);
-    actionTerm.sa_flags = 0;
-    sigaction(SIGTERM, &actionTerm, nullptr);
-    Logger::info("[SignalHandler] Registered SIGTERM handler");
-
-    // Register SIGINT handler (Ctrl+C)
-    struct sigaction actionInt = {};
-    actionInt.sa_handler       = handleSignalINT;
-    sigemptyset(&actionInt.sa_mask);
-    actionInt.sa_flags = 0;
-    sigaction(SIGINT, &actionInt, nullptr);
-    Logger::info("[SignalHandler] Registered SIGINT handler");
-
+    registerHandler(SIGHUP, handleSignalHUP, "SIGHUP");
+    registerHandler(SIGTERM, handleSignalTERM, "SIGTERM");
+    registerHandler(SIGINT, handleSignalINT, "SIGINT");  // Ctrl+C
     runningState() = true;
 }
 }  // namespace

@@ -105,7 +105,7 @@ Implementation order (each shippable independently):
 - [ ] [ci: durable pinning policy for third-party dependencies](https://github.com/Assar63/zwaved/issues/61)
 - [ ] [deps: documented upgrade path for pinned dependencies](https://github.com/Assar63/zwaved/issues/62)
 - [ ] [ci: scheduled deps-check workflow surfaces drift from upstream](https://github.com/Assar63/zwaved/issues/63)
-- [ ] [ci: bump GitHub Actions to versions supporting Node 24](https://github.com/Assar63/zwaved/issues/64) — **deadline 2026-06-02** (forced-Node-24); removal 2026-09-16
+- [x] **ci: GitHub Actions on Node-24-supporting majors** — bumped before the 2026-06-02 forced-Node-24 deadline. `actions/checkout` v4→v6, `docker/setup-buildx-action` v3→v4, `docker/build-push-action` v6→v7, `docker/login-action` v3→v4, `docker/metadata-action` v5→v6. None of our inputs changed between majors. Verified via CI run.
 
 ### Quality & docs
 

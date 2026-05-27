@@ -45,6 +45,71 @@ struct LogEntry
     std::string message;
 };
 
+/// Move-only RAII wrapper around a POSIX file descriptor. Closes on
+/// destruction; `release()` hands ownership back to the caller; `reset()`
+/// closes any current fd and optionally adopts a new one.
+class FdHandle
+{
+  public:
+    FdHandle() = default;
+    // NOLINTNEXTLINE(readability-identifier-length): `fd` is the conventional name for a file descriptor
+    explicit FdHandle(int fd)
+        : fd_(fd)
+    {
+    }
+
+    ~FdHandle()
+    {
+        if (fd_ >= 0)
+        {
+            ::close(fd_);
+        }
+    }
+
+    FdHandle(const FdHandle&)                    = delete;
+    auto operator=(const FdHandle&) -> FdHandle& = delete;
+    FdHandle(FdHandle&& other) noexcept
+        : fd_(std::exchange(other.fd_, -1))
+    {
+    }
+    auto operator=(FdHandle&& other) noexcept -> FdHandle&
+    {
+        if (this != &other)
+        {
+            if (fd_ >= 0)
+            {
+                ::close(fd_);
+            }
+            fd_ = std::exchange(other.fd_, -1);
+        }
+        return *this;
+    }
+
+    [[nodiscard]] auto get() const noexcept -> int
+    {
+        return fd_;
+    }
+    [[nodiscard]] explicit operator bool() const noexcept
+    {
+        return fd_ >= 0;
+    }
+    auto reset() noexcept -> void
+    {
+        if (fd_ >= 0)
+        {
+            ::close(fd_);
+            fd_ = -1;
+        }
+    }
+    auto release() noexcept -> int
+    {
+        return std::exchange(fd_, -1);
+    }
+
+  private:
+    int fd_ = -1;
+};
+
 /// Per-stream capture state for stdout / stderr. The kernel duplicates
 /// the writer side of a pipe over fd 1 / fd 2, so any printf or
 /// std::cout in the process now writes into the pipe; a dedicated
@@ -52,9 +117,8 @@ struct LogEntry
 struct StreamCapture
 {
     std::thread thread;
-    int readFd          = -1;
-    int writeFd         = -1;
-    int targetFd        = -1;  // STDOUT_FILENO or STDERR_FILENO
+    FdHandle readFd;
+    FdHandle targetFd;  // STDOUT_FILENO or STDERR_FILENO, owned so closing it wakes the reader with EOF
     Logger::Level level = Logger::Level::Info;
     std::string buffer;  // partial-line accumulator, owned by the reader thread
 };
@@ -74,7 +138,7 @@ struct LoggerState
     std::mutex mutex;
     std::condition_variable cv;
     std::deque<LogEntry> queue;
-    MessageBus::SubscriptionId loggerConfigSub{0};
+    MessageBus::SubscriptionGuard loggerConfigSub;
 
 #ifdef ZWAVED_LOGGER_SYSLOG
     std::once_flag claimFlag;
@@ -89,11 +153,6 @@ struct LoggerState
     // joined their workers, so no producer is still calling Logger::log.
     ~LoggerState()
     {
-        if (loggerConfigSub != 0)
-        {
-            MessageBus::unsubscribe(loggerConfigSub);
-            loggerConfigSub = 0;
-        }
 #ifdef ZWAVED_LOGGER_SYSLOG
         // Drain the captures *before* the consumer thread, so any
         // trailing partial line each reader flushes still lands in the
@@ -222,7 +281,7 @@ auto captureReaderLoop(StreamCapture& capture, const char* threadName) -> void
     std::array<char, CAPTURE_CHUNK_BYTES> chunk{};
     while (true)
     {
-        const ssize_t got = ::read(capture.readFd, chunk.data(), chunk.size());
+        const ssize_t got = ::read(capture.readFd.get(), chunk.data(), chunk.size());
         if (got > 0)
         {
             capture.buffer.append(chunk.data(), static_cast<std::size_t>(got));
@@ -266,42 +325,33 @@ auto stealStream(StreamCapture& capture, int targetFd, Logger::Level level, cons
         std::cerr << "[Logger] pipe() for fd " << targetFd << " failed\n";
         return;
     }
-    if (::dup2(pipeFds.at(1), targetFd) < 0)
+    FdHandle readEnd(pipeFds.at(0));
+    FdHandle writeEnd(pipeFds.at(1));
+
+    if (::dup2(writeEnd.get(), targetFd) < 0)
     {
         std::cerr << "[Logger] dup2() for fd " << targetFd << " failed\n";
-        ::close(pipeFds.at(0));
-        ::close(pipeFds.at(1));
-        return;
+        return;  // both ends cleaned up by FdHandle dtors
     }
     // The original write end is no longer needed — fd `targetFd` is
-    // now a duplicate. Closing it here means the only remaining
-    // reference is targetFd itself; closing targetFd in the destructor
-    // therefore reaches the reader as EOF.
-    ::close(pipeFds.at(1));
-    capture.readFd   = pipeFds.at(0);
-    capture.writeFd  = -1;
-    capture.targetFd = targetFd;
+    // now a duplicate. Letting writeEnd's destructor close it leaves
+    // only targetFd as the surviving reference; closing targetFd in
+    // joinCapture therefore reaches the reader as EOF.
+    capture.readFd   = std::move(readEnd);
+    capture.targetFd = FdHandle(targetFd);
     capture.level    = level;
     capture.thread   = std::thread([&capture, threadName] { captureReaderLoop(capture, threadName); });
 }
 
 auto joinCapture(StreamCapture& capture) -> void
 {
-    if (capture.targetFd >= 0)
-    {
-        // Close the dup2'd writer side. The reader sees EOF and exits.
-        ::close(capture.targetFd);
-        capture.targetFd = -1;
-    }
+    // Close the dup2'd writer side. The reader sees EOF and exits.
+    capture.targetFd.reset();
     if (capture.thread.joinable())
     {
         capture.thread.join();
     }
-    if (capture.readFd >= 0)
-    {
-        ::close(capture.readFd);
-        capture.readFd = -1;
-    }
+    capture.readFd.reset();
 }
 #endif  // ZWAVED_LOGGER_SYSLOG
 
@@ -424,9 +474,9 @@ __attribute__((constructor(CONFIG_LOGGER_PRIO))) auto startLogger() -> void
     // priority 102, *after* this constructor returns, so the subscriber
     // is on the bus before the publish — the handler fires when Config
     // calls publish() and updates the producer-side level gate.
-    state().loggerConfigSub = MessageBus::subscribe<MessageBus::LoggerConfig>(
+    state().loggerConfigSub = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::LoggerConfig>(
         [](const MessageBus::LoggerConfig& cfg) -> void
-        { Logger::setMinLevel(static_cast<Logger::Level>(cfg.minLevel)); });
+        { Logger::setMinLevel(static_cast<Logger::Level>(cfg.minLevel)); }));
 
 #ifdef ZWAVED_LOGGER_SYSLOG
     // With the syslog sink there is no looping risk and capturing

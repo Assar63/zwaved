@@ -545,11 +545,23 @@ auto introspectDongle(SerialPort& port) -> IntrospectionResult
     if (!sendAndAwait(HostApi::CMD_GET_VERSION, version))
     {
         Logger::error("[ProtocolThread] GET_VERSION introspection failed");
+        MessageBus::publish(MessageBus::DaemonError{
+            .severity = MessageBus::DaemonError::SEVERITY_ERROR,
+            .source   = "zwave-protocol",
+            .code     = MessageBus::DaemonError::CODE_DONGLE_INTROSPECTION_FAILED,
+            .message  = "GET_VERSION introspection failed",
+        });
         return result;
     }
     if (!sendAndAwait(HostApi::CMD_MEMORY_GET_ID, identity))
     {
         Logger::error("[ProtocolThread] MEMORY_GET_ID introspection failed");
+        MessageBus::publish(MessageBus::DaemonError{
+            .severity = MessageBus::DaemonError::SEVERITY_ERROR,
+            .source   = "zwave-protocol",
+            .code     = MessageBus::DaemonError::CODE_DONGLE_INTROSPECTION_FAILED,
+            .message  = "MEMORY_GET_ID introspection failed",
+        });
         return result;
     }
     if (!sendAndAwait(HostApi::CMD_SERIAL_API_GET_INIT_DATA, initData))
@@ -1034,12 +1046,22 @@ auto zwaveCommunicationThread() -> void
         if (!port.open(*path))
         {
             Logger::error("[ProtocolThread] failed to open " + *path + "; backing off");
+            MessageBus::publish(MessageBus::DaemonError{
+                .severity = MessageBus::DaemonError::SEVERITY_ERROR,
+                .source   = "zwave-protocol",
+                .code     = MessageBus::DaemonError::CODE_DONGLE_OPEN_FAILED,
+                .message  = "failed to open serial port " + *path,
+            });
             std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;
         }
 
         if (auto introspection = introspectDongle(port); introspection.dongleInfo.has_value())
         {
+            // Clear any stale dongle-related error from a previous
+            // disconnect cycle — late subscribers should see "no
+            // current problem" now that the dongle is talking.
+            MessageBus::publish(MessageBus::DaemonError{});
             const auto& info = *introspection.dongleInfo;
             Logger::info("[ProtocolThread] dongle " + info.libraryVersion + " (lib type " +
                          std::to_string(static_cast<int>(info.libraryType)) + ", controller node " +

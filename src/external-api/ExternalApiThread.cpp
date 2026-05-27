@@ -1,4 +1,5 @@
 #include "../logger/Logger.hpp"
+#include "../message-bus/MessageBus.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 #include "IExternalApi.hpp"
 
@@ -67,6 +68,12 @@ auto externalApiThread() -> void
     if (!state().backend)
     {
         Logger::warn("[ExternalApi] no backend compiled; thread idling");
+        MessageBus::publish(MessageBus::DaemonError{
+            .severity = MessageBus::DaemonError::SEVERITY_WARN,
+            .source   = "external-api",
+            .code     = MessageBus::DaemonError::CODE_EXTERNAL_API_NO_BACKEND,
+            .message  = "no external-API backend compiled; thread idling",
+        });
         while (state().running)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(IDLE_SLEEP_MS));

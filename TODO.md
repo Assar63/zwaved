@@ -75,7 +75,7 @@ companion `zwave-terminal` client, and packaging.
 ### Observability
 
 - [x] **Async logger** — `src/logger/` runs an MPSC queue + dedicated `ZWaveLog` consumer thread (constructor priority 101). Producers never block on I/O. Sink picked at build time via `ZWAVED_LOGGER_SINK`: `stdout` (default — captured by journald under systemd) or `syslog` (for OpenWRT / non-systemd hosts). Migration of existing `std::cout` / `std::cerr` call sites is incremental.
-- [ ] [Structured error feed](https://github.com/Assar63/zwaved/issues/32)
+- [x] **Structured error feed** — retained `MessageBus::DaemonError` event (severity / source / code / message) re-emitted as a typed `DaemonError` D-Bus signal. Lets external clients react to "dongle disconnected" / "DBus bind failed" / "no external API backend" by code rather than grep-mining journald. Publish sites today: serial-port open failure, dongle introspection timeouts (GET_VERSION / MEMORY_GET_ID), udev init failures, D-Bus bind failure, missing external-API backend, config-file open failure. Recovery is modelled by publishing a default-constructed `DaemonError{}` — currently done after successful dongle introspection. Severity values align with `Logger::Level` plus a `SEVERITY_CRITICAL` step; codes are byte-grouped by source-module high-nibble.
 - [ ] [systemd Type=notify integration](https://github.com/Assar63/zwaved/issues/33)
 
 ### Hardware

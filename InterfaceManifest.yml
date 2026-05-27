@@ -150,6 +150,50 @@ events:
       - { name: commandId, type: u8,   default: 0, doc: "HostApi::CMD_ADD_NODE_TO_NETWORK / CMD_REMOVE_NODE_FROM_NETWORK / 0" }
       - { name: sessionId, type: u8,   default: 0 }
 
+  - name: DaemonError
+    category: state
+    direction: { publishers: [zwave-protocol, zwave-dongle, external-api, config], subscribers: [external-api] }
+    doc: |
+      Structured error feed — the operator-visible counterpart to
+      Logger::error / journald lines. Retained so a D-Bus client
+      connecting after a failure still sees the most recent one
+      (mirrors how GetNetworkStatus exposes the latest cached
+      DongleStatus / DongleInfo). An empty `message` on the default-
+      constructed value means "no error yet"; publishers may also
+      publish a default-constructed DaemonError as an explicit
+      "recovered, no current problem" signal.
+
+      `severity` aligns with Logger::Level (1..3) plus a Critical
+      step for failures that imply the daemon can't make progress at
+      all. `source` is the publishing module's name as a free-form
+      string ("zwave-protocol", "zwave-dongle", etc) so adding a new
+      publisher doesn't require an enum extension. `code` is one of
+      the constants below — extend the enum when a new operator-
+      meaningful failure class shows up.
+    constants:
+      - { name: SEVERITY_INFO,     value: 1 }
+      - { name: SEVERITY_WARN,     value: 2 }
+      - { name: SEVERITY_ERROR,    value: 3 }
+      - { name: SEVERITY_CRITICAL, value: 4, doc: "daemon can't make progress in its current mode" }
+
+      # Code high-nibble groups by source module so a quick visual
+      # scan tells you where the failure came from; low nibble is a
+      # within-module ordinal. Codegen emits constants as `std::uint8_t`
+      # today, so codes must fit in a byte; if/when the manifest gets a
+      # constant-type hint, this layout can expand to u16.
+      - { name: CODE_NONE,                        value: 0x00, doc: "default — no error to report" }
+      - { name: CODE_DONGLE_OPEN_FAILED,          value: 0x10, doc: "serial port open() / configure failed" }
+      - { name: CODE_DONGLE_INTROSPECTION_FAILED, value: 0x11, doc: "GET_VERSION or MEMORY_GET_ID didn't answer" }
+      - { name: CODE_UDEV_INIT_FAILED,            value: 0x20, doc: "libudev context or monitor creation failed" }
+      - { name: CODE_DBUS_BIND_FAILED,            value: 0x30, doc: "couldn't acquire the system-bus name" }
+      - { name: CODE_EXTERNAL_API_NO_BACKEND,     value: 0x31, doc: "no external-API backend compiled in" }
+      - { name: CODE_CONFIG_LOAD_FAILED,          value: 0x40, doc: "config file present but unreadable / malformed" }
+    fields:
+      - { name: severity, type: u8,     default: SEVERITY_INFO }
+      - { name: source,   type: string, doc: "publishing module — e.g. 'zwave-protocol'" }
+      - { name: code,     type: u8,     default: CODE_NONE }
+      - { name: message,  type: string, doc: "human-readable; empty for default 'no error' value" }
+
   # ---- 2b. Configuration (retained, set once at startup) -----------
   # Published once by Config (priority 102) after parsing zwaved.conf;
   # consumers subscribe from their own constructor and pick up the
@@ -952,6 +996,14 @@ dbus:
         - { name: specificDeviceType, dbus: y, doc: "populated only for status=0x84" }
         - { name: commandClasses,     dbus: ay, doc: "supported list, populated only for status=0x84" }
       triggered_by: { event: NodeInfoUpdate }
+
+    - name: DaemonError
+      params:
+        - { name: severity, dbus: y, doc: "1=Info, 2=Warn, 3=Error, 4=Critical" }
+        - { name: source,   dbus: s, doc: "publishing module name" }
+        - { name: code,     dbus: y, doc: "DaemonError::CODE_* enum" }
+        - { name: message,  dbus: s, doc: "human-readable; empty means 'no current error'" }
+      triggered_by: { event: DaemonError }
 
     # -- Typed CC-report signals: trigger off the cc-translator's
     # republished typed events. The translator owns the codec call

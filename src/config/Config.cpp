@@ -292,6 +292,12 @@ auto Config::load() -> void
     else if (const auto parsed = parseFile(path); !parsed.has_value())
     {
         Logger::error("Config: failed to open " + path.string() + " — publishing defaults");
+        MessageBus::publish(MessageBus::DaemonError{
+            .severity = MessageBus::DaemonError::SEVERITY_WARN,
+            .source   = "config",
+            .code     = MessageBus::DaemonError::CODE_CONFIG_LOAD_FAILED,
+            .message  = "failed to open config file " + path.string() + "; using defaults",
+        });
     }
     else
     {

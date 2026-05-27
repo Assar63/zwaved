@@ -76,6 +76,12 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     catch (const sdbus::Error& err)
     {
         Logger::error(std::string("[DBusBackend] failed to acquire system bus name ") + BUS_NAME + ": " + err.what());
+        MessageBus::publish(MessageBus::DaemonError{
+            .severity = MessageBus::DaemonError::SEVERITY_CRITICAL,
+            .source   = "external-api",
+            .code     = MessageBus::DaemonError::CODE_DBUS_BIND_FAILED,
+            .message  = std::string("failed to acquire system bus name ") + BUS_NAME + ": " + err.what(),
+        });
         return;
     }
 

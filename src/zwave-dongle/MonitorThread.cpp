@@ -235,6 +235,12 @@ auto setupMonitor() -> MonitorContext
     if (!udev)
     {
         Logger::error("Failed to create udev context");
+        MessageBus::publish(MessageBus::DaemonError{
+            .severity = MessageBus::DaemonError::SEVERITY_CRITICAL,
+            .source   = "zwave-dongle",
+            .code     = MessageBus::DaemonError::CODE_UDEV_INIT_FAILED,
+            .message  = "udev_new() returned NULL",
+        });
         return {};
     }
 
@@ -242,6 +248,12 @@ auto setupMonitor() -> MonitorContext
     if (!mon)
     {
         Logger::error("Failed to create udev monitor");
+        MessageBus::publish(MessageBus::DaemonError{
+            .severity = MessageBus::DaemonError::SEVERITY_CRITICAL,
+            .source   = "zwave-dongle",
+            .code     = MessageBus::DaemonError::CODE_UDEV_INIT_FAILED,
+            .message  = "udev_monitor_new_from_netlink() returned NULL",
+        });
         return {};
     }
 

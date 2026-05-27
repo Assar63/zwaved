@@ -38,7 +38,7 @@ companion `zwave-terminal` client, and packaging.
 - [x] **Battery (CC `0x80`)** — `GetBattery` over D-Bus drives Battery GET; the codec decodes Reports and surfaces both the raw `level` byte (0..100 % or `0xFF` low-battery sentinel) and a derived `lowBattery` bool. Reports come back through the typed `BatteryReport` D-Bus signal (and the raw `ApplicationCommand` signal); the v2 charging / health bitfields are ignored today.
 - [ ] [Version (CC 0x86)](https://github.com/Assar63/zwaved/issues/9)
 - [x] **Manufacturer Specific (CC `0x72`)** — `GetManufacturerSpecific` over D-Bus drives Manufacturer Specific GET; the codec decodes the v1 Report (CC + cmd + three big-endian u16s) and surfaces `manufacturerId` / `productTypeId` / `productId`. Reports come back through the typed `ManufacturerSpecificReport` D-Bus signal (and the raw `ApplicationCommand` signal); v2 Device Specific Get/Report is a follow-up.
-- [ ] [Z-Wave Plus Info (CC 0x5E)](https://github.com/Assar63/zwaved/issues/11)
+- [x] **Z-Wave Plus Info (CC `0x5E`)** — `GetZWavePlusInfo` over D-Bus drives Z-Wave Plus Info GET (note: GET=0x01, REPORT=0x02 — opposite of the more common 0x02/0x03 layout). The codec decodes the 9-byte v2 Report and surfaces `zwavePlusVersion` + `roleType` (0x00..0x07: central/sub/portable controller, always-on/sleeping slave, …) + `nodeType` (0x00 node, 0x02 IP gateway) + two big-endian u16 icon types (installer + user). Reports come back through the typed `ZWavePlusInfoReport` D-Bus signal.
 - [ ] [Indicator (CC 0x87)](https://github.com/Assar63/zwaved/issues/12)
 
 **More involved — variable-shape payloads, encapsulation, or multi-frame state machines:**

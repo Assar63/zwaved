@@ -364,6 +364,35 @@ events:
       - { name: level,        type: u8,   default: 0 }
       - { name: lowBattery,   type: bool, default: false }
 
+  - name: ZWavePlusInfoReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Z-Wave Plus Info (CC 0x5E) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose
+      ccData parses as a Z-Wave Plus Info Report. Identifies how a
+      Z-Wave Plus node positions itself in the network (role / node
+      type) and which device-database icons it advertises.
+      Role-type values (per the Z-Wave Plus role-type spec):
+        0x00 CENTRAL_STATIC_CONTROLLER
+        0x01 SUB_STATIC_CONTROLLER
+        0x02 PORTABLE_CONTROLLER
+        0x03 PORTABLE_REPORTING_CONTROLLER
+        0x04 PORTABLE_SLAVE
+        0x05 ALWAYS_ON_SLAVE
+        0x06 SLEEPING_REPORTING_SLAVE
+        0x07 SLEEPING_LISTENING_SLAVE
+      Node-type values:
+        0x00 ZWAVEPLUS_NODE
+        0x02 ZWAVEPLUS_IP_GATEWAY
+    fields:
+      - { name: sourceNodeId,      type: u8,  default: 0 }
+      - { name: zwavePlusVersion,  type: u8,  default: 0 }
+      - { name: roleType,          type: u8,  default: 0 }
+      - { name: nodeType,          type: u8,  default: 0 }
+      - { name: installerIconType, type: u16, default: 0 }
+      - { name: userIconType,      type: u16, default: 0 }
+
   - name: ManufacturerSpecificReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -530,6 +559,14 @@ events:
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
     doc: Query a node's manufacturer / product identifiers.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetZWavePlusInfoCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's Z-Wave Plus role / node type and icon advertisements.
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
@@ -762,6 +799,13 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetManufacturerSpecificCommand
+
+    - name: GetZWavePlusInfo
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetZWavePlusInfoCommand
 
     - name: SetAssociation
       params:
@@ -1046,6 +1090,17 @@ dbus:
       triggered_by:
         event: ManufacturerSpecificReport
 
+    - name: ZWavePlusInfoReport
+      params:
+        - { name: sourceNodeId,      dbus: y }
+        - { name: zwavePlusVersion,  dbus: y, doc: "typically 0x02" }
+        - { name: roleType,          dbus: y, doc: "0x00..0x07; see event for enum" }
+        - { name: nodeType,          dbus: y, doc: "0x00 = node, 0x02 = IP gateway" }
+        - { name: installerIconType, dbus: q }
+        - { name: userIconType,      dbus: q }
+      triggered_by:
+        event: ZWavePlusInfoReport
+
 # =====================================================================
 # 4. Protocol modules
 # =====================================================================
@@ -1162,6 +1217,32 @@ modules:
         decoded_struct:
           - { name: level,      type: u8,   doc: "raw wire byte: 0x00..0x64 = 0..100%, 0xFF = low" }
           - { name: lowBattery, type: bool, doc: "true iff level == LEVEL_LOW_WARNING" }
+
+  - name: ZWavePlusInfo
+    wire:
+      class_byte: 0x5E
+      prefix: ZWAVEPLUS_INFO
+    description: |
+      Z-Wave Plus identification. Get returns a Report carrying the
+      Z-Wave Plus protocol version, role/node type, and a pair of
+      device-database icon hints (installer + user). Unusually for a
+      Z-Wave CC, GET is byte 0x01 and REPORT is byte 0x02 (most CCs
+      use 0x02/0x03 or 0x04/0x05) — follow the spec, not the pattern.
+    commands:
+      - name: Get
+        wire:
+          byte: 0x01
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x02
+        decoded_struct:
+          - { name: zwavePlusVersion,  type: u8 }
+          - { name: roleType,          type: u8 }
+          - { name: nodeType,          type: u8 }
+          - { name: installerIconType, type: u16 }
+          - { name: userIconType,      type: u16 }
 
   - name: ManufacturerSpecific
     wire:
@@ -1321,3 +1402,17 @@ translations:
       manufacturerId: decoded.manufacturerId
       productTypeId:  decoded.productTypeId
       productId:      decoded.productId
+
+  - publishes: ZWavePlusInfoReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: ZWavePlusInfo.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:      event.sourceNodeId
+      zwavePlusVersion:  decoded.zwavePlusVersion
+      roleType:          decoded.roleType
+      nodeType:          decoded.nodeType
+      installerIconType: decoded.installerIconType
+      userIconType:      decoded.userIconType

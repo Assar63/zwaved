@@ -29,6 +29,20 @@ companion `zwave-terminal` client, and packaging.
 - [ ] [Controller backup/restore (FUNC_ID_NVM_BACKUP_RESTORE 0xF8)](https://github.com/Assar63/zwaved/issues/5)
 - [ ] [Per-node liveness](https://github.com/Assar63/zwaved/issues/6)
 
+### Inclusion & wake-up orchestration
+
+Coordinated plan for two flows: **what happens after a node is included** (lifeline → policy → wake-up interval) and **what happens when a sleeping node wakes up** (drain pending commands → tell it to sleep again, fast, to preserve battery). The work splits across two new CC codecs, a SQLite-backed queue + policy register, and a dedicated `src/orchestrator/` module that holds the state machines. Orchestrators talk to ProtocolThread via the message bus only — same loose-coupling rule the existing modules follow — which leaves room for a future SecurityOrchestrator (#26/#27) to hook into the inclusion flow without rewriting it.
+
+Implementation order (each shippable independently):
+
+1. [Wake Up CC `0x84`](https://github.com/Assar63/zwaved/issues/15) — smallest codec; lands the bus events the orchestrators depend on
+2. [Per-node pending-command queue (SQLite)](https://github.com/Assar63/zwaved/issues/65) — durable buffer for sleeping nodes
+3. [WakeUpOrchestrator](https://github.com/Assar63/zwaved/issues/68) — proves the `src/orchestrator/` module shape with the simpler flow first
+4. [Configuration CC `0x70`](https://github.com/Assar63/zwaved/issues/16) — adds `SetConfigurationCommand`
+5. [Device + per-node policy register (SQLite)](https://github.com/Assar63/zwaved/issues/66) — device default + per-node override merge
+6. [InclusionOrchestrator](https://github.com/Assar63/zwaved/issues/67) — moves auto-lifeline out of ProtocolThread; adds policy + wake-up interval steps
+7. [D-Bus surface for policy CRUD](https://github.com/Assar63/zwaved/issues/69) — Set/Get/Delete/List for device + per-node policies
+
 ### Command classes
 
 **Simple — single fixed-shape payload, mirrors the existing BinarySwitch / Association pattern:**

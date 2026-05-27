@@ -204,9 +204,75 @@ auto resolvePath() -> std::filesystem::path
     }
     return DEFAULT_PATH;
 }
+
+auto loadLoggerSection(const ParsedFile& file, MessageBus::LoggerConfig& logger) -> void
+{
+    const auto value = firstValue(file, "logger", "min_level");
+    if (!value.has_value())
+    {
+        return;
+    }
+    if (const auto level = parseLevel(*value); level.has_value())
+    {
+        logger.minLevel = *level;
+    }
+    else
+    {
+        Logger::warn("Config: unknown logger.min_level '" + *value + "', keeping default");
+    }
+}
+
+auto loadStorageSection(const ParsedFile& file, MessageBus::StorageConfig& storage) -> void
+{
+    if (const auto value = firstValue(file, "storage", "state_dir"); value.has_value())
+    {
+        storage.stateDir = *value;
+    }
+}
+
+auto loadDonglesSection(const ParsedFile& file, MessageBus::DonglesConfig& dongles) -> void
+{
+    const auto entries = allValues(file, "dongles", "accept");
+    if (entries.empty())
+    {
+        return;
+    }
+    std::vector<MessageBus::AcceptedDongleConfig> parsedList;
+    for (const auto& entry : entries)
+    {
+        if (auto accepted = parseAccept(entry); accepted.has_value())
+        {
+            parsedList.push_back(*accepted);
+        }
+        else
+        {
+            Logger::warn("Config: malformed dongles.accept '" + entry + "', skipped");
+        }
+    }
+    if (!parsedList.empty())
+    {
+        dongles.accept = std::move(parsedList);
+    }
+}
+
+auto loadBehaviorSection(const ParsedFile& file, MessageBus::BehaviorConfig& behavior) -> void
+{
+    const auto value = firstValue(file, "behavior", "auto_lifeline");
+    if (!value.has_value())
+    {
+        return;
+    }
+    if (const auto flag = parseBool(*value); flag.has_value())
+    {
+        behavior.autoLifeline = *flag;
+    }
+    else
+    {
+        Logger::warn("Config: unknown behavior.auto_lifeline '" + *value + "', keeping default");
+    }
+}
 }  // namespace
 
-// NOLINTBEGIN(readability-function-cognitive-complexity): single load() does the parse + four publishes
 auto Config::load() -> void
 {
     // Defaults reflect the daemon's pre-config baseline. These values
@@ -230,56 +296,10 @@ auto Config::load() -> void
     else
     {
         const auto& file = *parsed;
-
-        if (const auto value = firstValue(file, "logger", "min_level"); value.has_value())
-        {
-            if (const auto level = parseLevel(*value); level.has_value())
-            {
-                logger.minLevel = *level;
-            }
-            else
-            {
-                Logger::warn("Config: unknown logger.min_level '" + *value + "', keeping default");
-            }
-        }
-
-        if (const auto value = firstValue(file, "storage", "state_dir"); value.has_value())
-        {
-            storage.stateDir = *value;
-        }
-
-        if (const auto entries = allValues(file, "dongles", "accept"); !entries.empty())
-        {
-            std::vector<MessageBus::AcceptedDongleConfig> parsedList;
-            for (const auto& entry : entries)
-            {
-                if (auto accepted = parseAccept(entry); accepted.has_value())
-                {
-                    parsedList.push_back(*accepted);
-                }
-                else
-                {
-                    Logger::warn("Config: malformed dongles.accept '" + entry + "', skipped");
-                }
-            }
-            if (!parsedList.empty())
-            {
-                dongles.accept = std::move(parsedList);
-            }
-        }
-
-        if (const auto value = firstValue(file, "behavior", "auto_lifeline"); value.has_value())
-        {
-            if (const auto flag = parseBool(*value); flag.has_value())
-            {
-                behavior.autoLifeline = *flag;
-            }
-            else
-            {
-                Logger::warn("Config: unknown behavior.auto_lifeline '" + *value + "', keeping default");
-            }
-        }
-
+        loadLoggerSection(file, logger);
+        loadStorageSection(file, storage);
+        loadDonglesSection(file, dongles);
+        loadBehaviorSection(file, behavior);
         Logger::info("Config: loaded " + path.string());
     }
 
@@ -288,7 +308,6 @@ auto Config::load() -> void
     MessageBus::publish(dongles);
     MessageBus::publish(behavior);
 }
-// NOLINTEND(readability-function-cognitive-complexity)
 
 namespace
 {

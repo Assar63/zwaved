@@ -18,6 +18,7 @@ set_source_files_properties(
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Battery.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ManufacturerSpecific.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/NodeVersion.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ZWavePlusInfo.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
@@ -28,6 +29,7 @@ target_sources(zwaved PRIVATE
     BinarySwitch.cpp
     ManufacturerSpecific.cpp
     MultilevelSwitch.cpp
+    NodeVersion.cpp
     ZWavePlusInfo.cpp
     Association.cpp
     MultichannelAssociation.cpp
@@ -36,6 +38,7 @@ target_sources(zwaved PRIVATE
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Battery.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ManufacturerSpecific.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/NodeVersion.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ZWavePlusInfo.gen.cpp"
 )
 

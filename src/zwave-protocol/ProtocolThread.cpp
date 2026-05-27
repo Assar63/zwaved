@@ -14,6 +14,7 @@
 #include "application/ManufacturerSpecific.hpp"
 #include "application/MultichannelAssociation.hpp"
 #include "application/MultilevelSwitch.hpp"
+#include "application/NodeVersion.hpp"
 #include "application/ZWavePlusInfo.hpp"
 
 #include <array>
@@ -345,6 +346,11 @@ auto onGetManufacturerSpecific(const MessageBus::GetManufacturerSpecificCommand&
 auto onGetZWavePlusInfo(const MessageBus::GetZWavePlusInfoCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, ZWavePlusInfo::encodeGet());
+}
+
+auto onGetNodeVersion(const MessageBus::GetNodeVersionCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, NodeVersion::encodeGet());
 }
 
 auto onSetAssociation(const MessageBus::SetAssociationCommand& cmd) -> void
@@ -988,7 +994,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 23;
+constexpr std::size_t SUBSCRIPTION_COUNT = 24;
 
 auto subscribeBus() -> void
 {
@@ -1008,6 +1014,7 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetBatteryCommand>(onGetBattery);
     subscribe<MessageBus::GetManufacturerSpecificCommand>(onGetManufacturerSpecific);
     subscribe<MessageBus::GetZWavePlusInfoCommand>(onGetZWavePlusInfo);
+    subscribe<MessageBus::GetNodeVersionCommand>(onGetNodeVersion);
     subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
     subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
     subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);

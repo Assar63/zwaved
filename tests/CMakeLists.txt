@@ -25,6 +25,7 @@ set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/Basic.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/Battery.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ManufacturerSpecific.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/NodeVersion.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ZWavePlusInfo.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
@@ -134,6 +135,20 @@ target_include_directories(ZWavePlusInfo_test PRIVATE
 target_link_libraries(ZWavePlusInfo_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(ZWavePlusInfo_test)
 gtest_discover_tests(ZWavePlusInfo_test)
+
+# ---- NodeVersion ----------------------------------------------------
+add_executable(NodeVersion_test
+    NodeVersion_test.cpp
+    "${SRC_DIR}/application/NodeVersion.cpp"
+    "${GENERATED_APPLICATION_DIR}/NodeVersion.gen.cpp"
+)
+target_include_directories(NodeVersion_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(NodeVersion_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(NodeVersion_test)
+gtest_discover_tests(NodeVersion_test)
 
 # ---- Association ----------------------------------------------------
 add_executable(Association_test

@@ -364,6 +364,29 @@ events:
       - { name: level,        type: u8,   default: 0 }
       - { name: lowBattery,   type: bool, default: false }
 
+  - name: NodeVersionReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Version (CC 0x86) Report from a *node*. Republished by
+      the cc-translator from inbound ApplicationCommand frames whose
+      ccData parses as a Version Report. Carries the node's Z-Wave
+      library type, Z-Wave protocol version, and application version
+      — distinct from the daemon's own version (see GetVersion).
+      Naming: `Node` prefix distinguishes from the daemon's existing
+      `Version` namespace; the wire CC is plain "Version".
+      libraryType values mirror HostApi::LIBRARY_TYPE_* (1=Static
+      Controller, 2=Controller, 3=Enhanced Slave, 4=Slave, …).
+      v2 adds hardware version + per-firmware-target list; not
+      decoded today.
+    fields:
+      - { name: sourceNodeId,         type: u8, default: 0 }
+      - { name: libraryType,          type: u8, default: 0 }
+      - { name: protocolVersion,      type: u8, default: 0 }
+      - { name: protocolSubVersion,   type: u8, default: 0 }
+      - { name: applicationVersion,   type: u8, default: 0 }
+      - { name: applicationSubVersion, type: u8, default: 0 }
+
   - name: ZWavePlusInfoReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -567,6 +590,17 @@ events:
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
     doc: Query a node's Z-Wave Plus role / node type and icon advertisements.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetNodeVersionCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Query a node's Version CC (0x86) Report — node firmware versions.
+      Distinct from the daemon's GetVersion D-Bus method (which
+      returns the daemon's own semver / git-describe).
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
@@ -806,6 +840,13 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetZWavePlusInfoCommand
+
+    - name: GetNodeVersion
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetNodeVersionCommand
 
     - name: SetAssociation
       params:
@@ -1101,6 +1142,17 @@ dbus:
       triggered_by:
         event: ZWavePlusInfoReport
 
+    - name: NodeVersionReport
+      params:
+        - { name: sourceNodeId,          dbus: y }
+        - { name: libraryType,           dbus: y, doc: "HostApi::LIBRARY_TYPE_* (1=StaticCtrl, 2=Ctrl, 3=EnhSlave, 4=Slave, …)" }
+        - { name: protocolVersion,       dbus: y }
+        - { name: protocolSubVersion,    dbus: y }
+        - { name: applicationVersion,    dbus: y }
+        - { name: applicationSubVersion, dbus: y }
+      triggered_by:
+        event: NodeVersionReport
+
 # =====================================================================
 # 4. Protocol modules
 # =====================================================================
@@ -1217,6 +1269,38 @@ modules:
         decoded_struct:
           - { name: level,      type: u8,   doc: "raw wire byte: 0x00..0x64 = 0..100%, 0xFF = low" }
           - { name: lowBattery, type: bool, doc: "true iff level == LEVEL_LOW_WARNING" }
+
+  - name: NodeVersion
+    wire:
+      class_byte: 0x86
+      prefix: VERSION
+    description: |
+      Z-Wave Version CC (0x86) — reports a *node's* Z-Wave library
+      type, Z-Wave protocol version, and application version.
+      Distinct from the daemon's own version (Version::SEMVER); the
+      module is named `NodeVersion` to keep that distinction loud at
+      every call site, but the wire `prefix:` stays `VERSION` so the
+      generated `VERSION_GET` (0x11) and `VERSION_REPORT` (0x12)
+      constants still match the Z-Wave spec. Commands live in the
+      0x10s, not 0x01-0x05 like most CCs.
+
+      v2 adds hardware version + a per-firmware-target list; v1 is
+      what most v1/v2 nodes answer with and is what we decode today.
+    commands:
+      - name: Get
+        wire:
+          byte: 0x11
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x12
+        decoded_struct:
+          - { name: libraryType,           type: u8 }
+          - { name: protocolVersion,       type: u8 }
+          - { name: protocolSubVersion,    type: u8 }
+          - { name: applicationVersion,    type: u8 }
+          - { name: applicationSubVersion, type: u8 }
 
   - name: ZWavePlusInfo
     wire:
@@ -1416,3 +1500,17 @@ translations:
       nodeType:          decoded.nodeType
       installerIconType: decoded.installerIconType
       userIconType:      decoded.userIconType
+
+  - publishes: NodeVersionReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: NodeVersion.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:          event.sourceNodeId
+      libraryType:           decoded.libraryType
+      protocolVersion:       decoded.protocolVersion
+      protocolSubVersion:    decoded.protocolSubVersion
+      applicationVersion:    decoded.applicationVersion
+      applicationSubVersion: decoded.applicationSubVersion

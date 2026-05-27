@@ -1,12 +1,14 @@
+#include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 
 #include <algorithm>
 #include <atomic>
 #include <cstring>
-#include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <libudev.h>
@@ -16,6 +18,42 @@
 
 namespace
 {
+// unique_ptr wrappers around the four libudev handle types. Each
+// owning local just declares one and forgets — no manual
+// `udev_*_unref` on early-return paths, no leaks under exceptions.
+struct UdevContextDeleter
+{
+    void operator()(udev* ctx) const noexcept
+    {
+        udev_unref(ctx);
+    }
+};
+struct UdevDeviceDeleter
+{
+    void operator()(udev_device* dev) const noexcept
+    {
+        udev_device_unref(dev);
+    }
+};
+struct UdevMonitorDeleter
+{
+    void operator()(udev_monitor* mon) const noexcept
+    {
+        udev_monitor_unref(mon);
+    }
+};
+struct UdevEnumerateDeleter
+{
+    void operator()(udev_enumerate* enumerate) const noexcept
+    {
+        udev_enumerate_unref(enumerate);
+    }
+};
+using UdevContextPtr   = std::unique_ptr<udev, UdevContextDeleter>;
+using UdevDevicePtr    = std::unique_ptr<udev_device, UdevDeviceDeleter>;
+using UdevMonitorPtr   = std::unique_ptr<udev_monitor, UdevMonitorDeleter>;
+using UdevEnumeratePtr = std::unique_ptr<udev_enumerate, UdevEnumerateDeleter>;
+
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct ZwaveMonitorState
 {
@@ -25,9 +63,9 @@ struct ZwaveMonitorState
     // DonglesConfig subscription — populates `accept` synchronously
     // via replay-on-subscribe in startZWaveMonitorThread(). The bus
     // delivers this once at startup; the list does not change at
-    // runtime.
+    // runtime. Guard auto-unsubscribes on destruction.
     std::vector<MessageBus::AcceptedDongleConfig> accept;
-    MessageBus::SubscriptionId donglesSub{0};
+    MessageBus::SubscriptionGuard donglesSub;
 
     // Static-state destructor handles teardown — the C++ runtime tears
     // static-storage objects down via __cxa_atexit *before* it runs
@@ -36,17 +74,12 @@ struct ZwaveMonitorState
     // joinable and calls std::terminate.
     ~ZwaveMonitorState()
     {
-        if (donglesSub != 0)
-        {
-            MessageBus::unsubscribe(donglesSub);
-            donglesSub = 0;
-        }
         running = false;
         if (thread.joinable())
         {
             thread.join();
         }
-        std::cout << "Z-Wave device monitor thread shutdown complete\n";
+        Logger::info("Z-Wave device monitor thread shutdown complete");
     }
 
     ZwaveMonitorState()                                                = default;
@@ -88,16 +121,16 @@ auto findAttachedTtyNode(udev* udev, udev_device* usbDevice) -> std::string
         return {};
     }
 
-    auto* enumerate = udev_enumerate_new(udev);
-    if (enumerate == nullptr)
+    const UdevEnumeratePtr enumerate(udev_enumerate_new(udev));
+    if (!enumerate)
     {
         return {};
     }
 
-    udev_enumerate_add_match_subsystem(enumerate, "tty");
-    udev_enumerate_scan_devices(enumerate);
+    udev_enumerate_add_match_subsystem(enumerate.get(), "tty");
+    udev_enumerate_scan_devices(enumerate.get());
 
-    udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
+    udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate.get());
     udev_list_entry* entry   = nullptr;
 
     udev_list_entry_foreach(entry, devices)
@@ -113,21 +146,16 @@ auto findAttachedTtyNode(udev* udev, udev_device* usbDevice) -> std::string
             continue;
         }
 
-        udev_device* ttyDevice = udev_device_new_from_syspath(udev, syspath);
-        if (ttyDevice == nullptr)
+        const UdevDevicePtr ttyDevice(udev_device_new_from_syspath(udev, syspath));
+        if (!ttyDevice)
         {
             continue;
         }
 
-        const char* devnode = udev_device_get_devnode(ttyDevice);
-        std::string result  = devnode != nullptr ? devnode : "";
-
-        udev_device_unref(ttyDevice);
-        udev_enumerate_unref(enumerate);
-        return result;
+        const char* devnode = udev_device_get_devnode(ttyDevice.get());
+        return devnode != nullptr ? devnode : std::string{};
     }
 
-    udev_enumerate_unref(enumerate);
     return {};
 }
 
@@ -139,18 +167,18 @@ auto findAlreadyInsertedZWaveDongleSyspath(udev* udev) -> std::string
 {
     for (const auto& accepted : state().accept)
     {
-        udev_enumerate* enumerate = udev_enumerate_new(udev);
-        if (enumerate == nullptr)
+        const UdevEnumeratePtr enumerate(udev_enumerate_new(udev));
+        if (!enumerate)
         {
             continue;
         }
 
-        udev_enumerate_add_match_subsystem(enumerate, "usb");
-        udev_enumerate_add_match_sysattr(enumerate, "idVendor", accepted.vid.c_str());
-        udev_enumerate_add_match_sysattr(enumerate, "idProduct", accepted.pid.c_str());
-        udev_enumerate_scan_devices(enumerate);
+        udev_enumerate_add_match_subsystem(enumerate.get(), "usb");
+        udev_enumerate_add_match_sysattr(enumerate.get(), "idVendor", accepted.vid.c_str());
+        udev_enumerate_add_match_sysattr(enumerate.get(), "idProduct", accepted.pid.c_str());
+        udev_enumerate_scan_devices(enumerate.get());
 
-        udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate);
+        udev_list_entry* devices = udev_enumerate_get_list_entry(enumerate.get());
         udev_list_entry* entry   = nullptr;
 
         udev_list_entry_foreach(entry, devices)
@@ -158,24 +186,21 @@ auto findAlreadyInsertedZWaveDongleSyspath(udev* udev) -> std::string
             const char* syspath = udev_list_entry_get_name(entry);
             if (syspath != nullptr)
             {
-                std::string result = syspath;
-                udev_enumerate_unref(enumerate);
-                return result;
+                return syspath;
             }
         }
-        udev_enumerate_unref(enumerate);
     }
     return {};
 }
 
-auto openUdevDeviceBySyspath(udev* udev, const std::string& syspath) -> udev_device*
+auto openUdevDeviceBySyspath(udev* udev, const std::string& syspath) -> UdevDevicePtr
 {
     if (syspath.empty())
     {
-        return nullptr;
+        return {};
     }
 
-    return udev_device_new_from_syspath(udev, syspath.c_str());
+    return UdevDevicePtr(udev_device_new_from_syspath(udev, syspath.c_str()));
 }
 
 auto logZWaveDongleDetails(udev* udev, udev_device* usbDevice, const std::string& prefix) -> std::string
@@ -183,42 +208,46 @@ auto logZWaveDongleDetails(udev* udev, udev_device* usbDevice, const std::string
     const char* devpath        = udev_device_get_devpath(usbDevice);
     std::string trackedDevpath = devpath != nullptr ? devpath : "";
 
-    std::cout << prefix << trackedDevpath << '\n';
+    Logger::info(prefix + trackedDevpath);
 
     std::string const ttyNode = findAttachedTtyNode(udev, usbDevice);
     if (!ttyNode.empty())
     {
-        std::cout << "Z-Wave dongle tty node: " << ttyNode << '\n';
+        Logger::info("Z-Wave dongle tty node: " + ttyNode);
     }
     else
     {
-        std::cout << "No tty node found for Z-Wave dongle\n";
+        Logger::warn("No tty node found for Z-Wave dongle");
     }
 
     return trackedDevpath;
 }
 
-auto setupMonitor(udev*& udev, udev_monitor*& mon) -> bool
+struct MonitorContext
 {
-    udev = udev_new();
-    if (udev == nullptr)
+    UdevContextPtr udev;
+    UdevMonitorPtr mon;
+};
+
+auto setupMonitor() -> MonitorContext
+{
+    UdevContextPtr udev(udev_new());
+    if (!udev)
     {
-        std::cerr << "Failed to create udev context\n";
-        return false;
+        Logger::error("Failed to create udev context");
+        return {};
     }
 
-    mon = udev_monitor_new_from_netlink(udev, "udev");
-    if (mon == nullptr)
+    UdevMonitorPtr mon(udev_monitor_new_from_netlink(udev.get(), "udev"));
+    if (!mon)
     {
-        std::cerr << "Failed to create udev monitor\n";
-        udev_unref(udev);
-        udev = nullptr;
-        return false;
+        Logger::error("Failed to create udev monitor");
+        return {};
     }
 
-    udev_monitor_filter_add_match_subsystem_devtype(mon, "usb", "usb_device");
-    udev_monitor_enable_receiving(mon);
-    return true;
+    udev_monitor_filter_add_match_subsystem_devtype(mon.get(), "usb", "usb_device");
+    udev_monitor_enable_receiving(mon.get());
+    return MonitorContext{.udev = std::move(udev), .mon = std::move(mon)};
 }
 
 auto handleDeviceEvent(udev* udev, udev_device* dev, std::string& trackedDevpath, std::string& trackedTtyNode) -> void
@@ -247,10 +276,10 @@ auto handleDeviceEvent(udev* udev, udev_device* dev, std::string& trackedDevpath
     {
         if (!trackedDevpath.empty() && trackedDevpath == devpath)
         {
-            std::cout << "Z-Wave dongle path \"" << trackedDevpath << "\" removed\n";
+            Logger::info("Z-Wave dongle path \"" + trackedDevpath + "\" removed");
             if (!trackedTtyNode.empty())
             {
-                std::cout << "Z-Wave dongle tty node was: " << trackedTtyNode << '\n';
+                Logger::info("Z-Wave dongle tty node was: " + trackedTtyNode);
             }
 
             MessageBus::publish(MessageBus::DongleStatus{.connected = false, .ttyPath = {}});
@@ -264,7 +293,7 @@ auto runMonitorLoop(udev* udev, udev_monitor* mon, std::string& trackedDevpath, 
 {
     int const fileDescriptor = udev_monitor_get_fd(mon);
 
-    std::cout << "Z-Wave device monitor started. Waiting for device events...\n";
+    Logger::info("Z-Wave device monitor started. Waiting for device events...");
     prctl(PR_SET_NAME, "ZWaveComm", 0, 0, 0);  // NOLINT(misc-include-cleaner): PR_SET_NAME from <sys/prctl.h>
 
     while (state().running)
@@ -282,10 +311,9 @@ auto runMonitorLoop(udev* udev, udev_monitor* mon, std::string& trackedDevpath, 
         if (int const ret = select(fileDescriptor + 1, &fds, nullptr, nullptr, &time);
             ret > 0 && FD_ISSET(fileDescriptor, &fds))
         {
-            if (udev_device* dev = udev_monitor_receive_device(mon); dev != nullptr)
+            if (const UdevDevicePtr dev(udev_monitor_receive_device(mon)); dev)
             {
-                handleDeviceEvent(udev, dev, trackedDevpath, trackedTtyNode);
-                udev_device_unref(dev);
+                handleDeviceEvent(udev, dev.get(), trackedDevpath, trackedTtyNode);
             }
         }
     }
@@ -295,10 +323,8 @@ auto zwaveMonitorThread() -> void
 {
     state().running = true;
 
-    udev* udev        = nullptr;
-    udev_monitor* mon = nullptr;
-
-    if (!setupMonitor(udev, mon))
+    auto ctx = setupMonitor();
+    if (!ctx.udev || !ctx.mon)
     {
         return;
     }
@@ -306,13 +332,14 @@ auto zwaveMonitorThread() -> void
     std::string trackedDevpath;
     std::string trackedTtyNode;
 
-    if (std::string const trackedSyspath = findAlreadyInsertedZWaveDongleSyspath(udev); !trackedSyspath.empty())
+    if (std::string const trackedSyspath = findAlreadyInsertedZWaveDongleSyspath(ctx.udev.get());
+        !trackedSyspath.empty())
     {
-        if (udev_device* usbDevice = openUdevDeviceBySyspath(udev, trackedSyspath); usbDevice != nullptr)
+        if (const UdevDevicePtr usbDevice = openUdevDeviceBySyspath(ctx.udev.get(), trackedSyspath); usbDevice)
         {
-            trackedTtyNode = findAttachedTtyNode(udev, usbDevice);
-            trackedDevpath = logZWaveDongleDetails(udev, usbDevice, "Z-Wave dongle already inserted at startup: ");
-            udev_device_unref(usbDevice);
+            trackedTtyNode = findAttachedTtyNode(ctx.udev.get(), usbDevice.get());
+            trackedDevpath =
+                logZWaveDongleDetails(ctx.udev.get(), usbDevice.get(), "Z-Wave dongle already inserted at startup: ");
             if (!trackedTtyNode.empty())
             {
                 MessageBus::publish(MessageBus::DongleStatus{.connected = true, .ttyPath = trackedTtyNode});
@@ -320,11 +347,9 @@ auto zwaveMonitorThread() -> void
         }
     }
 
-    runMonitorLoop(udev, mon, trackedDevpath, trackedTtyNode);
+    runMonitorLoop(ctx.udev.get(), ctx.mon.get(), trackedDevpath, trackedTtyNode);
 
-    std::cout << "Z-Wave device monitor stopping...\n";
-    udev_monitor_unref(mon);
-    udev_unref(udev);
+    Logger::info("Z-Wave device monitor stopping...");
 }
 
 __attribute__((constructor(CONFIG_ZWAVE_DONGLE_PRIO))) auto startZWaveMonitorThread() -> void
@@ -333,8 +358,8 @@ __attribute__((constructor(CONFIG_ZWAVE_DONGLE_PRIO))) auto startZWaveMonitorThr
     // Config has already published at priority 102, so the bus replays
     // the cached value synchronously and `state().accept` is populated
     // by the time `findAlreadyInsertedZWaveDongleSyspath()` runs.
-    state().donglesSub = MessageBus::subscribe<MessageBus::DonglesConfig>(
-        [](const MessageBus::DonglesConfig& cfg) -> void { state().accept = cfg.accept; });
+    state().donglesSub = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::DonglesConfig>(
+        [](const MessageBus::DonglesConfig& cfg) -> void { state().accept = cfg.accept; }));
 
     state().running = true;
     state().thread  = std::thread(zwaveMonitorThread);

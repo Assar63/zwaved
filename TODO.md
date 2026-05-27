@@ -91,6 +91,7 @@ companion `zwave-terminal` client, and packaging.
 - [ ] [ci: durable pinning policy for third-party dependencies](https://github.com/Assar63/zwaved/issues/61)
 - [ ] [deps: documented upgrade path for pinned dependencies](https://github.com/Assar63/zwaved/issues/62)
 - [ ] [ci: scheduled deps-check workflow surfaces drift from upstream](https://github.com/Assar63/zwaved/issues/63)
+- [ ] [ci: bump GitHub Actions to versions supporting Node 24](https://github.com/Assar63/zwaved/issues/64) — **deadline 2026-06-02** (forced-Node-24); removal 2026-09-16
 
 ### Quality & docs
 

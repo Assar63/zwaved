@@ -34,7 +34,7 @@ companion `zwave-terminal` client, and packaging.
 **Simple — single fixed-shape payload, mirrors the existing BinarySwitch / Association pattern:**
 
 - [x] **Basic (CC `0x20`)** — `SetBasic` / `GetBasic` over D-Bus drive Basic SET / GET; the codec also decodes both v1 (3-byte) and v2+ (5-byte with `targetValue` + `duration`) Reports. Reports come back through the existing `ApplicationCommand` signal — clients filter on `ccData[0] == 0x20`.
-- [ ] [Multilevel Switch (CC 0x26)](https://github.com/Assar63/zwaved/issues/7)
+- [x] **Multilevel Switch (CC `0x26`)** — `SetMultilevelSwitch` (with v2+ `duration` byte) / `GetMultilevelSwitch` over D-Bus; codec decodes both v1 (3-byte) and v2+ (5-byte with `targetValue` + `duration`) Reports. Reports come back through the existing `ApplicationCommand` signal — clients filter on `ccData[0] == 0x26`.
 - [ ] [Battery (CC 0x80)](https://github.com/Assar63/zwaved/issues/8)
 - [ ] [Version (CC 0x86)](https://github.com/Assar63/zwaved/issues/9)
 - [ ] [Manufacturer Specific (CC 0x72)](https://github.com/Assar63/zwaved/issues/10)

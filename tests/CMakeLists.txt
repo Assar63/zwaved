@@ -26,6 +26,7 @@ set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/Battery.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ManufacturerSpecific.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/NodeVersion.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/WakeUp.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ZWavePlusInfo.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
@@ -149,6 +150,20 @@ target_include_directories(NodeVersion_test PRIVATE
 target_link_libraries(NodeVersion_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(NodeVersion_test)
 gtest_discover_tests(NodeVersion_test)
+
+# ---- WakeUp ---------------------------------------------------------
+add_executable(WakeUp_test
+    WakeUp_test.cpp
+    "${SRC_DIR}/application/WakeUp.cpp"
+    "${GENERATED_APPLICATION_DIR}/WakeUp.gen.cpp"
+)
+target_include_directories(WakeUp_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(WakeUp_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(WakeUp_test)
+gtest_discover_tests(WakeUp_test)
 
 # ---- Association ----------------------------------------------------
 add_executable(Association_test

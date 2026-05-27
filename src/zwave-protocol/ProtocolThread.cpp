@@ -15,6 +15,7 @@
 #include "application/MultichannelAssociation.hpp"
 #include "application/MultilevelSwitch.hpp"
 #include "application/NodeVersion.hpp"
+#include "application/WakeUp.hpp"
 #include "application/ZWavePlusInfo.hpp"
 
 #include <array>
@@ -351,6 +352,21 @@ auto onGetZWavePlusInfo(const MessageBus::GetZWavePlusInfoCommand& cmd) -> void
 auto onGetNodeVersion(const MessageBus::GetNodeVersionCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, NodeVersion::encodeGet());
+}
+
+auto onSetWakeUpInterval(const MessageBus::SetWakeUpIntervalCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, WakeUp::encodeIntervalSet(cmd.seconds, cmd.controllerNodeId));
+}
+
+auto onGetWakeUpInterval(const MessageBus::GetWakeUpIntervalCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, WakeUp::encodeGet());
+}
+
+auto onSendWakeUpNoMoreInformation(const MessageBus::SendWakeUpNoMoreInformationCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, WakeUp::encodeNoMoreInformation());
 }
 
 auto onSetAssociation(const MessageBus::SetAssociationCommand& cmd) -> void
@@ -994,7 +1010,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 24;
+constexpr std::size_t SUBSCRIPTION_COUNT = 27;
 
 auto subscribeBus() -> void
 {
@@ -1015,6 +1031,9 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetManufacturerSpecificCommand>(onGetManufacturerSpecific);
     subscribe<MessageBus::GetZWavePlusInfoCommand>(onGetZWavePlusInfo);
     subscribe<MessageBus::GetNodeVersionCommand>(onGetNodeVersion);
+    subscribe<MessageBus::SetWakeUpIntervalCommand>(onSetWakeUpInterval);
+    subscribe<MessageBus::GetWakeUpIntervalCommand>(onGetWakeUpInterval);
+    subscribe<MessageBus::SendWakeUpNoMoreInformationCommand>(onSendWakeUpNoMoreInformation);
     subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
     subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
     subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);

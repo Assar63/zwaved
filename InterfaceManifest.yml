@@ -364,6 +364,34 @@ events:
       - { name: level,        type: u8,   default: 0 }
       - { name: lowBattery,   type: bool, default: false }
 
+  - name: WakeUpIntervalReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Wake Up (CC 0x84) Interval Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose
+      ccData parses as a Wake Up Interval Report. `seconds` is the
+      node's current wake-up interval (0 means stay-awake / disabled
+      for most devices); `controllerNodeId` is the node the sleeper
+      will phone home to on wake-up.
+    fields:
+      - { name: sourceNodeId,     type: u8,  default: 0 }
+      - { name: seconds,          type: u32, default: 0 }
+      - { name: controllerNodeId, type: u8,  default: 0 }
+
+  - name: WakeUpNotification
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api, orchestrator] }
+    doc: |
+      A sleeping node is briefly awake. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose
+      ccData is `(0x84, 0x07)`. Consumed by WakeUpOrchestrator (#68)
+      to drain any pending commands for `sourceNodeId` and then
+      send WAKE_UP_NO_MORE_INFORMATION so the node sleeps again
+      ASAP (battery).
+    fields:
+      - { name: sourceNodeId, type: u8, default: 0 }
+
   - name: NodeVersionReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -601,6 +629,42 @@ events:
       Query a node's Version CC (0x86) Report — node firmware versions.
       Distinct from the daemon's GetVersion D-Bus method (which
       returns the daemon's own semver / git-describe).
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: SetWakeUpIntervalCommand
+    category: command
+    direction: { publishers: [external-api, orchestrator], subscribers: [zwave-protocol] }
+    doc: |
+      Send Wake Up Interval Set (CC 0x84) to a node. `seconds` is the
+      24-bit unsigned interval the spec allows; values above
+      0x00FFFFFF are clamped at encode time. `controllerNodeId` is
+      the node the sleeper will phone home to — usually the daemon's
+      own controller node ID. Published by InclusionOrchestrator
+      (#67) when applying the per-device wake-up policy.
+    fields:
+      - { name: nodeId,           type: u8,  default: 0 }
+      - { name: seconds,          type: u32, default: 0 }
+      - { name: controllerNodeId, type: u8,  default: 0 }
+      - { name: callbackId,       type: u8,  default: 0 }
+
+  - name: GetWakeUpIntervalCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's current Wake Up interval.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: SendWakeUpNoMoreInformationCommand
+    category: command
+    direction: { publishers: [orchestrator, external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Send WAKE_UP_NO_MORE_INFORMATION (CC 0x84 cmd 0x08) to a
+      node, telling it to go back to sleep ASAP. Published by
+      WakeUpOrchestrator (#68) after draining the pending queue;
+      also exposed on D-Bus for diagnostics.
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
@@ -847,6 +911,29 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetNodeVersionCommand
+
+    - name: SetWakeUpInterval
+      params:
+        - { name: nodeId,           dbus: y, cpp: u8 }
+        - { name: seconds,          dbus: u, cpp: u32, doc: "0..0x00FFFFFF; clamped to 24 bits" }
+        - { name: controllerNodeId, dbus: y, cpp: u8 }
+        - { name: callbackId,       dbus: y, cpp: u8 }
+      action:
+        publish: SetWakeUpIntervalCommand
+
+    - name: GetWakeUpInterval
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetWakeUpIntervalCommand
+
+    - name: SendWakeUpNoMoreInformation
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: SendWakeUpNoMoreInformationCommand
 
     - name: SetAssociation
       params:
@@ -1153,6 +1240,20 @@ dbus:
       triggered_by:
         event: NodeVersionReport
 
+    - name: WakeUpIntervalReport
+      params:
+        - { name: sourceNodeId,     dbus: y }
+        - { name: seconds,          dbus: u, doc: "24-bit interval; 0 = stay-awake" }
+        - { name: controllerNodeId, dbus: y }
+      triggered_by:
+        event: WakeUpIntervalReport
+
+    - name: WakeUpNotification
+      params:
+        - { name: sourceNodeId, dbus: y }
+      triggered_by:
+        event: WakeUpNotification
+
 # =====================================================================
 # 4. Protocol modules
 # =====================================================================
@@ -1269,6 +1370,46 @@ modules:
         decoded_struct:
           - { name: level,      type: u8,   doc: "raw wire byte: 0x00..0x64 = 0..100%, 0xFF = low" }
           - { name: lowBattery, type: bool, doc: "true iff level == LEVEL_LOW_WARNING" }
+
+  - name: WakeUp
+    wire:
+      class_byte: 0x84
+      prefix: WAKE_UP
+    description: |
+      Sleeping-node lifecycle. The Interval Set/Get/Report trio
+      configures how often the node phones home; the Notification
+      (node → host) signals "I'm briefly awake, send me anything
+      pending"; NoMoreInformation (host → node) is the daemon's
+      "go back to sleep now" reply.
+
+      Set carries a 24-bit big-endian seconds field plus a
+      single-byte controllerNodeId — too irregular for the
+      manifest's payload generator, so encodeIntervalSet is
+      hand-written in WakeUp.cpp. Get and NoMoreInformation are
+      empty-payload, so their encoders come from the .gen.cpp.
+    commands:
+      - name: Set
+        wire:
+          byte: 0x04
+      - name: Get
+        wire:
+          byte: 0x05
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x06
+        decoded_struct:
+          - { name: seconds,          type: u32 }
+          - { name: controllerNodeId, type: u8 }
+      - name: Notification
+        wire:
+          byte: 0x07
+      - name: NoMoreInformation
+        wire:
+          byte: 0x08
+          payload: []
+        encode_args: []
 
   - name: NodeVersion
     wire:
@@ -1514,3 +1655,23 @@ translations:
       protocolSubVersion:    decoded.protocolSubVersion
       applicationVersion:    decoded.applicationVersion
       applicationSubVersion: decoded.applicationSubVersion
+
+  - publishes: WakeUpIntervalReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: WakeUp.decodeIntervalReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:     event.sourceNodeId
+      seconds:          decoded.seconds
+      controllerNodeId: decoded.controllerNodeId
+
+  - publishes: WakeUpNotification
+    triggered_by: ApplicationCommand
+    decode:
+      codec: WakeUp.decodeNotification
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId

@@ -35,7 +35,7 @@ Coordinated plan for two flows: **what happens after a node is included** (lifel
 
 Implementation order (each shippable independently):
 
-1. [Wake Up CC `0x84`](https://github.com/Assar63/zwaved/issues/15) — smallest codec; lands the bus events the orchestrators depend on
+1. ~~[Wake Up CC `0x84`](https://github.com/Assar63/zwaved/issues/15)~~ — **done**; codec + 3 bus commands + 2 typed signals (`WakeUpIntervalReport`, `WakeUpNotification`). 24-bit BE seconds field clamps on encode so a too-large `seconds` doesn't truncate to ~0.
 2. [Per-node pending-command queue (SQLite)](https://github.com/Assar63/zwaved/issues/65) — durable buffer for sleeping nodes
 3. [WakeUpOrchestrator](https://github.com/Assar63/zwaved/issues/68) — proves the `src/orchestrator/` module shape with the simpler flow first
 4. [Configuration CC `0x70`](https://github.com/Assar63/zwaved/issues/16) — adds `SetConfigurationCommand`

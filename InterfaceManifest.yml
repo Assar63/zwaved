@@ -264,6 +264,21 @@ events:
       - { name: sourceNodeId, type: u8, default: 0 }
       - { name: state,        type: u8, default: 0, doc: "0=Off, 1=On, 2=Unknown" }
 
+  - name: BatteryReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Battery (CC 0x80) Report. Republished by the cc-translator
+      from inbound ApplicationCommand frames whose ccData parses as a
+      Battery Report. `level` is the wire byte: 0x00..0x64 is a
+      percentage (0–100 %); 0xFF means "battery low" with no precise
+      gauge — surfaced separately as `lowBattery` so callers don't
+      have to special-case the sentinel.
+    fields:
+      - { name: sourceNodeId, type: u8,   default: 0 }
+      - { name: level,        type: u8,   default: 0 }
+      - { name: lowBattery,   type: bool, default: false }
+
   - name: MultilevelSwitchReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -386,6 +401,14 @@ events:
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
     doc: Query a node's Multilevel Switch value.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetBatteryCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's Battery level.
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
@@ -597,6 +620,13 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetMultilevelSwitchCommand
+
+    - name: GetBattery
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetBatteryCommand
 
     - name: SetAssociation
       params:
@@ -839,6 +869,14 @@ dbus:
       triggered_by:
         event: MultilevelSwitchReport
 
+    - name: BatteryReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: level,        dbus: y, doc: "0x00..0x64 = 0..100%, 0xFF = low-battery warning" }
+        - { name: lowBattery,   dbus: b, doc: "true iff level == 0xFF" }
+      triggered_by:
+        event: BatteryReport
+
 # =====================================================================
 # 4. Protocol modules
 # =====================================================================
@@ -930,6 +968,31 @@ modules:
           - { name: targetValue,  type: u8 }
           - { name: duration,     type: u8 }
           - { name: wireFormatV2, type: bool, doc: "true if 5-byte v2+ wire form" }
+
+  - name: Battery
+    wire:
+      class_byte: 0x80
+      prefix: BATTERY
+    description: |
+      Battery status reporting for battery-powered nodes. Get returns
+      a Report carrying the battery percentage (0..100) or 0xFF as a
+      low-battery warning. v2 adds charging / health bitfields; the
+      decoder ignores them today and only surfaces the percentage +
+      a derived lowBattery flag.
+    constants:
+      - { name: LEVEL_LOW_WARNING, value: 0xFF }
+    commands:
+      - name: Get
+        wire:
+          byte: 0x02
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: level,      type: u8,   doc: "raw wire byte: 0x00..0x64 = 0..100%, 0xFF = low" }
+          - { name: lowBattery, type: bool, doc: "true iff level == LEVEL_LOW_WARNING" }
 
   - name: Basic
     wire:
@@ -1041,3 +1104,14 @@ translations:
       targetValue:  decoded.targetValue
       duration:     decoded.duration
       wireFormatV2: decoded.wireFormatV2
+
+  - publishes: BatteryReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: Battery.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      level:        decoded.level
+      lowBattery:   decoded.lowBattery

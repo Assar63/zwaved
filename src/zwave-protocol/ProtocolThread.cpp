@@ -9,6 +9,7 @@
 #include "ZwaveDataFrame.hpp"
 #include "application/Association.hpp"
 #include "application/Basic.hpp"
+#include "application/Battery.hpp"
 #include "application/BinarySwitch.hpp"
 #include "application/MultichannelAssociation.hpp"
 #include "application/MultilevelSwitch.hpp"
@@ -311,6 +312,11 @@ auto onSetMultilevelSwitch(const MessageBus::SetMultilevelSwitchCommand& cmd) ->
 auto onGetMultilevelSwitch(const MessageBus::GetMultilevelSwitchCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, MultilevelSwitch::encodeGet());
+}
+
+auto onGetBattery(const MessageBus::GetBatteryCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, Battery::encodeGet());
 }
 
 auto onSetAssociation(const MessageBus::SetAssociationCommand& cmd) -> void
@@ -860,7 +866,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 19;
+constexpr std::size_t SUBSCRIPTION_COUNT = 20;
 
 auto subscribeBus() -> void
 {
@@ -876,6 +882,7 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetBasicCommand>(onGetBasic);
     subscribe<MessageBus::SetMultilevelSwitchCommand>(onSetMultilevelSwitch);
     subscribe<MessageBus::GetMultilevelSwitchCommand>(onGetMultilevelSwitch);
+    subscribe<MessageBus::GetBatteryCommand>(onGetBattery);
     subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
     subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
     subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);

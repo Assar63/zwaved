@@ -16,11 +16,13 @@ set_source_files_properties(
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/MultilevelSwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/Battery.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
 target_sources(zwaved PRIVATE
     Basic.cpp
+    Battery.cpp
     BinarySwitch.cpp
     MultilevelSwitch.cpp
     Association.cpp
@@ -28,6 +30,7 @@ target_sources(zwaved PRIVATE
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/MultilevelSwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/Battery.gen.cpp"
 )
 
 # Hand-written .{hpp,cpp} pairs `#include "<Name>.gen.hpp"`; expose

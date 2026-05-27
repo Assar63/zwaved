@@ -23,6 +23,7 @@ set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/BinarySwitch.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/MultilevelSwitch.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/Basic.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/Battery.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
@@ -89,6 +90,20 @@ target_include_directories(MultilevelSwitch_test PRIVATE
 target_link_libraries(MultilevelSwitch_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(MultilevelSwitch_test)
 gtest_discover_tests(MultilevelSwitch_test)
+
+# ---- Battery --------------------------------------------------------
+add_executable(Battery_test
+    Battery_test.cpp
+    "${SRC_DIR}/application/Battery.cpp"
+    "${GENERATED_APPLICATION_DIR}/Battery.gen.cpp"
+)
+target_include_directories(Battery_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(Battery_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(Battery_test)
+gtest_discover_tests(Battery_test)
 
 # ---- Association ----------------------------------------------------
 add_executable(Association_test

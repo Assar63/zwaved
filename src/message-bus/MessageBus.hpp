@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <utility>
 
 /**
  * In-process publish/subscribe bus for the daemon. Every cross-module
@@ -54,6 +55,50 @@ auto unsubscribe(SubscriptionId subscriptionId) -> void;
 /// teardown to run and joining-thread destructors can still safely
 /// call `unsubscribe(...)`.
 auto touch() -> void;
+
+/// RAII wrapper around `SubscriptionId`. Unsubscribes on destruction so
+/// a forgotten teardown path can't leak a subscription. Move-only —
+/// subscription IDs are unique identities, not copies.
+class SubscriptionGuard
+{
+  public:
+    SubscriptionGuard() = default;
+    // NOLINTNEXTLINE(readability-identifier-length): `id` is the conventional name for a SubscriptionId at this seam
+    explicit SubscriptionGuard(SubscriptionId id)
+        : id_(id)
+    {
+    }
+
+    ~SubscriptionGuard()
+    {
+        if (id_ != 0)
+        {
+            unsubscribe(id_);
+        }
+    }
+
+    SubscriptionGuard(const SubscriptionGuard&)                    = delete;
+    auto operator=(const SubscriptionGuard&) -> SubscriptionGuard& = delete;
+    SubscriptionGuard(SubscriptionGuard&& other) noexcept
+        : id_(std::exchange(other.id_, 0))
+    {
+    }
+    auto operator=(SubscriptionGuard&& other) noexcept -> SubscriptionGuard&
+    {
+        if (this != &other)
+        {
+            if (id_ != 0)
+            {
+                unsubscribe(id_);
+            }
+            id_ = std::exchange(other.id_, 0);
+        }
+        return *this;
+    }
+
+  private:
+    SubscriptionId id_ = 0;
+};
 }  // namespace MessageBus
 
 #endif  // ZWAVED_MESSAGE_BUS_HPP

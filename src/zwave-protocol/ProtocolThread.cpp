@@ -82,50 +82,6 @@ using Request = std::variant<HostApi::AddNodeRequest,
                              HostApi::RemoveFailedNodeRequest,
                              HostApi::SendDataRequest>;
 
-/// RAII wrapper around `MessageBus::SubscriptionId`. Unsubscribes on
-/// destruction so a forgotten teardown path can't leak a subscription.
-/// Move-only — subscriptions are unique identities, not copies.
-class SubscriptionGuard
-{
-  public:
-    SubscriptionGuard() = default;
-    // NOLINTNEXTLINE(readability-identifier-length): `id` is the conventional name for a SubscriptionId at this seam
-    explicit SubscriptionGuard(MessageBus::SubscriptionId id)
-        : id_(id)
-    {
-    }
-
-    ~SubscriptionGuard()
-    {
-        if (id_ != 0)
-        {
-            MessageBus::unsubscribe(id_);
-        }
-    }
-
-    SubscriptionGuard(const SubscriptionGuard&)                    = delete;
-    auto operator=(const SubscriptionGuard&) -> SubscriptionGuard& = delete;
-    SubscriptionGuard(SubscriptionGuard&& other) noexcept
-        : id_(std::exchange(other.id_, 0))
-    {
-    }
-    auto operator=(SubscriptionGuard&& other) noexcept -> SubscriptionGuard&
-    {
-        if (this != &other)
-        {
-            if (id_ != 0)
-            {
-                MessageBus::unsubscribe(id_);
-            }
-            id_ = std::exchange(other.id_, 0);
-        }
-        return *this;
-    }
-
-  private:
-    MessageBus::SubscriptionId id_ = 0;
-};
-
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct ZwaveProtocolState
 {
@@ -170,7 +126,7 @@ struct ZwaveProtocolState
     // Bus subscriptions, released on shutdown. Each guard auto-unsubscribes
     // on destruction — clearing the vector (from `unsubscribeBus` or
     // ultimately from this struct's destructor) tears them all down.
-    std::vector<SubscriptionGuard> subscriptions;
+    std::vector<MessageBus::SubscriptionGuard> subscriptions;
 
     // Cached `[behavior] auto_lifeline` toggle. Defaults to true to
     // match the daemon's pre-config baseline; updated synchronously

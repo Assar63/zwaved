@@ -69,15 +69,13 @@ struct DBusBackend::Impl
     std::unique_ptr<sdbus::IObject> object;
     std::atomic<bool> connected{false};
 
-    // Hand-written cache-update subscriber IDs. These five lambdas
-    // live in DBusBackend.cpp; they update impl->last* fields so the
-    // `custom: emitGet*` handlers can return cached state. Released
-    // explicitly in stop(), in reverse subscribe order.
-    MessageBus::SubscriptionId dongleStatusSub{0};
-    MessageBus::SubscriptionId dongleInfoSub{0};
-    MessageBus::SubscriptionId initDataSub{0};
-    MessageBus::SubscriptionId nodeListSub{0};
-    MessageBus::SubscriptionId sessionStatusSub{0};
+    // Hand-written cache-update subscribers. These lambdas live in
+    // DBusBackend.cpp; they update impl->last* fields so the
+    // `custom: emitGet*` handlers can return cached state. Each guard
+    // auto-unsubscribes on destruction — clearing the vector in stop()
+    // tears them all down, and the Impl destructor inherits the same
+    // teardown as a safety net.
+    std::vector<MessageBus::SubscriptionGuard> cacheSubs;
 
     // Generated signal-emission subscribers, populated by
     // subscribeGeneratedSignals() in DBusSignals.gen.cpp and released

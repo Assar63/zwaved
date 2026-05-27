@@ -1,5 +1,6 @@
 #include "DBusBackend.hpp"
 
+#include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
 #include "DBusBackendInternal.hpp"
 #include "Version.hpp"
@@ -10,7 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iomanip>
-#include <iostream>
+#include <ios>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -74,7 +75,7 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     }
     catch (const sdbus::Error& err)
     {
-        std::cerr << "[DBusBackend] failed to acquire system bus name " << BUS_NAME << ": " << err.what() << '\n';
+        Logger::error(std::string("[DBusBackend] failed to acquire system bus name ") + BUS_NAME + ": " + err.what());
         return;
     }
 
@@ -94,45 +95,42 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     registerGeneratedSignals(obj);
     obj.finishRegistration();
 
-    impl->dongleStatusSub = MessageBus::subscribe<MessageBus::DongleStatus>(
+    auto& subs = impl->cacheSubs;
+    subs.emplace_back(MessageBus::subscribe<MessageBus::DongleStatus>(
         [this](const MessageBus::DongleStatus& status) -> void
         {
             std::scoped_lock const lock(impl->stateMutex);
             impl->lastDongleStatus = status;
-        });
-
-    impl->dongleInfoSub = MessageBus::subscribe<MessageBus::DongleInfo>(
+        }));
+    subs.emplace_back(MessageBus::subscribe<MessageBus::DongleInfo>(
         [this](const MessageBus::DongleInfo& info) -> void
         {
             std::scoped_lock const lock(impl->stateMutex);
             impl->lastDongleInfo = info;
-        });
-
-    impl->initDataSub = MessageBus::subscribe<MessageBus::InitData>(
+        }));
+    subs.emplace_back(MessageBus::subscribe<MessageBus::InitData>(
         [this](const MessageBus::InitData& info) -> void
         {
             std::scoped_lock const lock(impl->stateMutex);
             impl->lastInitData = info;
-        });
-
-    impl->nodeListSub = MessageBus::subscribe<MessageBus::NodeListChanged>(
+        }));
+    subs.emplace_back(MessageBus::subscribe<MessageBus::NodeListChanged>(
         [this](const MessageBus::NodeListChanged& event) -> void
         {
             std::scoped_lock const lock(impl->stateMutex);
             impl->lastNodes = event.nodes;
-        });
-
-    impl->sessionStatusSub = MessageBus::subscribe<MessageBus::SessionStatus>(
+        }));
+    subs.emplace_back(MessageBus::subscribe<MessageBus::SessionStatus>(
         [this](const MessageBus::SessionStatus& status) -> void
         {
             std::scoped_lock const lock(impl->stateMutex);
             impl->lastSessionStatus = status;
-        });
+        }));
 
     subscribeGeneratedSignals(*impl);
 
     impl->connection->enterEventLoopAsync();
-    std::cout << "[DBusBackend] listening on system bus as " << BUS_NAME << '\n';
+    Logger::info(std::string("[DBusBackend] listening on system bus as ") + BUS_NAME);
 
     // Idle until the daemon is told to stop. The bus does the work —
     // command requests come in via D-Bus method handlers (publishing
@@ -162,32 +160,10 @@ auto DBusBackend::stop() -> void
     // signal-emit fires after `connected = false` has been observed.
     unsubscribeGeneratedSignals(*impl);
 
-    // Cache-update subscribers, in reverse subscribe order.
-    if (impl->sessionStatusSub != 0)
-    {
-        MessageBus::unsubscribe(impl->sessionStatusSub);
-        impl->sessionStatusSub = 0;
-    }
-    if (impl->nodeListSub != 0)
-    {
-        MessageBus::unsubscribe(impl->nodeListSub);
-        impl->nodeListSub = 0;
-    }
-    if (impl->initDataSub != 0)
-    {
-        MessageBus::unsubscribe(impl->initDataSub);
-        impl->initDataSub = 0;
-    }
-    if (impl->dongleInfoSub != 0)
-    {
-        MessageBus::unsubscribe(impl->dongleInfoSub);
-        impl->dongleInfoSub = 0;
-    }
-    if (impl->dongleStatusSub != 0)
-    {
-        MessageBus::unsubscribe(impl->dongleStatusSub);
-        impl->dongleStatusSub = 0;
-    }
+    // Cache-update subscribers — guards' destructors call
+    // MessageBus::unsubscribe; Impl's destructor would do the same if
+    // stop() were skipped.
+    impl->cacheSubs.clear();
     if (impl->connected.load() && impl->connection)
     {
         try
@@ -196,7 +172,7 @@ auto DBusBackend::stop() -> void
         }
         catch (const sdbus::Error& err)
         {
-            std::cerr << "[DBusBackend] leaveEventLoop: " << err.what() << '\n';
+            Logger::error(std::string("[DBusBackend] leaveEventLoop: ") + err.what());
         }
         impl->connected = false;
     }

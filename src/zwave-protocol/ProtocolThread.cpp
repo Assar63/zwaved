@@ -1,3 +1,4 @@
+#include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
 #include "../node-registry/NodeRegistry.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
@@ -16,9 +17,9 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
-#include <iostream>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -81,6 +82,50 @@ using Request = std::variant<HostApi::AddNodeRequest,
                              HostApi::RemoveFailedNodeRequest,
                              HostApi::SendDataRequest>;
 
+/// RAII wrapper around `MessageBus::SubscriptionId`. Unsubscribes on
+/// destruction so a forgotten teardown path can't leak a subscription.
+/// Move-only — subscriptions are unique identities, not copies.
+class SubscriptionGuard
+{
+  public:
+    SubscriptionGuard() = default;
+    // NOLINTNEXTLINE(readability-identifier-length): `id` is the conventional name for a SubscriptionId at this seam
+    explicit SubscriptionGuard(MessageBus::SubscriptionId id)
+        : id_(id)
+    {
+    }
+
+    ~SubscriptionGuard()
+    {
+        if (id_ != 0)
+        {
+            MessageBus::unsubscribe(id_);
+        }
+    }
+
+    SubscriptionGuard(const SubscriptionGuard&)                    = delete;
+    auto operator=(const SubscriptionGuard&) -> SubscriptionGuard& = delete;
+    SubscriptionGuard(SubscriptionGuard&& other) noexcept
+        : id_(std::exchange(other.id_, 0))
+    {
+    }
+    auto operator=(SubscriptionGuard&& other) noexcept -> SubscriptionGuard&
+    {
+        if (this != &other)
+        {
+            if (id_ != 0)
+            {
+                MessageBus::unsubscribe(id_);
+            }
+            id_ = std::exchange(other.id_, 0);
+        }
+        return *this;
+    }
+
+  private:
+    MessageBus::SubscriptionId id_ = 0;
+};
+
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct ZwaveProtocolState
 {
@@ -122,26 +167,10 @@ struct ZwaveProtocolState
     // dispatched (and cleared) on the terminal callback.
     std::optional<std::uint8_t> pendingLifelineNodeId;
 
-    // Bus subscription IDs, released on shutdown.
-    MessageBus::SubscriptionId dongleSubscription{0};
-    MessageBus::SubscriptionId addNodeSubscription{0};
-    MessageBus::SubscriptionId removeNodeSubscription{0};
-    MessageBus::SubscriptionId removeFailedNodeSubscription{0};
-    MessageBus::SubscriptionId switchBinarySubscription{0};
-    MessageBus::SubscriptionId getSwitchBinarySubscription{0};
-    MessageBus::SubscriptionId setBasicSubscription{0};
-    MessageBus::SubscriptionId getBasicSubscription{0};
-    MessageBus::SubscriptionId setMultilevelSwitchSubscription{0};
-    MessageBus::SubscriptionId getMultilevelSwitchSubscription{0};
-    MessageBus::SubscriptionId setAssociationSubscription{0};
-    MessageBus::SubscriptionId removeAssociationSubscription{0};
-    MessageBus::SubscriptionId getAssociationSubscription{0};
-    MessageBus::SubscriptionId getAssociationGroupingsSubscription{0};
-    MessageBus::SubscriptionId setMultichannelAssociationSubscription{0};
-    MessageBus::SubscriptionId removeMultichannelAssociationSubscription{0};
-    MessageBus::SubscriptionId getMultichannelAssociationSubscription{0};
-    MessageBus::SubscriptionId getMultichannelAssociationGroupingsSubscription{0};
-    MessageBus::SubscriptionId behaviorConfigSubscription{0};
+    // Bus subscriptions, released on shutdown. Each guard auto-unsubscribes
+    // on destruction — clearing the vector (from `unsubscribeBus` or
+    // ultimately from this struct's destructor) tears them all down.
+    std::vector<SubscriptionGuard> subscriptions;
 
     // Cached `[behavior] auto_lifeline` toggle. Defaults to true to
     // match the daemon's pre-config baseline; updated synchronously
@@ -160,7 +189,7 @@ struct ZwaveProtocolState
         {
             thread.join();
         }
-        std::cout << "Z-Wave communication thread shutdown complete\n";
+        Logger::info("Z-Wave communication thread shutdown complete");
     }
 
     ZwaveProtocolState()                                                 = default;
@@ -204,6 +233,21 @@ auto clearRequests() -> void
 {
     std::scoped_lock const lock(state().queueMutex);
     state().queue.clear();
+}
+
+/// Wrap an application-layer payload in a SendDataRequest with the
+/// daemon's default transmit options and push it onto the protocol
+/// queue. All onXxx bus-command handlers funnel through here so the
+/// SendData envelope stays in one place.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): every call site passes (cmd.nodeId, cmd.callbackId, …)
+auto pushSendData(std::uint8_t nodeId, std::uint8_t callbackId, std::vector<std::uint8_t> data) -> void
+{
+    HostApi::SendDataRequest req{};
+    req.nodeId     = nodeId;
+    req.data       = std::move(data);
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = callbackId;
+    pushRequest(req);
 }
 
 /// True if `commandClasses` (as captured during inclusion) advertises
@@ -285,92 +329,49 @@ auto onRemoveFailedNodeCommand(const MessageBus::RemoveFailedNodeCommand& cmd) -
 
 auto onSetSwitchBinary(const MessageBus::SetSwitchBinaryCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = BinarySwitch::encodeSet(cmd.turnOn);
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, BinarySwitch::encodeSet(cmd.turnOn));
 }
 
 auto onGetSwitchBinary(const MessageBus::GetSwitchBinaryCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = BinarySwitch::encodeGet();
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, BinarySwitch::encodeGet());
 }
 
 auto onSetBasic(const MessageBus::SetBasicCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = Basic::encodeSet(cmd.value);
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, Basic::encodeSet(cmd.value));
 }
 
 auto onGetBasic(const MessageBus::GetBasicCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = Basic::encodeGet();
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, Basic::encodeGet());
 }
 
 auto onSetMultilevelSwitch(const MessageBus::SetMultilevelSwitchCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = MultilevelSwitch::encodeSet(cmd.value, cmd.duration);
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, MultilevelSwitch::encodeSet(cmd.value, cmd.duration));
 }
 
 auto onGetMultilevelSwitch(const MessageBus::GetMultilevelSwitchCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = MultilevelSwitch::encodeGet();
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, MultilevelSwitch::encodeGet());
 }
 
 auto onSetAssociation(const MessageBus::SetAssociationCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = Association::encodeSet(cmd.groupId, std::span<const std::uint8_t>(cmd.members));
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(
+        cmd.nodeId, cmd.callbackId, Association::encodeSet(cmd.groupId, std::span<const std::uint8_t>(cmd.members)));
 }
 
 auto onRemoveAssociation(const MessageBus::RemoveAssociationCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = Association::encodeRemove(cmd.groupId, std::span<const std::uint8_t>(cmd.members));
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(
+        cmd.nodeId, cmd.callbackId, Association::encodeRemove(cmd.groupId, std::span<const std::uint8_t>(cmd.members)));
 }
 
 auto onGetAssociation(const MessageBus::GetAssociationCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = Association::encodeGet(cmd.groupId);
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, Association::encodeGet(cmd.groupId));
 }
 
 /// Translate the bus's `EndpointMember` (visible to all consumers via
@@ -392,58 +393,38 @@ auto toCodecEndpoints(const std::vector<MessageBus::EndpointMember>& busMembers)
 auto onSetMultichannelAssociation(const MessageBus::SetMultichannelAssociationCommand& cmd) -> void
 {
     const auto endpoints = toCodecEndpoints(cmd.endpointMembers);
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = MultichannelAssociation::encodeSet(cmd.groupId,
-                                                  std::span<const std::uint8_t>(cmd.nodeMembers),
-                                                  std::span<const MultichannelAssociation::EndpointMember>(endpoints));
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(
+        cmd.nodeId,
+        cmd.callbackId,
+        MultichannelAssociation::encodeSet(cmd.groupId,
+                                           std::span<const std::uint8_t>(cmd.nodeMembers),
+                                           std::span<const MultichannelAssociation::EndpointMember>(endpoints)));
 }
 
 auto onRemoveMultichannelAssociation(const MessageBus::RemoveMultichannelAssociationCommand& cmd) -> void
 {
     const auto endpoints = toCodecEndpoints(cmd.endpointMembers);
-    HostApi::SendDataRequest req{};
-    req.nodeId = cmd.nodeId;
-    req.data =
+    pushSendData(
+        cmd.nodeId,
+        cmd.callbackId,
         MultichannelAssociation::encodeRemove(cmd.groupId,
                                               std::span<const std::uint8_t>(cmd.nodeMembers),
-                                              std::span<const MultichannelAssociation::EndpointMember>(endpoints));
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+                                              std::span<const MultichannelAssociation::EndpointMember>(endpoints)));
 }
 
 auto onGetMultichannelAssociation(const MessageBus::GetMultichannelAssociationCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = MultichannelAssociation::encodeGet(cmd.groupId);
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, MultichannelAssociation::encodeGet(cmd.groupId));
 }
 
 auto onGetMultichannelAssociationGroupings(const MessageBus::GetMultichannelAssociationGroupingsCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = MultichannelAssociation::encodeGroupingsGet();
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, MultichannelAssociation::encodeGroupingsGet());
 }
 
 auto onGetAssociationGroupings(const MessageBus::GetAssociationGroupingsCommand& cmd) -> void
 {
-    HostApi::SendDataRequest req{};
-    req.nodeId     = cmd.nodeId;
-    req.data       = Association::encodeGroupingsGet();
-    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-    req.callbackId = cmd.callbackId;
-    pushRequest(req);
+    pushSendData(cmd.nodeId, cmd.callbackId, Association::encodeGroupingsGet());
 }
 
 auto awaitDevicePath() -> std::optional<std::string>
@@ -579,17 +560,17 @@ auto introspectDongle(SerialPort& port) -> IntrospectionResult
 
     if (!sendAndAwait(HostApi::CMD_GET_VERSION, version))
     {
-        std::cerr << "[ProtocolThread] GET_VERSION introspection failed\n";
+        Logger::error("[ProtocolThread] GET_VERSION introspection failed");
         return result;
     }
     if (!sendAndAwait(HostApi::CMD_MEMORY_GET_ID, identity))
     {
-        std::cerr << "[ProtocolThread] MEMORY_GET_ID introspection failed\n";
+        Logger::error("[ProtocolThread] MEMORY_GET_ID introspection failed");
         return result;
     }
     if (!sendAndAwait(HostApi::CMD_SERIAL_API_GET_INIT_DATA, initData))
     {
-        std::cerr << "[ProtocolThread] SERIAL_API_GET_INIT_DATA introspection failed (continuing)\n";
+        Logger::warn("[ProtocolThread] SERIAL_API_GET_INIT_DATA introspection failed (continuing)");
     }
     if (!version.has_value() || !identity.has_value())
     {
@@ -632,8 +613,8 @@ auto introspectDongle(SerialPort& port) -> IntrospectionResult
             const auto info = fetchNodeProtocolInfo(nodeId);
             if (!info.has_value())
             {
-                std::cerr << "[ProtocolThread] GET_NODE_PROTOCOL_INFO timeout for node " << static_cast<int>(nodeId)
-                          << " (continuing)\n";
+                Logger::warn("[ProtocolThread] GET_NODE_PROTOCOL_INFO timeout for node " +
+                             std::to_string(static_cast<int>(nodeId)) + " (continuing)");
                 continue;
             }
             // All-zero payload means the controller has no entry for
@@ -761,8 +742,9 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
                 req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
                 req.callbackId = 0;  // fire-and-forget; SendDataStatus would only be noise
                 pushRequest(req);
-                std::cout << "[ProtocolThread] auto-lifeline: SetAssociation node=" << static_cast<int>(*pendingNode)
-                          << " group=1 controller=" << static_cast<int>(*controller) << '\n';
+                Logger::info("[ProtocolThread] auto-lifeline: SetAssociation node=" +
+                             std::to_string(static_cast<int>(*pendingNode)) +
+                             " group=1 controller=" + std::to_string(static_cast<int>(*controller)));
             }
             state().pendingLifelineNodeId.reset();
             tracker.end();
@@ -793,8 +775,8 @@ auto dispatchRequest(FrameTransport& transport,
                 }
                 if (!transport.sendRequest(frame))
                 {
-                    std::cerr << "[ProtocolThread] AddNode send failed (session "
-                              << static_cast<int>(concrete.sessionId) << ")\n";
+                    Logger::error("[ProtocolThread] AddNode send failed (session " +
+                                  std::to_string(static_cast<int>(concrete.sessionId)) + ")");
                 }
             }
             else if constexpr (std::is_same_v<T, HostApi::RemoveNodeRequest>)
@@ -809,8 +791,8 @@ auto dispatchRequest(FrameTransport& transport,
                 }
                 if (!transport.sendRequest(frame))
                 {
-                    std::cerr << "[ProtocolThread] RemoveNode send failed (session "
-                              << static_cast<int>(concrete.sessionId) << ")\n";
+                    Logger::error("[ProtocolThread] RemoveNode send failed (session " +
+                                  std::to_string(static_cast<int>(concrete.sessionId)) + ")");
                 }
             }
             else if constexpr (std::is_same_v<T, HostApi::RemoveFailedNodeRequest>)
@@ -819,9 +801,9 @@ auto dispatchRequest(FrameTransport& transport,
                 ZwaveDataFrame const frame      = HostApi::encodeRemoveFailedNode(concrete);
                 if (!transport.sendRequest(frame))
                 {
-                    std::cerr << "[ProtocolThread] RemoveFailedNode send failed (node "
-                              << static_cast<int>(concrete.nodeId) << ", session "
-                              << static_cast<int>(concrete.sessionId) << ")\n";
+                    Logger::error("[ProtocolThread] RemoveFailedNode send failed (node " +
+                                  std::to_string(static_cast<int>(concrete.nodeId)) + ", session " +
+                                  std::to_string(static_cast<int>(concrete.sessionId)) + ")");
                     state().activeFailedNodeRemoval.reset();
                     MessageBus::publish(MessageBus::RemoveFailedNodeStatus{
                         .nodeId    = concrete.nodeId,
@@ -835,8 +817,9 @@ auto dispatchRequest(FrameTransport& transport,
                 ZwaveDataFrame const frame = HostApi::encodeSendData(concrete);
                 if (!transport.sendRequest(frame))
                 {
-                    std::cerr << "[ProtocolThread] SendData send failed (node " << static_cast<int>(concrete.nodeId)
-                              << ", callback " << static_cast<int>(concrete.callbackId) << ")\n";
+                    Logger::error("[ProtocolThread] SendData send failed (node " +
+                                  std::to_string(static_cast<int>(concrete.nodeId)) + ", callback " +
+                                  std::to_string(static_cast<int>(concrete.callbackId)) + ")");
                     // Synthesize a failure callback so the external API gets
                     // notified instead of waiting indefinitely for a response.
                     MessageBus::publish(MessageBus::SendDataCallback{.callbackId = concrete.callbackId,
@@ -894,7 +877,7 @@ auto runConnectedSession(SerialPort& port) -> void
     {
         if (!isPathSet())
         {
-            std::cout << "[ProtocolThread] device removed, closing serial port\n";
+            Logger::info("[ProtocolThread] device removed, closing serial port");
             port.close();
             break;
         }
@@ -911,81 +894,49 @@ auto runConnectedSession(SerialPort& port) -> void
     }
 }
 
+/// Bind a handler to a bus event, wrap the subscription ID in a guard,
+/// and stash the guard so the protocol thread owns its teardown.
+template <typename Event, typename Handler> auto subscribe(Handler&& handler) -> void
+{
+    state().subscriptions.emplace_back(MessageBus::subscribe<Event>(std::forward<Handler>(handler)));
+}
+
+// Count of bus subscriptions registered by `subscribeBus`. Kept in sync
+// with the body — used only as a `vector::reserve` hint so off-by-one is
+// harmless beyond an extra reallocation.
+constexpr std::size_t SUBSCRIPTION_COUNT = 19;
+
 auto subscribeBus() -> void
 {
-    state().dongleSubscription     = MessageBus::subscribe<MessageBus::DongleStatus>(onDongleStatus);
-    state().addNodeSubscription    = MessageBus::subscribe<MessageBus::AddNodeCommand>(onAddNodeCommand);
-    state().removeNodeSubscription = MessageBus::subscribe<MessageBus::RemoveNodeCommand>(onRemoveNodeCommand);
-    state().removeFailedNodeSubscription =
-        MessageBus::subscribe<MessageBus::RemoveFailedNodeCommand>(onRemoveFailedNodeCommand);
-    state().switchBinarySubscription    = MessageBus::subscribe<MessageBus::SetSwitchBinaryCommand>(onSetSwitchBinary);
-    state().getSwitchBinarySubscription = MessageBus::subscribe<MessageBus::GetSwitchBinaryCommand>(onGetSwitchBinary);
-    state().setBasicSubscription        = MessageBus::subscribe<MessageBus::SetBasicCommand>(onSetBasic);
-    state().getBasicSubscription        = MessageBus::subscribe<MessageBus::GetBasicCommand>(onGetBasic);
-    state().setMultilevelSwitchSubscription =
-        MessageBus::subscribe<MessageBus::SetMultilevelSwitchCommand>(onSetMultilevelSwitch);
-    state().getMultilevelSwitchSubscription =
-        MessageBus::subscribe<MessageBus::GetMultilevelSwitchCommand>(onGetMultilevelSwitch);
-    state().setAssociationSubscription = MessageBus::subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
-    state().removeAssociationSubscription =
-        MessageBus::subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
-    state().getAssociationSubscription = MessageBus::subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);
-    state().getAssociationGroupingsSubscription =
-        MessageBus::subscribe<MessageBus::GetAssociationGroupingsCommand>(onGetAssociationGroupings);
-    state().setMultichannelAssociationSubscription =
-        MessageBus::subscribe<MessageBus::SetMultichannelAssociationCommand>(onSetMultichannelAssociation);
-    state().removeMultichannelAssociationSubscription =
-        MessageBus::subscribe<MessageBus::RemoveMultichannelAssociationCommand>(onRemoveMultichannelAssociation);
-    state().getMultichannelAssociationSubscription =
-        MessageBus::subscribe<MessageBus::GetMultichannelAssociationCommand>(onGetMultichannelAssociation);
-    state().getMultichannelAssociationGroupingsSubscription =
-        MessageBus::subscribe<MessageBus::GetMultichannelAssociationGroupingsCommand>(
-            onGetMultichannelAssociationGroupings);
-    state().behaviorConfigSubscription = MessageBus::subscribe<MessageBus::BehaviorConfig>(
-        [](const MessageBus::BehaviorConfig& cfg) -> void
-        { state().autoLifeline.store(cfg.autoLifeline, std::memory_order_relaxed); });
+    auto& subs = state().subscriptions;
+    subs.reserve(SUBSCRIPTION_COUNT);
+    subscribe<MessageBus::DongleStatus>(onDongleStatus);
+    subscribe<MessageBus::AddNodeCommand>(onAddNodeCommand);
+    subscribe<MessageBus::RemoveNodeCommand>(onRemoveNodeCommand);
+    subscribe<MessageBus::RemoveFailedNodeCommand>(onRemoveFailedNodeCommand);
+    subscribe<MessageBus::SetSwitchBinaryCommand>(onSetSwitchBinary);
+    subscribe<MessageBus::GetSwitchBinaryCommand>(onGetSwitchBinary);
+    subscribe<MessageBus::SetBasicCommand>(onSetBasic);
+    subscribe<MessageBus::GetBasicCommand>(onGetBasic);
+    subscribe<MessageBus::SetMultilevelSwitchCommand>(onSetMultilevelSwitch);
+    subscribe<MessageBus::GetMultilevelSwitchCommand>(onGetMultilevelSwitch);
+    subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);
+    subscribe<MessageBus::RemoveAssociationCommand>(onRemoveAssociation);
+    subscribe<MessageBus::GetAssociationCommand>(onGetAssociation);
+    subscribe<MessageBus::GetAssociationGroupingsCommand>(onGetAssociationGroupings);
+    subscribe<MessageBus::SetMultichannelAssociationCommand>(onSetMultichannelAssociation);
+    subscribe<MessageBus::RemoveMultichannelAssociationCommand>(onRemoveMultichannelAssociation);
+    subscribe<MessageBus::GetMultichannelAssociationCommand>(onGetMultichannelAssociation);
+    subscribe<MessageBus::GetMultichannelAssociationGroupingsCommand>(onGetMultichannelAssociationGroupings);
+    subscribe<MessageBus::BehaviorConfig>([](const MessageBus::BehaviorConfig& cfg) -> void
+                                          { state().autoLifeline.store(cfg.autoLifeline, std::memory_order_relaxed); });
 }
 
 auto unsubscribeBus() -> void
 {
-    MessageBus::unsubscribe(state().behaviorConfigSubscription);
-    MessageBus::unsubscribe(state().getMultichannelAssociationGroupingsSubscription);
-    MessageBus::unsubscribe(state().getMultichannelAssociationSubscription);
-    MessageBus::unsubscribe(state().removeMultichannelAssociationSubscription);
-    MessageBus::unsubscribe(state().setMultichannelAssociationSubscription);
-    MessageBus::unsubscribe(state().getAssociationGroupingsSubscription);
-    MessageBus::unsubscribe(state().getAssociationSubscription);
-    MessageBus::unsubscribe(state().removeAssociationSubscription);
-    MessageBus::unsubscribe(state().setAssociationSubscription);
-    MessageBus::unsubscribe(state().getMultilevelSwitchSubscription);
-    MessageBus::unsubscribe(state().setMultilevelSwitchSubscription);
-    MessageBus::unsubscribe(state().getBasicSubscription);
-    MessageBus::unsubscribe(state().setBasicSubscription);
-    MessageBus::unsubscribe(state().getSwitchBinarySubscription);
-    MessageBus::unsubscribe(state().switchBinarySubscription);
-    MessageBus::unsubscribe(state().removeFailedNodeSubscription);
-    MessageBus::unsubscribe(state().removeNodeSubscription);
-    MessageBus::unsubscribe(state().addNodeSubscription);
-    MessageBus::unsubscribe(state().dongleSubscription);
-    state().getMultichannelAssociationGroupingsSubscription = 0;
-    state().getMultichannelAssociationSubscription          = 0;
-    state().removeMultichannelAssociationSubscription       = 0;
-    state().setMultichannelAssociationSubscription          = 0;
-    state().getAssociationGroupingsSubscription             = 0;
-    state().getAssociationSubscription                      = 0;
-    state().removeAssociationSubscription                   = 0;
-    state().setAssociationSubscription                      = 0;
-    state().getMultilevelSwitchSubscription                 = 0;
-    state().setMultilevelSwitchSubscription                 = 0;
-    state().getBasicSubscription                            = 0;
-    state().setBasicSubscription                            = 0;
-    state().getSwitchBinarySubscription                     = 0;
-    state().switchBinarySubscription                        = 0;
-    state().removeFailedNodeSubscription                    = 0;
-    state().removeNodeSubscription                          = 0;
-    state().addNodeSubscription                             = 0;
-    state().dongleSubscription                              = 0;
-    state().behaviorConfigSubscription                      = 0;
+    // Guards' destructors call MessageBus::unsubscribe; the State
+    // destructor would do the same if the thread exited abnormally.
+    state().subscriptions.clear();
 }
 
 auto zwaveCommunicationThread() -> void
@@ -1013,7 +964,7 @@ auto zwaveCommunicationThread() -> void
         SerialPort port;
         if (!port.open(*path))
         {
-            std::cerr << "[ProtocolThread] failed to open " << *path << "; backing off\n";
+            Logger::error("[ProtocolThread] failed to open " + *path + "; backing off");
             std::this_thread::sleep_for(std::chrono::seconds(1));
             continue;
         }
@@ -1021,9 +972,9 @@ auto zwaveCommunicationThread() -> void
         if (auto introspection = introspectDongle(port); introspection.dongleInfo.has_value())
         {
             const auto& info = *introspection.dongleInfo;
-            std::cout << "[ProtocolThread] dongle " << info.libraryVersion << " (lib type "
-                      << static_cast<int>(info.libraryType) << ", controller node "
-                      << static_cast<int>(info.controllerNodeId) << ")\n";
+            Logger::info("[ProtocolThread] dongle " + info.libraryVersion + " (lib type " +
+                         std::to_string(static_cast<int>(info.libraryType)) + ", controller node " +
+                         std::to_string(static_cast<int>(info.controllerNodeId)) + ")");
             state().controllerNodeId = info.controllerNodeId;
             // Bind the registry to this network *before* seeding from
             // init-data, so seeded entries land in the right home_id.
@@ -1033,8 +984,9 @@ auto zwaveCommunicationThread() -> void
             if (introspection.initData.has_value())
             {
                 const auto& init = *introspection.initData;
-                std::cout << "[ProtocolThread] init-data: " << init.nodeIds.size() << " node(s) included, chip type "
-                          << static_cast<int>(init.chipType) << " rev " << static_cast<int>(init.chipVersion) << '\n';
+                Logger::info("[ProtocolThread] init-data: " + std::to_string(init.nodeIds.size()) +
+                             " node(s) included, chip type " + std::to_string(static_cast<int>(init.chipType)) +
+                             " rev " + std::to_string(static_cast<int>(init.chipVersion)));
                 for (const auto nodeId : init.nodeIds)
                 {
                     NodeRegistry::seed(nodeId);

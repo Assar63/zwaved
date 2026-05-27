@@ -1,0 +1,18 @@
+# Point clangd at the canonical build directory's compile_commands.json
+# so editor IntelliSense knows about codegen outputs under
+# cmake-build-gnu/generated/. Without this, every .cpp that includes
+# MessageBus.hpp (which in turn pulls in generated MessageBus.gen.hpp)
+# lights up with "file not found" red herrings — the build itself is
+# fine, but the editor's view of the world isn't.
+#
+# Picks the gnu preset because it's the project's default (see CLAUDE.md
+# Build section). LLVM-preset users can override locally with
+# ~/.config/clangd/config.yaml or by editing this file in their working
+# tree.
+#
+# Build once after a fresh clone (`cmake --preset gnu && cmake --build
+# cmake-build-gnu`) so the generated files actually exist on disk;
+# clangd needs them present, not just listed in compile_commands.json.
+
+CompileFlags:
+  CompilationDatabase: cmake-build-gnu

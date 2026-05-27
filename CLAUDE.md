@@ -56,6 +56,10 @@ cmake --build cmake-build-gnu --target fix-tidy
 
 The `check` and `fix-tidy` targets read `compile_commands.json` from the build directory, so the preset must have been configured at least once. `CMAKE_EXPORT_COMPILE_COMMANDS=ON` is set in every preset.
 
+### Editor / clangd setup
+
+A `.clangd` file at the repo root points clangd at `cmake-build-gnu/compile_commands.json`, so any clangd-based editor (VS Code with the clangd extension, Neovim's builtin LSP, vim with coc-clangd, Sublime LSP-clangd, Emacs lsp-mode, …) finds the codegen outputs under `cmake-build-gnu/generated/` without further configuration. Without this, every `.cpp` that includes `MessageBus.hpp` (which pulls in the generated `MessageBus.gen.hpp`) shows "file not found" red herrings in the editor — the build itself is fine, but the editor's view of the world isn't. **Build once after a fresh clone** (`cmake --preset gnu && cmake --build cmake-build-gnu`) so the generated files actually exist on disk; clangd needs them present, not just listed in `compile_commands.json`. CLion has its own CMake integration and doesn't strictly need the `.clangd` file. LLVM-preset users (`cmake-build-llvm`) can override locally via `~/.config/clangd/config.yaml` or by editing `.clangd` in their working tree.
+
 ### Pre-commit hook setup
 
 After cloning, run `scripts/install-hooks` once. It points git's `core.hooksPath` at `scripts/git-hooks/`, where the hook scripts (currently `pre-commit`, a symlink to `scripts/check-format`) live in the repo itself rather than in `.git/hooks/`. Every clone — CLI, CLion, VSCode — runs the same hooks without anyone curating `.git/hooks/`, and future hooks (`commit-msg`, `pre-push`, …) just drop into `scripts/git-hooks/` and become live for everyone after a fresh `install-hooks` run.

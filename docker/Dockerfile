@@ -53,6 +53,11 @@ ARG DEBIAN_FRONTEND=noninteractive
 #   * Key fingerprint 60C317803A41BA51845E371A1E9377A2BA9EF27F is the
 #     stable signing key for `ubuntu-toolchain-r` (same one
 #     add-apt-repository would have fetched).
+#   * `make` is required by cmake's default "Unix Makefiles" generator —
+#     without it `cmake --build` fails before invoking gcc.
+#   * libsdbus-c++-dev is taken from Ubuntu's apt (1.4.x) — the daemon
+#     uses the 1.x API (registerSignal / withParameters); 2.x reshuffled
+#     both. Anchoring to apt also matches the dev environment exactly.
 #   * libsystemd-dev is the underlying sd-bus that sdbus-c++ wraps.
 #   * libgtest-dev is needed by `ZWAVED_BUILD_TESTS=ON` (default).
 #   * libncurses-dev for utils/zwave-terminal/ (`ZWAVED_BUILD_UTILS=ON`).
@@ -83,10 +88,12 @@ RUN apt-get update \
         g++-15 \
         git \
         libudev-dev \
+        libsdbus-c++-dev \
         libsqlite3-dev \
         libsystemd-dev \
         libgtest-dev \
         libncurses-dev \
+        make \
         pkg-config \
         python3-yaml \
         python3-jinja2 \
@@ -96,19 +103,12 @@ RUN apt-get update \
     && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-15 100 \
     && rm -rf /var/lib/apt/lists/*
 
-# sdbus-c++ 2.x — Ubuntu still ships 1.x; daemon needs 2.x.
-RUN git clone --depth 1 https://github.com/Kistler-Group/sdbus-cpp.git /tmp/sdbus-cpp \
-    && cmake -S /tmp/sdbus-cpp -B /tmp/sdbus-cpp/build \
-        -DSDBUSCPP_BUILD_CODEGEN=OFF \
-        -DSDBUSCPP_BUILD_TESTS=OFF \
-        -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build /tmp/sdbus-cpp/build --parallel \
-    && cmake --install /tmp/sdbus-cpp/build \
-    && ldconfig \
-    && rm -rf /tmp/sdbus-cpp
-
-# eventpp — header-only, not packaged. find_package needs the install.
-RUN git clone --depth 1 https://github.com/wqking/eventpp.git /tmp/eventpp \
+# eventpp — header-only, not packaged for Ubuntu. find_package needs
+# the install. Pinned to a release tag so a future upstream rename or
+# header reshuffle doesn't silently break CI; bump via single-purpose
+# PR with the changelog quoted (see docs/DEPENDENCIES.md when added).
+ARG EVENTPP_TAG=v0.1.3
+RUN git clone --depth 1 --branch ${EVENTPP_TAG} https://github.com/wqking/eventpp.git /tmp/eventpp \
     && cmake -S /tmp/eventpp -B /tmp/eventpp/build \
     && cmake --install /tmp/eventpp/build \
     && rm -rf /tmp/eventpp
@@ -153,15 +153,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libstdc++6 \
         libudev1 \
+        libsdbus-c++1 \
         libsqlite3-0 \
         libsystemd0 \
     && apt-get purge -y curl gnupg \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
-
-# sdbus-c++ runtime .so from the build stage.
-COPY --from=build /usr/local/lib/libsdbus-c++.so* /usr/local/lib/
-RUN ldconfig
 
 # The binary itself plus the system-bus policy.
 COPY --from=build /src/cmake-build-gnu/zwaved /usr/local/bin/zwaved

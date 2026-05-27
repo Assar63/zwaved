@@ -24,6 +24,7 @@ set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/MultilevelSwitch.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/Basic.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/Battery.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/ManufacturerSpecific.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
@@ -104,6 +105,20 @@ target_include_directories(Battery_test PRIVATE
 target_link_libraries(Battery_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Battery_test)
 gtest_discover_tests(Battery_test)
+
+# ---- ManufacturerSpecific -------------------------------------------
+add_executable(ManufacturerSpecific_test
+    ManufacturerSpecific_test.cpp
+    "${SRC_DIR}/application/ManufacturerSpecific.cpp"
+    "${GENERATED_APPLICATION_DIR}/ManufacturerSpecific.gen.cpp"
+)
+target_include_directories(ManufacturerSpecific_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(ManufacturerSpecific_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(ManufacturerSpecific_test)
+gtest_discover_tests(ManufacturerSpecific_test)
 
 # ---- Association ----------------------------------------------------
 add_executable(Association_test

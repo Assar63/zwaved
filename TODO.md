@@ -37,7 +37,7 @@ companion `zwave-terminal` client, and packaging.
 - [x] **Multilevel Switch (CC `0x26`)** — `SetMultilevelSwitch` (with v2+ `duration` byte) / `GetMultilevelSwitch` over D-Bus; codec decodes both v1 (3-byte) and v2+ (5-byte with `targetValue` + `duration`) Reports. Reports come back through the existing `ApplicationCommand` signal — clients filter on `ccData[0] == 0x26`.
 - [x] **Battery (CC `0x80`)** — `GetBattery` over D-Bus drives Battery GET; the codec decodes Reports and surfaces both the raw `level` byte (0..100 % or `0xFF` low-battery sentinel) and a derived `lowBattery` bool. Reports come back through the typed `BatteryReport` D-Bus signal (and the raw `ApplicationCommand` signal); the v2 charging / health bitfields are ignored today.
 - [ ] [Version (CC 0x86)](https://github.com/Assar63/zwaved/issues/9)
-- [ ] [Manufacturer Specific (CC 0x72)](https://github.com/Assar63/zwaved/issues/10)
+- [x] **Manufacturer Specific (CC `0x72`)** — `GetManufacturerSpecific` over D-Bus drives Manufacturer Specific GET; the codec decodes the v1 Report (CC + cmd + three big-endian u16s) and surfaces `manufacturerId` / `productTypeId` / `productId`. Reports come back through the typed `ManufacturerSpecificReport` D-Bus signal (and the raw `ApplicationCommand` signal); v2 Device Specific Get/Report is a follow-up.
 - [ ] [Z-Wave Plus Info (CC 0x5E)](https://github.com/Assar63/zwaved/issues/11)
 - [ ] [Indicator (CC 0x87)](https://github.com/Assar63/zwaved/issues/12)
 

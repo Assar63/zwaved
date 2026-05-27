@@ -279,6 +279,21 @@ events:
       - { name: level,        type: u8,   default: 0 }
       - { name: lowBattery,   type: bool, default: false }
 
+  - name: ManufacturerSpecificReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Manufacturer Specific (CC 0x72) Report. Republished by
+      the cc-translator from inbound ApplicationCommand frames whose
+      ccData parses as a Manufacturer Specific Report. The three
+      u16 identifiers come from the Z-Wave alliance assignment list
+      and together pin down which physical device this node is.
+    fields:
+      - { name: sourceNodeId,   type: u8,  default: 0 }
+      - { name: manufacturerId, type: u16, default: 0 }
+      - { name: productTypeId,  type: u16, default: 0 }
+      - { name: productId,      type: u16, default: 0 }
+
   - name: MultilevelSwitchReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -409,6 +424,14 @@ events:
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
     doc: Query a node's Battery level.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetManufacturerSpecificCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's manufacturer / product identifiers.
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
@@ -627,6 +650,13 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetBatteryCommand
+
+    - name: GetManufacturerSpecific
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetManufacturerSpecificCommand
 
     - name: SetAssociation
       params:
@@ -877,6 +907,15 @@ dbus:
       triggered_by:
         event: BatteryReport
 
+    - name: ManufacturerSpecificReport
+      params:
+        - { name: sourceNodeId,   dbus: y }
+        - { name: manufacturerId, dbus: q }
+        - { name: productTypeId,  dbus: q }
+        - { name: productId,      dbus: q }
+      triggered_by:
+        event: ManufacturerSpecificReport
+
 # =====================================================================
 # 4. Protocol modules
 # =====================================================================
@@ -993,6 +1032,31 @@ modules:
         decoded_struct:
           - { name: level,      type: u8,   doc: "raw wire byte: 0x00..0x64 = 0..100%, 0xFF = low" }
           - { name: lowBattery, type: bool, doc: "true iff level == LEVEL_LOW_WARNING" }
+
+  - name: ManufacturerSpecific
+    wire:
+      class_byte: 0x72
+      prefix: MANUFACTURER_SPECIFIC
+    description: |
+      Per-node identification — manufacturer ID, product type ID and
+      product ID are all u16 values assigned by the Z-Wave alliance.
+      Together they pin down which physical device the node is, which
+      lets a controller look up device-specific quirks. v2 adds a
+      Device Specific Get / Report pair for serial numbers / OEM
+      data; not implemented today.
+    commands:
+      - name: Get
+        wire:
+          byte: 0x04
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x05
+        decoded_struct:
+          - { name: manufacturerId, type: u16 }
+          - { name: productTypeId,  type: u16 }
+          - { name: productId,      type: u16 }
 
   - name: Basic
     wire:
@@ -1115,3 +1179,15 @@ translations:
       sourceNodeId: event.sourceNodeId
       level:        decoded.level
       lowBattery:   decoded.lowBattery
+
+  - publishes: ManufacturerSpecificReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: ManufacturerSpecific.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:   event.sourceNodeId
+      manufacturerId: decoded.manufacturerId
+      productTypeId:  decoded.productTypeId
+      productId:      decoded.productId

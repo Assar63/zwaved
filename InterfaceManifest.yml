@@ -393,6 +393,37 @@ events:
     fields:
       - { name: sourceNodeId, type: u8, default: 0 }
 
+  - name: PendingCommandEnqueued
+    category: transient
+    direction: { publishers: [pending-queue], subscribers: [external-api] }
+    doc: |
+      A daemon-internal Set/Get for a (typically sleeping) node was
+      stashed in the persistent pending-command queue (`nodes.db` →
+      `pending_commands` table). Drained on the next
+      WAKE_UP_NOTIFICATION by WakeUpOrchestrator (#68). Mostly
+      useful for observability — operators can confirm via D-Bus
+      that "yes, your Set went somewhere it can be retried."
+    constants:
+      - { name: PRIORITY_HIGH,   value: 50,  doc: "matches PendingQueue::PRIORITY_HIGH" }
+      - { name: PRIORITY_NORMAL, value: 100, doc: "matches PendingQueue::PRIORITY_NORMAL" }
+      - { name: PRIORITY_LOW,    value: 200, doc: "matches PendingQueue::PRIORITY_LOW" }
+    fields:
+      - { name: nodeId,   type: u8,  default: 0 }
+      - { name: sequence, type: u32, default: 0, doc: "auto-increment row id; monotonic within a daemon run" }
+      - { name: priority, type: u8,  default: PRIORITY_NORMAL }
+
+  - name: PendingCommandsDrained
+    category: transient
+    direction: { publishers: [pending-queue], subscribers: [external-api] }
+    doc: |
+      The pending-command queue for `nodeId` was flushed (typically
+      by WakeUpOrchestrator after a wake-up). `count` is the number
+      of payloads that were actually queued; 0 is a valid value
+      and means "the wake-up handler asked but had nothing to send."
+    fields:
+      - { name: nodeId, type: u8,  default: 0 }
+      - { name: count,  type: u32, default: 0 }
+
   - name: ConfigurationReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api, orchestrator] }

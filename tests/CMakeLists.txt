@@ -206,6 +206,31 @@ target_link_libraries(MultichannelAssociation_test PRIVATE GTest::gtest GTest::g
 zwaved_test_target(MultichannelAssociation_test)
 gtest_discover_tests(MultichannelAssociation_test)
 
+# ---- PendingQueue ---------------------------------------------------
+# Persistence test target — different from the protocol-layer codecs.
+# Links sqlite3 because the SUT opens a real file; each TEST_F() gets
+# its own tmpdir DB via the fixture and tears it down on completion.
+add_executable(PendingQueue_test
+    PendingQueue_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/pending-queue/PendingQueue.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
+    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
+)
+target_include_directories(PendingQueue_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/pending-queue"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(PendingQueue_test zwaved_codegen)
+target_link_libraries(PendingQueue_test PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    PkgConfig::SQLITE3
+)
+zwaved_test_target(PendingQueue_test)
+gtest_discover_tests(PendingQueue_test)
+
 # ---- FrameTransport -------------------------------------------------
 # Exercises the real poll() / read() / write() syscalls — drives the
 # transport over one end of a socketpair via SerialPort::adoptFd from

@@ -36,7 +36,7 @@ Coordinated plan for two flows: **what happens after a node is included** (lifel
 Implementation order (each shippable independently):
 
 1. ~~[Wake Up CC `0x84`](https://github.com/Assar63/zwaved/issues/15)~~ — **done**; codec + 3 bus commands + 2 typed signals (`WakeUpIntervalReport`, `WakeUpNotification`). 24-bit BE seconds field clamps on encode so a too-large `seconds` doesn't truncate to ~0.
-2. [Per-node pending-command queue (SQLite)](https://github.com/Assar63/zwaved/issues/65) — durable buffer for sleeping nodes
+2. ~~[Per-node pending-command queue (SQLite)](https://github.com/Assar63/zwaved/issues/65)~~ — **done**; `src/pending-queue/`. Class-based `PendingQueue::Queue` owns one SQLite connection + path (shares `nodes.db` with NodeRegistry, separate connection). Production singleton via `PendingQueue::instance()` wired through `StorageConfig`. Three priority levels (HIGH/NORMAL/LOW = 50/100/200). Bus events `PendingCommandEnqueued` / `PendingCommandsDrained` fire from inside the queue. 10 unit tests including persist-across-restart via two `Queue` instances on the same file. Ready for #68 WakeUpOrchestrator to drive.
 3. [WakeUpOrchestrator](https://github.com/Assar63/zwaved/issues/68) — proves the `src/orchestrator/` module shape with the simpler flow first
 4. ~~[Configuration CC `0x70`](https://github.com/Assar63/zwaved/issues/16)~~ — **done**; `SetConfigurationCommand` + `GetConfigurationCommand` + typed `ConfigurationReport`. Codegen extended with `i32` support so `value` doesn't have to be smuggled through a `u32`.
 5. [Device + per-node policy register (SQLite)](https://github.com/Assar63/zwaved/issues/66) — device default + per-node override merge
@@ -106,6 +106,7 @@ Implementation order (each shippable independently):
 - [ ] [deps: documented upgrade path for pinned dependencies](https://github.com/Assar63/zwaved/issues/62)
 - [ ] [ci: scheduled deps-check workflow surfaces drift from upstream](https://github.com/Assar63/zwaved/issues/63)
 - [x] **ci: GitHub Actions on Node-24-supporting majors** — bumped before the 2026-06-02 forced-Node-24 deadline. `actions/checkout` v4→v6, `docker/setup-buildx-action` v3→v4, `docker/build-push-action` v6→v7, `docker/login-action` v3→v4, `docker/metadata-action` v5→v6. None of our inputs changed between majors. Verified via CI run.
+- [ ] [ci: drop `../subdir/` includes — `<>` style on a project include path](https://github.com/Assar63/zwaved/issues/70) — 23 `#include "../foo/bar.hpp"` lines today; one-line `target_include_directories` plus mechanical rewrite. Optional follow-up: split interface headers under `include/zwaved/…`.
 
 ### Quality & docs
 

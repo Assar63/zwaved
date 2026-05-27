@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <sqlite3.h>
@@ -480,6 +481,24 @@ auto NodeRegistry::seed(std::uint8_t nodeId) -> void
             info.nodeId           = nodeId;
             state().nodes[nodeId] = info;
             persistAdd(home, info);
+            return true;
+        });
+}
+
+auto NodeRegistry::updateCommandClasses(std::uint8_t nodeId, std::vector<std::uint8_t> commandClasses) -> void
+{
+    withBoundHome(
+        [&](const std::string& home) -> bool
+        {
+            const auto iter = state().nodes.find(nodeId);
+            if (iter == state().nodes.end())
+            {
+                return false;
+            }
+            // Same UPSERT trick as updateDeviceClass — persistAdd
+            // overwrites the row, preserving the device-class triple.
+            iter->second.commandClasses = std::move(commandClasses);
+            persistAdd(home, iter->second);
             return true;
         });
 }

@@ -21,6 +21,8 @@ constexpr uint8_t CMD_MEMORY_GET_ID            = 0x20;
 constexpr uint8_t CMD_GET_NODE_PROTOCOL_INFO   = 0x41;
 constexpr uint8_t CMD_ADD_NODE_TO_NETWORK      = 0x4A;
 constexpr uint8_t CMD_REMOVE_NODE_FROM_NETWORK = 0x4B;
+constexpr uint8_t CMD_APPLICATION_UPDATE       = 0x49;
+constexpr uint8_t CMD_REQUEST_NODE_INFO        = 0x60;
 constexpr uint8_t CMD_REMOVE_FAILED_NODE_ID    = 0x61;
 
 // FUNC_ID_GET_VERSION library types (response byte 12).
@@ -198,6 +200,49 @@ struct RemoveFailedNodeCallback
     uint8_t status      = STATUS_NOT_REMOVED;
 };
 
+/// Initial-frame parameters for FUNC_ID_ZW_REQUEST_NODE_INFO (0x60).
+/// Asks the dongle to send a NodeInformation Frame request to the
+/// target node. The dongle answers synchronously with a 1-byte
+/// Response (accepted / not); the actual NodeInfo arrives later as
+/// a FUNC_ID_APPLICATION_UPDATE (0x49) frame correlated by nodeId
+/// (not by sessionId — the wire FUNC_ID carries neither).
+struct RequestNodeInfoRequest
+{
+    uint8_t nodeId      = 0;
+    SessionId sessionId = 0;
+};
+
+/// Decoded RESPONSE frame for FUNC_ID_ZW_REQUEST_NODE_INFO (0x60) —
+/// indicates whether the dongle accepted the request and will attempt
+/// to ferry it over the air. The actual node-info payload arrives
+/// later as a FUNC_ID_APPLICATION_UPDATE frame (see ApplicationUpdate).
+struct RequestNodeInfoResponse
+{
+    bool accepted = false;
+};
+
+/// Decoded payload of FUNC_ID_APPLICATION_UPDATE (0x49). Fires
+/// asynchronously from the dongle — both in response to a prior
+/// REQUEST_NODE_INFO and unsolicited (a node sending a NIF after
+/// waking up). `status` distinguishes the case; payload fields are
+/// only populated for STATUS_NODE_INFO_RECEIVED.
+struct ApplicationUpdate
+{
+    static constexpr uint8_t STATUS_SUC_ID                = 0x80;
+    static constexpr uint8_t STATUS_NODE_INFO_REQ_FAILED  = 0x81;
+    static constexpr uint8_t STATUS_NODE_INFO_REQ_DONE    = 0x82;
+    static constexpr uint8_t STATUS_NODE_INFO_RX_RECEIVED = 0x83;
+    static constexpr uint8_t STATUS_NODE_INFO_RECEIVED    = 0x84;
+    static constexpr uint8_t STATUS_NEW_ID_ASSIGNED       = 0x86;
+
+    uint8_t status             = 0;
+    uint8_t nodeId             = 0;
+    uint8_t basicDeviceType    = 0;
+    uint8_t genericDeviceType  = 0;
+    uint8_t specificDeviceType = 0;
+    std::vector<uint8_t> commandClasses;
+};
+
 /// Decoded callback payload for either Add (0x4A) or Remove (0x4B).
 struct NodeStatusCallback
 {
@@ -214,6 +259,7 @@ struct NodeStatusCallback
 [[nodiscard]] auto encodeAddNode(const AddNodeRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeRemoveNode(const RemoveNodeRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeRemoveFailedNode(const RemoveFailedNodeRequest& request) -> ZwaveDataFrame;
+[[nodiscard]] auto encodeRequestNodeInfo(const RequestNodeInfoRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeSendData(const SendDataRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeGetNodeProtocolInfo(uint8_t nodeId) -> ZwaveDataFrame;
 
@@ -258,6 +304,18 @@ struct NodeStatusCallback
 /// Decode the CALLBACK frame for FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61).
 [[nodiscard]] auto decodeRemoveFailedNodeCallback(const ZwaveDataFrame& frame)
     -> std::optional<RemoveFailedNodeCallback>;
+
+/// Decode the RESPONSE frame for FUNC_ID_ZW_REQUEST_NODE_INFO (0x60).
+/// Returns std::nullopt for non-matching frames.
+[[nodiscard]] auto decodeRequestNodeInfoResponse(const ZwaveDataFrame& frame) -> std::optional<RequestNodeInfoResponse>;
+
+/// Decode an asynchronous FUNC_ID_APPLICATION_UPDATE (0x49) frame. The
+/// dongle emits these both in response to a prior REQUEST_NODE_INFO
+/// and spontaneously when a node sends a NIF (e.g. on wake-up).
+/// device-class + commandClasses are only populated when status is
+/// STATUS_NODE_INFO_RECEIVED. Returns std::nullopt for non-matching
+/// frames or truncated payloads.
+[[nodiscard]] auto decodeApplicationUpdate(const ZwaveDataFrame& frame) -> std::optional<ApplicationUpdate>;
 }  // namespace HostApi
 
 #endif  // ZWAVED_HOST_API_HPP

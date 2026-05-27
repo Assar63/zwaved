@@ -50,6 +50,15 @@ auto updateDeviceClass(std::uint8_t nodeId,
                        std::uint8_t genericType,
                        std::uint8_t specificType) -> void;
 
+/// Overwrite only the `commandClasses` list of an existing entry,
+/// leaving its device-class triple intact. Suitable for filling in
+/// CC-list info that arrives asynchronously via
+/// FUNC_ID_APPLICATION_UPDATE (0x49) — whether triggered by an
+/// explicit FUNC_ID_REQUEST_NODE_INFO (0x60) call or by an
+/// unsolicited NIF from a node that just woke up. No-op if no
+/// entry exists for `nodeId`.
+auto updateCommandClasses(std::uint8_t nodeId, std::vector<std::uint8_t> commandClasses) -> void;
+
 /// Thread-safe copy of the current registry, sorted ascending by nodeId.
 [[nodiscard]] auto snapshot() -> std::vector<NodeInfo>;
 }  // namespace NodeRegistry

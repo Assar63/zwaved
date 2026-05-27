@@ -2,6 +2,7 @@
 
 #include "ZwaveDataFrame.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -34,6 +35,20 @@ constexpr std::size_t NPI_OFFSET_BASIC        = 3;
 constexpr std::size_t NPI_OFFSET_GENERIC      = 4;
 constexpr std::size_t NPI_OFFSET_SPECIFIC     = 5;
 constexpr std::size_t NPI_PAYLOAD_BYTES       = 6;
+
+// FUNC_ID_APPLICATION_UPDATE wire-payload offsets and constants.
+// Layout: [0]=status, [1]=nodeId, [2]=length, then `length` bytes of
+// NodeInfo for STATUS_NODE_INFO_RECEIVED — basic, generic, specific,
+// then the supported-CC list.
+constexpr std::size_t AU_OFFSET_STATUS       = 0;
+constexpr std::size_t AU_OFFSET_NODE_ID      = 1;
+constexpr std::size_t AU_OFFSET_LENGTH       = 2;
+constexpr std::size_t AU_OFFSET_BASIC        = 3;
+constexpr std::size_t AU_OFFSET_GENERIC      = 4;
+constexpr std::size_t AU_OFFSET_SPECIFIC     = 5;
+constexpr std::size_t AU_OFFSET_CCS          = 6;
+constexpr std::size_t AU_HEADER_BYTES        = 3;  // status + nodeId + length
+constexpr std::size_t AU_NODE_INFO_MIN_BYTES = 6;  // header + 3 device-class bytes
 
 auto makeFlagByte(const uint8_t mode,
                   const bool power,
@@ -139,6 +154,18 @@ auto HostApi::encodeGetNodeProtocolInfo(uint8_t nodeId) -> ZwaveDataFrame
     ZwaveDataFrame frame;
     frame.setHeader(ZwaveDataFrame::FrameType::REQUEST, CMD_GET_NODE_PROTOCOL_INFO);
     const std::array<uint8_t, 1> payload{nodeId};
+    frame.setPayload(payload.data(), payload.size());
+    return frame;
+}
+
+auto HostApi::encodeRequestNodeInfo(const RequestNodeInfoRequest& request) -> ZwaveDataFrame
+{
+    // Wire frame is just `nodeId` — sessionId is a daemon-side
+    // correlation key for the Response signal and never goes on the
+    // wire (the 0x60 FUNC_ID has no session/callback slot).
+    ZwaveDataFrame frame;
+    frame.setHeader(ZwaveDataFrame::FrameType::REQUEST, CMD_REQUEST_NODE_INFO);
+    const std::array<uint8_t, 1> payload{request.nodeId};
     frame.setPayload(payload.data(), payload.size());
     return frame;
 }
@@ -359,6 +386,57 @@ auto HostApi::decodeRemoveFailedNodeCallback(const ZwaveDataFrame& frame) -> std
     RemoveFailedNodeCallback out;
     out.sessionId = payload[0];
     out.status    = payload[1];
+    return out;
+}
+
+auto HostApi::decodeRequestNodeInfoResponse(const ZwaveDataFrame& frame) -> std::optional<RequestNodeInfoResponse>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_REQUEST_NODE_INFO ||
+        frame.getType() != ZwaveDataFrame::FrameType::RESPONSE)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload  = frame.getPayload();
+    std::size_t const total = frame.getPayloadSize();
+    if (payload == nullptr || total < 1)
+    {
+        return std::nullopt;
+    }
+    RequestNodeInfoResponse out;
+    out.accepted = (payload[0] != 0);
+    return out;
+}
+
+auto HostApi::decodeApplicationUpdate(const ZwaveDataFrame& frame) -> std::optional<ApplicationUpdate>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_APPLICATION_UPDATE ||
+        frame.getType() != ZwaveDataFrame::FrameType::REQUEST)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload  = frame.getPayload();
+    std::size_t const total = frame.getPayloadSize();
+    if (payload == nullptr || total < AU_HEADER_BYTES)
+    {
+        return std::nullopt;
+    }
+    ApplicationUpdate out;
+    out.status            = payload[AU_OFFSET_STATUS];
+    out.nodeId            = payload[AU_OFFSET_NODE_ID];
+    const uint8_t length  = payload[AU_OFFSET_LENGTH];
+    const std::size_t end = std::min<std::size_t>(total, AU_HEADER_BYTES + length);
+    // Other statuses (REQ_FAILED, SUC_ID, ...) typically carry length=0
+    // or unrelated payload — only the status / nodeId are reliable.
+    if (out.status == ApplicationUpdate::STATUS_NODE_INFO_RECEIVED && end >= AU_NODE_INFO_MIN_BYTES)
+    {
+        out.basicDeviceType    = payload[AU_OFFSET_BASIC];
+        out.genericDeviceType  = payload[AU_OFFSET_GENERIC];
+        out.specificDeviceType = payload[AU_OFFSET_SPECIFIC];
+        if (end > AU_OFFSET_CCS)
+        {
+            out.commandClasses.assign(&payload[AU_OFFSET_CCS], &payload[end]);
+        }
+    }
     return out;
 }
 

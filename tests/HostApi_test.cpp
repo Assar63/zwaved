@@ -464,3 +464,121 @@ TEST(HostApi, DecodeRemoveFailedNodeCallbackRejectsResponseType)
     const auto frame = frameFromBytes(bytes);
     EXPECT_FALSE(HostApi::decodeRemoveFailedNodeCallback(frame).has_value());
 }
+
+// ===========================================================================
+// encodeRequestNodeInfo + decodeRequestNodeInfoResponse
+// (FUNC_ID_ZW_REQUEST_NODE_INFO = 0x60)
+// ===========================================================================
+
+TEST(HostApi, EncodeRequestNodeInfo)
+{
+    // Wire frame carries only the nodeId; sessionId is a daemon-side
+    // correlation key and never goes over the wire.
+    HostApi::RequestNodeInfoRequest req{};
+    req.nodeId       = 0x0C;
+    req.sessionId    = 0x42;
+    const auto frame = HostApi::encodeRequestNodeInfo(req);
+    EXPECT_EQ(frame.getCommand(), HostApi::CMD_REQUEST_NODE_INFO);
+    ASSERT_GE(frame.getPayloadSize(), 1);
+    EXPECT_EQ(frame.getPayload()[0], 0x0C);
+}
+
+TEST(HostApi, DecodeRequestNodeInfoResponseAccepted)
+{
+    // Non-zero byte = dongle accepted the request.
+    const auto bytes = buildResponseFrame(HostApi::CMD_REQUEST_NODE_INFO, {0x01});
+    const auto frame = frameFromBytes(bytes);
+    const auto resp  = HostApi::decodeRequestNodeInfoResponse(frame);
+    ASSERT_TRUE(resp.has_value());
+    EXPECT_TRUE(resp->accepted);
+}
+
+TEST(HostApi, DecodeRequestNodeInfoResponseRejected)
+{
+    const auto bytes = buildResponseFrame(HostApi::CMD_REQUEST_NODE_INFO, {0x00});
+    const auto frame = frameFromBytes(bytes);
+    const auto resp  = HostApi::decodeRequestNodeInfoResponse(frame);
+    ASSERT_TRUE(resp.has_value());
+    EXPECT_FALSE(resp->accepted);
+}
+
+TEST(HostApi, DecodeRequestNodeInfoResponseRejectsRequestType)
+{
+    // APPLICATION_UPDATE shares no FUNC_ID with REQUEST_NODE_INFO, so
+    // there's no callback-frame confusion to guard against here — but
+    // double-check the type discriminant anyway.
+    const auto bytes = buildRequestFrame(HostApi::CMD_REQUEST_NODE_INFO, {0x01});
+    const auto frame = frameFromBytes(bytes);
+    EXPECT_FALSE(HostApi::decodeRequestNodeInfoResponse(frame).has_value());
+}
+
+// ===========================================================================
+// decodeApplicationUpdate (FUNC_ID_APPLICATION_UPDATE = 0x49)
+// ===========================================================================
+
+TEST(HostApi, DecodeApplicationUpdateNodeInfoReceived)
+{
+    // status + nodeId + length=06 + basic + generic + specific +
+    // three CC bytes (CC_BASIC, CC_BINARY_SWITCH, CC_BATTERY).
+    const auto bytes = buildRequestFrame(
+        HostApi::CMD_APPLICATION_UPDATE,
+        {HostApi::ApplicationUpdate::STATUS_NODE_INFO_RECEIVED, 0x0C, 0x06, 0x04, 0x10, 0x01, 0x20, 0x25, 0x80});
+    const auto frame  = frameFromBytes(bytes);
+    const auto update = HostApi::decodeApplicationUpdate(frame);
+    ASSERT_TRUE(update.has_value());
+    EXPECT_EQ(update->status, HostApi::ApplicationUpdate::STATUS_NODE_INFO_RECEIVED);
+    EXPECT_EQ(update->nodeId, 0x0C);
+    EXPECT_EQ(update->basicDeviceType, 0x04);
+    EXPECT_EQ(update->genericDeviceType, 0x10);
+    EXPECT_EQ(update->specificDeviceType, 0x01);
+    const std::vector<std::uint8_t> expectedCcs{0x20, 0x25, 0x80};
+    EXPECT_EQ(update->commandClasses, expectedCcs);
+}
+
+TEST(HostApi, DecodeApplicationUpdateReqFailedLeavesPayloadEmpty)
+{
+    // REQ_FAILED typically carries length=0 — only status and nodeId
+    // are reliable. Decoder must not surface garbage device-class
+    // bytes for this case.
+    const auto bytes  = buildRequestFrame(HostApi::CMD_APPLICATION_UPDATE,
+                                          {HostApi::ApplicationUpdate::STATUS_NODE_INFO_REQ_FAILED, 0x0C, 0x00});
+    const auto frame  = frameFromBytes(bytes);
+    const auto update = HostApi::decodeApplicationUpdate(frame);
+    ASSERT_TRUE(update.has_value());
+    EXPECT_EQ(update->status, HostApi::ApplicationUpdate::STATUS_NODE_INFO_REQ_FAILED);
+    EXPECT_EQ(update->nodeId, 0x0C);
+    EXPECT_EQ(update->basicDeviceType, 0);
+    EXPECT_EQ(update->genericDeviceType, 0);
+    EXPECT_EQ(update->specificDeviceType, 0);
+    EXPECT_TRUE(update->commandClasses.empty());
+}
+
+TEST(HostApi, DecodeApplicationUpdateTruncatedNodeInfo)
+{
+    // A length byte that says "6 bytes follow" but with only 3 of
+    // them present must not over-read; the decoder caps `end` at the
+    // actual total. NodeInfo isn't surfaced when end < 6.
+    const auto bytes  = buildRequestFrame(HostApi::CMD_APPLICATION_UPDATE,
+                                          {HostApi::ApplicationUpdate::STATUS_NODE_INFO_RECEIVED, 0x0C, 0x06, 0x04});
+    const auto frame  = frameFromBytes(bytes);
+    const auto update = HostApi::decodeApplicationUpdate(frame);
+    ASSERT_TRUE(update.has_value());
+    EXPECT_EQ(update->basicDeviceType, 0);
+    EXPECT_EQ(update->genericDeviceType, 0);
+    EXPECT_TRUE(update->commandClasses.empty());
+}
+
+TEST(HostApi, DecodeApplicationUpdateRejectsResponseType)
+{
+    const auto bytes = buildResponseFrame(HostApi::CMD_APPLICATION_UPDATE,
+                                          {HostApi::ApplicationUpdate::STATUS_NODE_INFO_RECEIVED, 0x0C, 0x00});
+    const auto frame = frameFromBytes(bytes);
+    EXPECT_FALSE(HostApi::decodeApplicationUpdate(frame).has_value());
+}
+
+TEST(HostApi, DecodeApplicationUpdateRejectsWrongCommand)
+{
+    const auto bytes = buildRequestFrame(0x4A, {0x84, 0x0C, 0x00});
+    const auto frame = frameFromBytes(bytes);
+    EXPECT_FALSE(HostApi::decodeApplicationUpdate(frame).has_value());
+}

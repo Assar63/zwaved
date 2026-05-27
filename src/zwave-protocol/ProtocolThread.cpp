@@ -82,6 +82,7 @@ constexpr std::uint8_t LIFELINE_GROUP_ID = 1;
 using Request = std::variant<HostApi::AddNodeRequest,
                              HostApi::RemoveNodeRequest,
                              HostApi::RemoveFailedNodeRequest,
+                             HostApi::RequestNodeInfoRequest,
                              HostApi::SendDataRequest>;
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
@@ -112,6 +113,13 @@ struct ZwaveProtocolState
     // originating nodeId. Only one removal is in flight at a time
     // because the same request queue serializes them.
     std::optional<HostApi::RemoveFailedNodeRequest> activeFailedNodeRemoval;
+
+    // Tracks the currently-dispatched Request Node Info request so the
+    // synchronous 1-byte Response can be tagged back with the caller's
+    // (nodeId, sessionId). The async APPLICATION_UPDATE that may follow
+    // is not correlated by sessionId — it goes out as a separate
+    // NodeInfoUpdate event keyed on nodeId only.
+    std::optional<HostApi::RequestNodeInfoRequest> activeRequestNodeInfo;
 
     // Cached from FUNC_ID_MEMORY_GET_ID introspection — needed as the
     // member byte for the Z-Wave Plus auto-lifeline SetAssociation.
@@ -280,6 +288,14 @@ auto onRemoveNodeCommand(const MessageBus::RemoveNodeCommand& cmd) -> void
 auto onRemoveFailedNodeCommand(const MessageBus::RemoveFailedNodeCommand& cmd) -> void
 {
     HostApi::RemoveFailedNodeRequest req{};
+    req.nodeId    = cmd.nodeId;
+    req.sessionId = cmd.sessionId;
+    pushRequest(req);
+}
+
+auto onRequestNodeInfoCommand(const MessageBus::RequestNodeInfoCommand& cmd) -> void
+{
+    HostApi::RequestNodeInfoRequest req{};
     req.nodeId    = cmd.nodeId;
     req.sessionId = cmd.sessionId;
     pushRequest(req);
@@ -640,6 +656,60 @@ auto handleRemoveFailedNodeFrame(const ZwaveDataFrame& frame) -> bool
     return false;
 }
 
+/// Handle the synchronous RESPONSE for FUNC_ID_ZW_REQUEST_NODE_INFO.
+/// Returns true if the frame matched. The async NodeInfo (when / if
+/// the node answers) is handled by handleApplicationUpdateFrame —
+/// `accepted=false` here means we won't get one for this request.
+auto handleRequestNodeInfoResponse(const ZwaveDataFrame& frame) -> bool
+{
+    const auto resp = HostApi::decodeRequestNodeInfoResponse(frame);
+    if (!resp.has_value())
+    {
+        return false;
+    }
+    const auto pending = state().activeRequestNodeInfo;
+    MessageBus::publish(MessageBus::RequestNodeInfoStatus{
+        .nodeId    = pending.has_value() ? pending->nodeId : static_cast<std::uint8_t>(0),
+        .sessionId = pending.has_value() ? pending->sessionId : static_cast<std::uint8_t>(0),
+        .accepted  = resp->accepted,
+    });
+    // Done with the in-flight slot either way — the async
+    // APPLICATION_UPDATE is uncorrelated by sessionId.
+    state().activeRequestNodeInfo.reset();
+    return true;
+}
+
+/// Handle an asynchronous FUNC_ID_APPLICATION_UPDATE frame. Returns
+/// true if the frame matched. On STATUS_NODE_INFO_RECEIVED, also
+/// updates NodeRegistry with the device-class triple + CC list.
+auto handleApplicationUpdateFrame(const ZwaveDataFrame& frame) -> bool
+{
+    const auto update = HostApi::decodeApplicationUpdate(frame);
+    if (!update.has_value())
+    {
+        return false;
+    }
+    MessageBus::publish(MessageBus::NodeInfoUpdate{
+        .status             = update->status,
+        .nodeId             = update->nodeId,
+        .basicDeviceType    = update->basicDeviceType,
+        .genericDeviceType  = update->genericDeviceType,
+        .specificDeviceType = update->specificDeviceType,
+        .commandClasses     = update->commandClasses,
+    });
+    if (update->status == HostApi::ApplicationUpdate::STATUS_NODE_INFO_RECEIVED && update->nodeId != 0)
+    {
+        NodeRegistry::updateDeviceClass(
+            update->nodeId, update->basicDeviceType, update->genericDeviceType, update->specificDeviceType);
+        if (!update->commandClasses.empty())
+        {
+            NodeRegistry::updateCommandClasses(update->nodeId, update->commandClasses);
+        }
+    }
+    return true;
+}
+
+// NOLINTNEXTLINE(readability-function-cognitive-complexity): flat per-FUNC_ID dispatch; splintering doesn't help
 auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame& frame) -> void
 {
     if (const auto sendDataCb = HostApi::decodeSendDataCallback(frame); sendDataCb.has_value())
@@ -655,6 +725,14 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
         return;
     }
     if (handleRemoveFailedNodeFrame(frame))
+    {
+        return;
+    }
+    if (handleRequestNodeInfoResponse(frame))
+    {
+        return;
+    }
+    if (handleApplicationUpdateFrame(frame))
     {
         return;
     }
@@ -728,6 +806,7 @@ auto dispatchRequest(FrameTransport& transport,
                      const Request& request) -> void
 {
     std::visit(
+        // NOLINTNEXTLINE(readability-function-cognitive-complexity): per-variant dispatch, see enclosing fn comment
         [&]<typename T0>(T0 const& concrete) -> auto
         {
             using T = std::decay_t<T0>;
@@ -778,6 +857,25 @@ auto dispatchRequest(FrameTransport& transport,
                         .sessionId = concrete.sessionId,
                         .phase     = MessageBus::RemoveFailedNodeStatus::PHASE_RESPONSE,
                         .status    = HostApi::RemoveFailedNodeResponse::STATUS_REMOVE_FAIL});
+                }
+            }
+            else if constexpr (std::is_same_v<T, HostApi::RequestNodeInfoRequest>)
+            {
+                state().activeRequestNodeInfo = concrete;
+                ZwaveDataFrame const frame    = HostApi::encodeRequestNodeInfo(concrete);
+                if (!transport.sendRequest(frame))
+                {
+                    Logger::error("[ProtocolThread] RequestNodeInfo send failed (node " +
+                                  std::to_string(static_cast<int>(concrete.nodeId)) + ", session " +
+                                  std::to_string(static_cast<int>(concrete.sessionId)) + ")");
+                    state().activeRequestNodeInfo.reset();
+                    // Synthesize a Response saying "not accepted" so the
+                    // external API doesn't hang waiting for a signal.
+                    MessageBus::publish(MessageBus::RequestNodeInfoStatus{
+                        .nodeId    = concrete.nodeId,
+                        .sessionId = concrete.sessionId,
+                        .accepted  = false,
+                    });
                 }
             }
             else if constexpr (std::is_same_v<T, HostApi::SendDataRequest>)
@@ -872,7 +970,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 21;
+constexpr std::size_t SUBSCRIPTION_COUNT = 22;
 
 auto subscribeBus() -> void
 {
@@ -882,6 +980,7 @@ auto subscribeBus() -> void
     subscribe<MessageBus::AddNodeCommand>(onAddNodeCommand);
     subscribe<MessageBus::RemoveNodeCommand>(onRemoveNodeCommand);
     subscribe<MessageBus::RemoveFailedNodeCommand>(onRemoveFailedNodeCommand);
+    subscribe<MessageBus::RequestNodeInfoCommand>(onRequestNodeInfoCommand);
     subscribe<MessageBus::SetSwitchBinaryCommand>(onSetSwitchBinary);
     subscribe<MessageBus::GetSwitchBinaryCommand>(onGetSwitchBinary);
     subscribe<MessageBus::SetBasicCommand>(onSetBasic);
@@ -978,6 +1077,7 @@ auto zwaveCommunicationThread() -> void
 
         clearRequests();
         state().activeFailedNodeRemoval.reset();
+        state().activeRequestNodeInfo.reset();
         state().pendingLifelineNodeId.reset();
         runConnectedSession(port);
     }

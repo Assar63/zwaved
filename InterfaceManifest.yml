@@ -245,6 +245,47 @@ events:
       - { name: phase,     type: u8, default: PHASE_RESPONSE }
       - { name: status,    type: u8, default: 0, doc: "interpretation depends on phase" }
 
+  - name: RequestNodeInfoStatus
+    category: transient
+    direction: { publishers: [zwave-protocol], subscribers: [external-api] }
+    doc: |
+      Synchronous response to FUNC_ID_ZW_REQUEST_NODE_INFO (0x60).
+      `accepted` says whether the dongle accepted the request and
+      will attempt to ferry it over the air. The actual NodeInfo
+      payload arrives later — unsolicited — as a NodeInfoUpdate
+      event (which fires for both requested and unprompted NIFs).
+    fields:
+      - { name: nodeId,    type: u8,   default: 0 }
+      - { name: sessionId, type: u8,   default: 0 }
+      - { name: accepted,  type: bool, default: false }
+
+  - name: NodeInfoUpdate
+    category: transient
+    direction: { publishers: [zwave-protocol], subscribers: [external-api, node-registry] }
+    doc: |
+      Decoded FUNC_ID_APPLICATION_UPDATE (0x49) payload. Fires both in
+      response to a prior REQUEST_NODE_INFO and unsolicited (a node
+      sending a NIF after waking up); correlated to a request only by
+      nodeId. `status` distinguishes the case:
+        0x81 NODE_INFO_REQ_FAILED  — node didn't reply within the
+                                     dongle's window (sleeping / out
+                                     of range). device-class and CCs
+                                     are unset.
+        0x84 NODE_INFO_RECEIVED    — full NodeInfo arrived. The
+                                     daemon also updates NodeRegistry.
+      Other statuses (SUC_ID, NEW_ID_ASSIGNED, ...) pass through; the
+      payload-bearing fields are only populated for NODE_INFO_RECEIVED.
+    constants:
+      - { name: STATUS_NODE_INFO_REQ_FAILED, value: 0x81 }
+      - { name: STATUS_NODE_INFO_RECEIVED,   value: 0x84 }
+    fields:
+      - { name: status,             type: u8,    default: 0 }
+      - { name: nodeId,             type: u8,    default: 0 }
+      - { name: basicDeviceType,    type: u8,    default: 0 }
+      - { name: genericDeviceType,  type: u8,    default: 0 }
+      - { name: specificDeviceType, type: u8,    default: 0 }
+      - { name: commandClasses,     type: bytes }
+
   # ---- 2c'. Typed CC reports ---------------------------------------
   # The cc-translator module subscribes to ApplicationCommand events,
   # runs the application/ codec decoders, and republishes typed events
@@ -362,6 +403,19 @@ events:
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
     doc: Drive FUNC_ID_ZW_REMOVE_FAILED_NODE_ID (0x61) for an unresponsive node.
+    fields:
+      - { name: nodeId,    type: u8, default: 0 }
+      - { name: sessionId, type: u8, default: 0 }
+
+  - name: RequestNodeInfoCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Drive FUNC_ID_ZW_REQUEST_NODE_INFO (0x60) — asks the dongle to
+      ferry a NodeInfo request to the target node. Synchronous result
+      comes back as RequestNodeInfoStatus; the actual NodeInfo (when /
+      if the node answers) arrives as NodeInfoUpdate, possibly never
+      for sleeping nodes.
     fields:
       - { name: nodeId,    type: u8, default: 0 }
       - { name: sessionId, type: u8, default: 0 }
@@ -596,6 +650,13 @@ dbus:
         - { name: sessionId, dbus: y, cpp: u8 }
       action:
         publish: RemoveFailedNodeCommand
+
+    - name: RequestNodeInfo
+      params:
+        - { name: nodeId,    dbus: y, cpp: u8 }
+        - { name: sessionId, dbus: y, cpp: u8 }
+      action:
+        publish: RequestNodeInfoCommand
 
     # -- Application CCs -------------------------------------------
     - name: SetSwitchBinary
@@ -874,6 +935,23 @@ dbus:
         - { name: phase,     dbus: y }
         - { name: status,    dbus: y }
       triggered_by: { event: RemoveFailedNodeStatus }
+
+    - name: RequestNodeInfoStatus
+      params:
+        - { name: nodeId,    dbus: y }
+        - { name: sessionId, dbus: y }
+        - { name: accepted,  dbus: b, doc: "true iff the dongle started the request" }
+      triggered_by: { event: RequestNodeInfoStatus }
+
+    - name: NodeInfoUpdate
+      params:
+        - { name: status,             dbus: y, doc: "0x81 REQ_FAILED, 0x84 RECEIVED, others pass through" }
+        - { name: nodeId,             dbus: y }
+        - { name: basicDeviceType,    dbus: y, doc: "populated only for status=0x84" }
+        - { name: genericDeviceType,  dbus: y, doc: "populated only for status=0x84" }
+        - { name: specificDeviceType, dbus: y, doc: "populated only for status=0x84" }
+        - { name: commandClasses,     dbus: ay, doc: "supported list, populated only for status=0x84" }
+      triggered_by: { event: NodeInfoUpdate }
 
     # -- Typed CC-report signals: trigger off the cc-translator's
     # republished typed events. The translator owns the codec call

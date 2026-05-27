@@ -84,6 +84,14 @@ companion `zwave-terminal` client, and packaging.
 - [ ] [700-series silicon support](https://github.com/Assar63/zwaved/issues/34)
 - [ ] [Multi-dongle: drive several controllers from one daemon](https://github.com/Assar63/zwaved/issues/35)
 
+### Dependency hygiene
+
+- [x] **CI build green** — `docker/Dockerfile` fixed in `1e69248`: added `make` to the toolchain apt list; switched sdbus-c++ from `git clone --depth 1 master` (which silently tracked upstream 2.x's renamed API) to `libsdbus-c++-dev` from apt (1.4.x, matches dev); pinned eventpp to `v0.1.3` via an `EVENTPP_TAG` build-arg. First green build since the workflow was introduced.
+- [ ] [docs: inventory dependencies + versions in docs/DEPENDENCIES.md](https://github.com/Assar63/zwaved/issues/60)
+- [ ] [ci: durable pinning policy for third-party dependencies](https://github.com/Assar63/zwaved/issues/61)
+- [ ] [deps: documented upgrade path for pinned dependencies](https://github.com/Assar63/zwaved/issues/62)
+- [ ] [ci: scheduled deps-check workflow surfaces drift from upstream](https://github.com/Assar63/zwaved/issues/63)
+
 ### Quality & docs
 
 - [x] **Unit tests** — six modules covered: `HostApi` (encoder + decoder round-trips for every `FUNC_ID` the daemon issues), `BinarySwitch` (encode + decodeReport), `Basic` (encode SET / GET + decode v1 3-byte and v2+ 5-byte Reports), `Association` (encode + decode for both Report and GroupingsReport), `MultichannelAssociation` (encode/decode for whole-node + endpoint-pair members, REMOVE-all elision of MARKER, malformed-frame rejection), `FrameTransport` (passive `pumpOnce` paths plus active `sendRequest` happy / NAK-retry / CAN-retry paths, driven over a `socketpair(2)` via `SerialPort::adoptFd`). GoogleTest via `libgtest-dev`; `ZWAVED_BUILD_TESTS=ON` default; 91/91 in ~2.5s via `ctest --test-dir cmake-build-gnu`.

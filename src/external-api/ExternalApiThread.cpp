@@ -1,9 +1,9 @@
+#include "../logger/Logger.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 #include "IExternalApi.hpp"
 
 #include <atomic>
 #include <chrono>
-#include <iostream>
 #include <memory>
 #include <thread>
 
@@ -42,7 +42,7 @@ struct ExternalApiState
         {
             thread.join();
         }
-        std::cout << "External API thread shutdown complete\n";
+        Logger::info("External API thread shutdown complete");
     }
 
     ExternalApiState()                                               = default;
@@ -66,7 +66,7 @@ auto externalApiThread() -> void
     state().backend = ExternalApi::createBackend();
     if (!state().backend)
     {
-        std::cerr << "[ExternalApi] no backend compiled; thread idling\n";
+        Logger::warn("[ExternalApi] no backend compiled; thread idling");
         while (state().running)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(IDLE_SLEEP_MS));
@@ -75,7 +75,7 @@ auto externalApiThread() -> void
     }
 
     state().backend->run(state().running);
-    std::cout << "[ExternalApi] backend run() returned\n";
+    Logger::info("[ExternalApi] backend run() returned");
 }
 
 __attribute__((constructor(CONFIG_ZWAVE_EXTERNAL_API_PRIO))) auto startExternalApiThread() -> void

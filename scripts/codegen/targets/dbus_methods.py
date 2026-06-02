@@ -122,11 +122,12 @@ def _dbus_to_cpp(dbus_sig: str) -> str:
 # represents its return shape. Hand-keyed for now; revisit when
 # read_cached: lands.
 RETURN_TUPLE_ALIASES: dict[str, str] = {
-    "GetNodes":         "NodeTuple",
-    "GetDongleInfo":    "DongleInfoTuple",
-    "GetInitData":      "InitDataTuple",
-    "GetVersion":       "DaemonVersionTuple",
-    "GetNetworkStatus": "NetworkStatusTuple",
+    "GetNodes":           "NodeTuple",
+    "GetDongleInfo":      "DongleInfoTuple",
+    "GetInitData":        "InitDataTuple",
+    "GetVersion":         "DaemonVersionTuple",
+    "GetNetworkStatus":   "NetworkStatusTuple",
+    "ListDevicePolicies": "DevicePolicyTuple",
 }
 
 

@@ -77,6 +77,13 @@ struct DeviceId
     std::uint16_t productId      = 0;
 };
 
+/// One row of the device-default table — identity + its policy.
+struct DevicePolicyRow
+{
+    DeviceId device;
+    Policy policy;
+};
+
 class Register
 {
   public:
@@ -101,6 +108,10 @@ class Register
 
     [[nodiscard]] auto devicePolicy(DeviceId device) const -> std::optional<Policy>;
     [[nodiscard]] auto nodeOverride(std::uint8_t nodeId) const -> std::optional<Policy>;
+
+    /// Every device-default policy, in no particular order. Powers the
+    /// D-Bus ListDevicePolicies method (#69).
+    [[nodiscard]] auto listDevicePolicies() const -> std::vector<DevicePolicyRow>;
 
     /// Record a node's manufacturer triple (learned from a
     /// ManufacturerSpecific Report). Lets `effectivePolicy` find the

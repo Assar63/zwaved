@@ -424,6 +424,22 @@ events:
       - { name: nodeId, type: u8,  default: 0 }
       - { name: count,  type: u32, default: 0 }
 
+  - name: WakeUpCycleComplete
+    category: transient
+    direction: { publishers: [orchestrator], subscribers: [external-api] }
+    doc: |
+      WakeUpOrchestrator (#68) finished servicing a wake-up for
+      `nodeId`: it drained `drainedCount` pending payloads, dispatched
+      each as a SendData, then issued WAKE_UP_NO_MORE_INFORMATION so
+      the node could return to sleep. `drainedCount == 0` is normal —
+      the node woke, had nothing waiting, and was sent straight back to
+      sleep. Distinct from PendingCommandsDrained (which fires when the
+      queue is read, before the commands and the sleep nudge are sent);
+      this marks the *end* of the whole cycle. Observability only.
+    fields:
+      - { name: nodeId,       type: u8,  default: 0 }
+      - { name: drainedCount, type: u32, default: 0 }
+
   - name: ConfigurationReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api, orchestrator] }
@@ -749,6 +765,24 @@ events:
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
+
+  - name: SendDataCommand
+    category: command
+    direction: { publishers: [orchestrator], subscribers: [zwave-protocol] }
+    doc: |
+      Send a pre-encoded application-command payload to a node. Unlike
+      the per-CC command events, this carries the raw Command Class
+      bytes verbatim in `payload` — used by WakeUpOrchestrator (#68) to
+      replay entries drained from the persistent pending-command queue,
+      which stores opaque encoded bytes rather than typed commands.
+      ProtocolThread wraps `payload` in a FUNC_ID_ZW_SEND_DATA envelope
+      addressed to `nodeId`. Internal conduit only — not exposed on
+      D-Bus (external clients enqueue indirectly via the typed Set/Get
+      methods).
+    fields:
+      - { name: nodeId,     type: u8,    default: 0 }
+      - { name: payload,    type: bytes }
+      - { name: callbackId, type: u8,    default: 0 }
 
   - name: GetBasicCommand
     category: command
@@ -1362,6 +1396,13 @@ dbus:
         - { name: sourceNodeId, dbus: y }
       triggered_by:
         event: WakeUpNotification
+
+    - name: WakeUpCycleComplete
+      params:
+        - { name: nodeId,       dbus: y }
+        - { name: drainedCount, dbus: u }
+      triggered_by:
+        event: WakeUpCycleComplete
 
 # =====================================================================
 # 4. Protocol modules

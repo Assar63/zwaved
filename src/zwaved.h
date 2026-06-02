@@ -21,6 +21,11 @@
 //                       D-Bus signals without ever including a CC
 //                       codec header — the bus is the only seam.
 //   201..203          — dongle / protocol / external-api workers.
+//   204 Orchestrators  — bus-only policy/state machines (WakeUp #68,
+//                        Inclusion #67). Come up after the workers so
+//                        every command subscriber is already wired;
+//                        they own no thread and react synchronously to
+//                        bus events.
 //
 // Toolchain note: priorities 0..100 are reserved, so Logger gets the
 // lowest available slot (101).
@@ -31,4 +36,5 @@ constexpr int CONFIG_CC_TRANSLATOR_PRIO      = 110;
 constexpr int CONFIG_ZWAVE_DONGLE_PRIO       = 201;
 constexpr int CONFIG_ZWAVE_PROTOCOL_PRIO     = 202;
 constexpr int CONFIG_ZWAVE_EXTERNAL_API_PRIO = 203;
+constexpr int CONFIG_ORCHESTRATOR_PRIO       = 204;
 #endif  // ZWAVED_ZWAVED_H

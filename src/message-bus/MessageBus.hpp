@@ -17,8 +17,15 @@
  * return promptly and not block. State events flagged retained
  * (see IsRetained) are cached: a new subscriber receives the most
  * recent published value once, immediately, on subscribe — so late
- * starters don't miss the current state. Handlers must not call
- * publish() or subscribe() reentrantly.
+ * starters don't miss the current state. A handler may publish() or
+ * subscribe() reentrantly: the nested call runs to completion as a
+ * depth-first dispatch on the same thread before the outer handler
+ * resumes (the bus mutex is recursive). This is how the cc-translator
+ * republishes typed events from an ApplicationCommand handler and how
+ * the orchestrators issue commands from notification handlers. Avoid
+ * unbounded recursion (a handler that re-publishes the same event it
+ * handles), and remember that a reentrant publish still runs under the
+ * bus mutex, so it serializes against every other thread.
  *
  * Adding a new event type:
  *   1. Add the event under `events:` in InterfaceManifest.yml.

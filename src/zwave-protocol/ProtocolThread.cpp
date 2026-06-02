@@ -371,6 +371,14 @@ auto onSendWakeUpNoMoreInformation(const MessageBus::SendWakeUpNoMoreInformation
     pushSendData(cmd.nodeId, cmd.callbackId, WakeUp::encodeNoMoreInformation());
 }
 
+// Raw pre-encoded payload (e.g. a queued command replayed by
+// WakeUpOrchestrator on wake-up). The bytes are already a complete CC
+// frame, so they go straight into the SendData envelope.
+auto onSendData(const MessageBus::SendDataCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, cmd.payload);
+}
+
 auto onSetConfiguration(const MessageBus::SetConfigurationCommand& cmd) -> void
 {
     // `isSigned` is advisory metadata for downstream tooling; the
@@ -1025,7 +1033,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 29;
+constexpr std::size_t SUBSCRIPTION_COUNT = 30;
 
 auto subscribeBus() -> void
 {
@@ -1049,6 +1057,7 @@ auto subscribeBus() -> void
     subscribe<MessageBus::SetWakeUpIntervalCommand>(onSetWakeUpInterval);
     subscribe<MessageBus::GetWakeUpIntervalCommand>(onGetWakeUpInterval);
     subscribe<MessageBus::SendWakeUpNoMoreInformationCommand>(onSendWakeUpNoMoreInformation);
+    subscribe<MessageBus::SendDataCommand>(onSendData);
     subscribe<MessageBus::SetConfigurationCommand>(onSetConfiguration);
     subscribe<MessageBus::GetConfigurationCommand>(onGetConfiguration);
     subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);

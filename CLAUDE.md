@@ -24,6 +24,8 @@ cmake --preset llvm-tidy && cmake --build cmake-build-llvm-tidy
 
 Requires: GCC 15 (`g++-15`), LLVM/Clang 20 (`clang++-20`), CMake 3.20+, `libudev-dev`, `libsdbus-c++-dev` (pulls in `libsystemd-dev`), `libsqlite3-dev`, eventpp (header-only via `find_package`). C++26 standard.
 
+`scripts/bootstrap` does one-shot setup (prereq check / apt, `install-hooks`, configure a preset, build once, point `.clangd` at the build dir). Dual-mode: run standalone (downloaded) it clones into a target dir then prepares; run inside a checkout (`./scripts/bootstrap`) it just prepares. Idempotent; `--help` for flags. The manual steps below are the fallback.
+
 The CMake cache option `ZWAVED_EXTERNAL_API` selects which external transports are built. Accepted values: `dbus` (default), `ubus` (placeholder, not implemented), `both`.
 
 The CMake cache option `ZWAVED_LOGGER_SINK` selects the logger backend. Accepted values: `stdout` (default — picked up by journald under systemd) or `syslog` (calls `syslog(3)` with `LOG_DAEMON`; for OpenWRT / non-systemd hosts).

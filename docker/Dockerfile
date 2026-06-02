@@ -127,6 +127,26 @@ RUN cmake --preset gnu \
     && ctest --test-dir cmake-build-gnu --output-on-failure
 
 # ---------------------------------------------------------------------
+# Stage 2b: bootstrap-smoke — prove scripts/bootstrap's in-place setup
+# path works in the canonical toolchain environment. Runs configure +
+# wiring only (`--no-build`): the compile + ctest are already covered by
+# the `build` stage, so this stays cheap and just exercises bootstrap's
+# orchestration — mode detection, prereq check (deps already present, so
+# `--skip-deps` just reports), install-hooks, preset configure, and the
+# `.clangd` rewrite. CI targets this stage on every push / PR.
+# `git config --add safe.directory` heads off git's "dubious ownership"
+# guard, since `COPY . .` leaves the tree root-owned.
+# ---------------------------------------------------------------------
+FROM toolchain AS bootstrap-smoke
+
+WORKDIR /src
+COPY . .
+RUN git config --global --add safe.directory /src \
+    && scripts/bootstrap --here --skip-deps --no-build \
+    && test -f cmake-build-gnu/compile_commands.json \
+    && grep -q 'CompilationDatabase: cmake-build-gnu' .clangd
+
+# ---------------------------------------------------------------------
 # Stage 3: runtime — ubuntu base + dynamic deps + the daemon binary.
 # Drops the build toolchain to keep the image small.
 # ---------------------------------------------------------------------

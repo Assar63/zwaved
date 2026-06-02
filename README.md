@@ -28,6 +28,40 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 See the [Dependencies](#dependencies) section below for what each
 library does, where it's used, and how CMake discovers it.
 
+## Quick start (`scripts/bootstrap`)
+
+The fastest way from nothing — or a fresh clone — to a built,
+ready-to-develop tree is `scripts/bootstrap`. It checks (and on
+Debian/Ubuntu can install) the prerequisites, installs the git hooks,
+configures a CMake preset, builds once so the codegen outputs exist for
+clangd, and points `.clangd` at the configured build directory. It's
+idempotent — safe to re-run.
+
+**From nothing** — download, read it, then run (it clones, then prepares):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Assar63/zwaved/master/scripts/bootstrap -o bootstrap
+less bootstrap            # inspect before running unreviewed code
+bash bootstrap ~/src/zwaved
+```
+
+> Prefer download-then-run over `curl … | bash` — piping a remote script
+> straight into a shell runs unreviewed code as your user.
+
+**Inside an existing clone** — it detects the checkout and just prepares it:
+
+```bash
+git clone https://github.com/Assar63/zwaved.git && cd zwaved
+./scripts/bootstrap
+```
+
+Useful flags: `--preset llvm` (default `gnu`; also `gnu-tidy`, `llvm-tidy`),
+`--ref <branch|tag>`, `--skip-deps` (don't touch apt — just check and
+report), `--help`. On non-Debian hosts, or when the toolchain (`g++-15`,
+`clang-20`) or `eventpp` isn't apt-installable, bootstrap prints what's
+missing and points at `docker/Dockerfile` for the exact recipe; the manual
+steps below remain the fallback.
+
 ## Devcontainer
 
 A `.devcontainer/devcontainer.json` is provided for VS Code (and any

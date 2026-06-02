@@ -13,6 +13,7 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <ncurses.h>
@@ -111,6 +112,29 @@ constexpr std::uint64_t SECONDS_PER_MINUTE = 60;
 // Max characters of node-id input read from the bottom-row prompt
 // (3 digits + null terminator, with slack).
 constexpr std::size_t NODE_ID_INPUT_BUFFER = 8;
+
+// Wider input buffer for signed Configuration values (e.g. "-2147483648").
+constexpr std::size_t INT_INPUT_BUFFER = 16;
+
+// PolicyRegister BLOB wire format (see src/policy-register/PolicyRegister.cpp).
+// Reimplemented here because the terminal is a standalone D-Bus client —
+// it doesn't link daemon code, same as the NodeTuple / status-code
+// duplication elsewhere in this file. The leading version byte makes a
+// format change detectable rather than silently misparsed.
+constexpr std::uint8_t POLICY_BLOB_VERSION    = 1;
+constexpr std::uint8_t POLICY_KIND_CONFIG     = 1;
+constexpr std::uint8_t POLICY_KIND_ASSOC      = 2;
+constexpr std::uint8_t POLICY_KIND_WAKEUP     = 3;
+constexpr std::size_t POLICY_CONFIG_BODY_LEN  = 7;  // parameter, size, signed, value(4)
+constexpr std::size_t POLICY_ASSOC_HEADER_LEN = 2;  // groupId, memberCount
+constexpr std::size_t POLICY_WAKEUP_BODY_LEN  = 5;  // intervalSeconds(4), notificationNodeId
+
+// Valid Configuration value sizes per the CC spec.
+constexpr int CONFIG_SIZE_MIN = 1;
+constexpr int CONFIG_SIZE_MAX = 4;
+
+constexpr unsigned BITS_PER_BYTE      = 8;
+constexpr std::uint32_t U32_BYTE_MASK = 0xFFU;
 
 struct ActivityState
 {
@@ -278,6 +302,46 @@ auto promptNodeId(const char* label) -> std::optional<std::uint8_t>
     return promptByte(label, NODE_ID_MIN, NODE_ID_MAX);
 }
 
+/// Like promptByte but for a signed 32-bit integer (Configuration values
+/// are i32). Same blocking-echo prompt mechanics. Returns std::nullopt on
+/// empty input, parse error, or out-of-i32-range value.
+auto promptInt32(const char* label) -> std::optional<std::int32_t>
+{
+    const int rows = getmaxy(stdscr);
+    move(rows - 1, 0);
+    clrtoeol();
+    mvprintw(rows - 1, 0, "%s ", label);
+    refresh();
+
+    echo();
+    curs_set(1);
+    timeout(-1);  // blocking
+
+    std::array<char, INT_INPUT_BUFFER> buffer{};
+    int const got = getnstr(buffer.data(), static_cast<int>(buffer.size()) - 1);
+
+    noecho();
+    curs_set(0);
+    timeout(UI_REFRESH_MS);
+
+    if (got != OK)
+    {
+        return std::nullopt;
+    }
+    const std::string text(buffer.data());
+    if (text.empty())
+    {
+        return std::nullopt;
+    }
+    std::int32_t value          = 0;
+    auto const [ptr, errorCode] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (errorCode != std::errc{})
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
 auto draw(std::uint8_t lastSession) -> void
 {
     erase();
@@ -304,6 +368,8 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [n] Network status");
     mvprintw(row++, 0, "  [f] Remove failed node (prompts for node id)");
     mvprintw(row++, 0, "  [i] Dongle info");
+    mvprintw(row++, 0, "  [p] View effective policy   [o] View node override");
+    mvprintw(row++, 0, "  [c] Set node config override [x] Delete node override [d] List device policies");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));
     mvprintw(row++, 0, "  [q] Quit");
     mvhline(row++, 0, '-', getmaxx(stdscr));
@@ -733,6 +799,195 @@ auto formatCcList(const std::vector<std::uint8_t>& ccs) -> std::string
     return "supports=" + formatCcRange(ccs.begin(), mark) + " controls=" + formatCcRange(mark + 1, ccs.end());
 }
 
+// ---- Policy (#66/#69) ------------------------------------------------
+// A decoded policy entry. Tagged by `kind`; only the matching fields are
+// meaningful. Mirrors PolicyRegister::PolicyEntry without pulling in the
+// daemon's variant type.
+struct PolicyEntry
+{
+    std::uint8_t kind = 0;
+    // POLICY_KIND_CONFIG
+    std::uint8_t parameter = 0;
+    std::uint8_t size      = 1;
+    bool isSigned          = false;
+    std::int32_t value     = 0;
+    // POLICY_KIND_ASSOC
+    std::uint8_t groupId = 0;
+    std::vector<std::uint8_t> members;
+    // POLICY_KIND_WAKEUP
+    std::uint32_t intervalSeconds   = 0;
+    std::uint8_t notificationNodeId = 0;
+};
+
+// Read a big-endian u32 at `pos`, advancing it. Caller has bounds-checked.
+auto readU32Be(const std::vector<std::uint8_t>& bytes, std::size_t& pos) -> std::uint32_t
+{
+    const std::uint32_t value = (static_cast<std::uint32_t>(bytes[pos]) << (3 * BITS_PER_BYTE)) |
+                                (static_cast<std::uint32_t>(bytes[pos + 1]) << (2 * BITS_PER_BYTE)) |
+                                (static_cast<std::uint32_t>(bytes[pos + 2]) << BITS_PER_BYTE) |
+                                static_cast<std::uint32_t>(bytes[pos + 3]);
+    pos += 4;
+    return value;
+}
+
+auto appendU32Be(std::vector<std::uint8_t>& out, std::uint32_t value) -> void
+{
+    out.push_back(static_cast<std::uint8_t>((value >> (3 * BITS_PER_BYTE)) & U32_BYTE_MASK));
+    out.push_back(static_cast<std::uint8_t>((value >> (2 * BITS_PER_BYTE)) & U32_BYTE_MASK));
+    out.push_back(static_cast<std::uint8_t>((value >> BITS_PER_BYTE) & U32_BYTE_MASK));
+    out.push_back(static_cast<std::uint8_t>(value & U32_BYTE_MASK));
+}
+
+auto decodePolicy(const std::vector<std::uint8_t>& bytes) -> std::optional<std::vector<PolicyEntry>>
+{
+    std::size_t pos = 0;
+    if (bytes.size() < 2 || bytes[pos++] != POLICY_BLOB_VERSION)
+    {
+        return std::nullopt;
+    }
+    const std::uint8_t count = bytes[pos++];
+    std::vector<PolicyEntry> out;
+    for (std::uint8_t idx = 0; idx < count; ++idx)
+    {
+        if (pos >= bytes.size())
+        {
+            return std::nullopt;
+        }
+        PolicyEntry entry;
+        entry.kind = bytes[pos++];
+        if (entry.kind == POLICY_KIND_CONFIG)
+        {
+            if (pos + POLICY_CONFIG_BODY_LEN > bytes.size())
+            {
+                return std::nullopt;
+            }
+            entry.parameter = bytes[pos++];
+            entry.size      = bytes[pos++];
+            entry.isSigned  = bytes[pos++] != 0;
+            entry.value     = static_cast<std::int32_t>(readU32Be(bytes, pos));
+        }
+        else if (entry.kind == POLICY_KIND_ASSOC)
+        {
+            if (pos + POLICY_ASSOC_HEADER_LEN > bytes.size())
+            {
+                return std::nullopt;
+            }
+            entry.groupId               = bytes[pos++];
+            const std::uint8_t memberCt = bytes[pos++];
+            if (pos + memberCt > bytes.size())
+            {
+                return std::nullopt;
+            }
+            for (std::uint8_t member = 0; member < memberCt; ++member)
+            {
+                entry.members.push_back(bytes[pos++]);
+            }
+        }
+        else if (entry.kind == POLICY_KIND_WAKEUP)
+        {
+            if (pos + POLICY_WAKEUP_BODY_LEN > bytes.size())
+            {
+                return std::nullopt;
+            }
+            entry.intervalSeconds    = readU32Be(bytes, pos);
+            entry.notificationNodeId = bytes[pos++];
+        }
+        else
+        {
+            return std::nullopt;
+        }
+        out.push_back(std::move(entry));
+    }
+    return out;
+}
+
+auto encodePolicy(const std::vector<PolicyEntry>& policy) -> std::vector<std::uint8_t>
+{
+    std::vector<std::uint8_t> out;
+    out.push_back(POLICY_BLOB_VERSION);
+    out.push_back(static_cast<std::uint8_t>(policy.size()));
+    for (const auto& entry : policy)
+    {
+        out.push_back(entry.kind);
+        if (entry.kind == POLICY_KIND_CONFIG)
+        {
+            out.push_back(entry.parameter);
+            out.push_back(entry.size);
+            out.push_back(entry.isSigned ? 1 : 0);
+            appendU32Be(out, static_cast<std::uint32_t>(entry.value));
+        }
+        else if (entry.kind == POLICY_KIND_ASSOC)
+        {
+            out.push_back(entry.groupId);
+            out.push_back(static_cast<std::uint8_t>(entry.members.size()));
+            for (const auto member : entry.members)
+            {
+                out.push_back(member);
+            }
+        }
+        else if (entry.kind == POLICY_KIND_WAKEUP)
+        {
+            appendU32Be(out, entry.intervalSeconds);
+            out.push_back(entry.notificationNodeId);
+        }
+    }
+    return out;
+}
+
+// Log a decoded policy under `header`. Empty policy logs "(empty)";
+// a blob that fails to decode logs a hex dump so it's still visible.
+auto logPolicy(const std::string& header, const std::vector<std::uint8_t>& bytes) -> void
+{
+    logLine(header);
+    if (bytes.empty())
+    {
+        logLine("    (none)");
+        return;
+    }
+    const auto policy = decodePolicy(bytes);
+    if (!policy.has_value())
+    {
+        logLine("    (undecodable blob, " + std::to_string(bytes.size()) + " bytes)");
+        return;
+    }
+    if (policy->empty())
+    {
+        logLine("    (empty)");
+        return;
+    }
+    for (const auto& entry : *policy)
+    {
+        std::ostringstream stream;
+        if (entry.kind == POLICY_KIND_CONFIG)
+        {
+            stream << "    config param=" << static_cast<unsigned>(entry.parameter)
+                   << " size=" << static_cast<unsigned>(entry.size) << " value=" << entry.value
+                   << (entry.isSigned ? " (signed)" : "");
+        }
+        else if (entry.kind == POLICY_KIND_ASSOC)
+        {
+            stream << "    assoc group=" << static_cast<unsigned>(entry.groupId) << " members=[";
+            bool first = true;
+            for (const auto member : entry.members)
+            {
+                if (!first)
+                {
+                    stream << " ";
+                }
+                first = false;
+                stream << static_cast<unsigned>(member);
+            }
+            stream << "]";
+        }
+        else if (entry.kind == POLICY_KIND_WAKEUP)
+        {
+            stream << "    wakeup interval=" << entry.intervalSeconds
+                   << "s notify=" << static_cast<unsigned>(entry.notificationNodeId);
+        }
+        logLine(stream.str());
+    }
+}
+
 auto handleNetworkStatus(sdbus::IProxy& proxy) -> void
 {
     using NetworkStatusTuple = sdbus::Struct<bool,
@@ -1038,6 +1293,185 @@ auto handleListNodes(sdbus::IProxy& proxy) -> void
         }
     }
 }
+
+auto handleViewEffectivePolicy(sdbus::IProxy& proxy) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("GetEffectivePolicy: cancelled or invalid node id");
+        return;
+    }
+    std::vector<std::uint8_t> bytes;
+    try
+    {
+        proxy.callMethod("GetEffectivePolicy").onInterface(IFACE_NAME).withArguments(*nodeId).storeResultsTo(bytes);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetEffectivePolicy failed: "} + err.what());
+        return;
+    }
+    logPolicy("Effective policy node=" + std::to_string(static_cast<unsigned>(*nodeId)) + ":", bytes);
+}
+
+auto handleViewNodeOverride(sdbus::IProxy& proxy) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("GetNodeOverride: cancelled or invalid node id");
+        return;
+    }
+    std::vector<std::uint8_t> bytes;
+    try
+    {
+        proxy.callMethod("GetNodeOverride").onInterface(IFACE_NAME).withArguments(*nodeId).storeResultsTo(bytes);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetNodeOverride failed: "} + err.what());
+        return;
+    }
+    logPolicy("Node override node=" + std::to_string(static_cast<unsigned>(*nodeId)) + ":", bytes);
+}
+
+auto handleDeleteNodeOverride(sdbus::IProxy& proxy) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("DeleteNodeOverride: cancelled or invalid node id");
+        return;
+    }
+    try
+    {
+        proxy.callMethod("DeleteNodeOverride").onInterface(IFACE_NAME).withArguments(*nodeId);
+        logLine("DeleteNodeOverride node=" + std::to_string(static_cast<unsigned>(*nodeId)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"DeleteNodeOverride failed: "} + err.what());
+    }
+}
+
+// Add or update a single Configuration entry in a node's override,
+// preserving any other entries: read the current override, decode it,
+// upsert the entry keyed by parameter, re-encode, and write it back.
+auto handleSetConfigOverride(sdbus::IProxy& proxy) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("SetNodeOverride: cancelled or invalid node id");
+        return;
+    }
+    auto parameter = promptByte("Config parameter (0-255):", BYTE_MIN, BYTE_MAX);
+    if (!parameter.has_value())
+    {
+        logLine("SetNodeOverride: cancelled or invalid parameter");
+        return;
+    }
+    auto size = promptByte("Value size bytes (1, 2, or 4):", CONFIG_SIZE_MIN, CONFIG_SIZE_MAX);
+    if (!size.has_value() || (*size != 1 && *size != 2 && *size != 4))
+    {
+        logLine("SetNodeOverride: size must be 1, 2, or 4");
+        return;
+    }
+    auto value = promptInt32("Value (signed int32):");
+    if (!value.has_value())
+    {
+        logLine("SetNodeOverride: cancelled or invalid value");
+        return;
+    }
+
+    std::vector<std::uint8_t> existing;
+    try
+    {
+        proxy.callMethod("GetNodeOverride").onInterface(IFACE_NAME).withArguments(*nodeId).storeResultsTo(existing);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetNodeOverride: read-back failed: "} + err.what());
+        return;
+    }
+    std::vector<PolicyEntry> policy;
+    if (!existing.empty())
+    {
+        auto decoded = decodePolicy(existing);
+        if (!decoded.has_value())
+        {
+            logLine("SetNodeOverride: existing override is undecodable — aborting to avoid overwriting it");
+            return;
+        }
+        policy = *decoded;
+    }
+
+    bool replaced = false;
+    for (auto& entry : policy)
+    {
+        if (entry.kind == POLICY_KIND_CONFIG && entry.parameter == *parameter)
+        {
+            entry.size     = *size;
+            entry.isSigned = *value < 0;
+            entry.value    = *value;
+            replaced       = true;
+            break;
+        }
+    }
+    if (!replaced)
+    {
+        policy.push_back(PolicyEntry{.kind      = POLICY_KIND_CONFIG,
+                                     .parameter = *parameter,
+                                     .size      = *size,
+                                     .isSigned  = *value < 0,
+                                     .value     = *value});
+    }
+
+    try
+    {
+        proxy.callMethod("SetNodeOverride").onInterface(IFACE_NAME).withArguments(*nodeId, encodePolicy(policy));
+        std::ostringstream stream;
+        stream << "SetNodeOverride node=" << static_cast<unsigned>(*nodeId)
+               << " config param=" << static_cast<unsigned>(*parameter) << " size=" << static_cast<unsigned>(*size)
+               << " value=" << *value << (replaced ? " (updated)" : " (added)");
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetNodeOverride failed: "} + err.what());
+    }
+}
+
+auto handleListDevicePolicies(sdbus::IProxy& proxy) -> void
+{
+    using DevicePolicyTuple = sdbus::Struct<std::uint16_t, std::uint16_t, std::uint16_t, std::vector<std::uint8_t>>;
+    std::vector<DevicePolicyTuple> rows;
+    try
+    {
+        proxy.callMethod("ListDevicePolicies").onInterface(IFACE_NAME).storeResultsTo(rows);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"ListDevicePolicies failed: "} + err.what());
+        return;
+    }
+    if (rows.empty())
+    {
+        logLine("Device policies: (none)");
+        return;
+    }
+    logLine("Device policies (" + std::to_string(rows.size()) + "):");
+    for (const auto& row : rows)
+    {
+        std::ostringstream header;
+        header << "  device mfr=0x" << std::hex << std::setw(4) << std::setfill('0')
+               << static_cast<unsigned>(std::get<0>(row)) << " type=0x" << std::setw(4)
+               << static_cast<unsigned>(std::get<1>(row)) << " id=0x" << std::setw(4)
+               << static_cast<unsigned>(std::get<2>(row)) << std::dec << ":";
+        logPolicy(header.str(), std::get<3>(row));
+    }
+}
 }  // namespace
 
 // NOLINTBEGIN(readability-function-cognitive-complexity): flat key-dispatch table
@@ -1146,6 +1580,26 @@ auto main() -> int
             else if (key == 'g' || key == 'G')
             {
                 handleGetAssociationGroupings(*proxy, sessionCounter);
+            }
+            else if (key == 'p' || key == 'P')
+            {
+                handleViewEffectivePolicy(*proxy);
+            }
+            else if (key == 'o' || key == 'O')
+            {
+                handleViewNodeOverride(*proxy);
+            }
+            else if (key == 'c' || key == 'C')
+            {
+                handleSetConfigOverride(*proxy);
+            }
+            else if (key == 'x' || key == 'X')
+            {
+                handleDeleteNodeOverride(*proxy);
+            }
+            else if (key == 'd' || key == 'D')
+            {
+                handleListDevicePolicies(*proxy);
             }
             else if (key == 'L')
             {

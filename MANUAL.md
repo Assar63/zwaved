@@ -681,6 +681,67 @@ daemon started), `GetDongleInfo` returns an empty struct (empty
 `libraryVersion`, all bytes zero); clients should treat that as
 "not available yet" and wait for the next `DongleInfo` signal.
 
+## 16b. Post-inclusion policies (Configuration / Association / Wake-Up)
+
+The daemon keeps a **policy register**: for a device type (or a specific
+node) it remembers which Configuration parameters, Associations, and
+Wake-Up interval should be applied after inclusion. `InclusionOrchestrator`
+applies the *effective* policy (device default merged with the per-node
+override, override winning per entry) when a node finishes inclusion;
+`WakeUpOrchestrator` can re-apply on wake-up. The lifeline (Association
+group 1 → controller) is set automatically for nodes that support
+Association when `[behavior] auto_lifeline` is on — it is **not** part of
+the policy.
+
+### Policy BLOB format
+
+A policy crosses the wire as a single `ay` byte array — a versioned,
+length-prefixed binary form:
+
+```
+u8  version = 1
+u8  entryCount
+entryCount × entry:
+  u8 kind
+  kind 1 (Configuration): u8 parameter, u8 size (1|2|4), u8 signed, i32 value (big-endian)
+  kind 2 (Association):    u8 groupId, u8 memberCount, memberCount × u8 nodeId
+  kind 3 (Wake-Up):        u32 intervalSeconds (big-endian), u8 notificationNodeId
+```
+
+An empty policy is `01 00`. A Wake-Up `notificationNodeId` of `0` means
+"report to the daemon's controller node."
+
+### Methods
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `SetDevicePolicy` | `(q q q ay) → ()` | upsert; args are manufacturerId, productTypeId, productId, policy |
+| `GetDevicePolicy` | `(q q q) → (ay)` | empty bytes if none |
+| `DeleteDevicePolicy` | `(q q q) → ()` | |
+| `ListDevicePolicies` | `() → (a(qqqay))` | rows of (mfr, type, id, policy) |
+| `SetNodeOverride` | `(y ay) → ()` | scoped to the current network's home id |
+| `GetNodeOverride` | `(y) → (ay)` | empty bytes if none |
+| `DeleteNodeOverride` | `(y) → ()` | |
+| `GetEffectivePolicy` | `(y) → (ay)` | merged device-default + override the orchestrators would apply now |
+
+Each `Set` / `Delete` re-triggers the orchestrators on the next applicable
+event. Example — set node 9's override to "Configuration parameter 3 = 1
+(1 byte)". The 10-byte BLOB is `01 01 01 03 01 00 00 00 00 01` (version,
+count=1, kind=config, param=3, size=1, signed=0, value=1); in `busctl`
+the `ay` is written as a length followed by the bytes:
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetNodeOverride yay 9 10 1 1 1 3 1 0 0 0 0 1
+```
+
+### In the terminal
+
+`zwave-terminal` drives this interactively: `[p]` view a node's effective
+policy, `[o]` view its override, `[c]` add/update a Configuration entry in
+the override (preserves other entries), `[x]` delete the override, `[d]`
+list device policies.
+
 ## 17. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's

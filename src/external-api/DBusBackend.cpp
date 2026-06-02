@@ -2,6 +2,7 @@
 
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
+#include "../policy-register/PolicyRegister.hpp"
 #include "DBusBackendInternal.hpp"
 #include "Version.hpp"
 
@@ -327,5 +328,94 @@ auto emitGetNetworkStatus(DBusBackend::Impl& impl) -> NetworkStatusTuple
                               impl.lastSessionStatus.commandId,
                               impl.lastSessionStatus.sessionId,
                               static_cast<std::uint64_t>(uptime)};
+}
+
+// ---- Policy CRUD (#69) ----------------------------------------------
+// Thin adapters over PolicyRegister::instance(). `policy` crosses the
+// wire as the register's serialized BLOB, so Set deserializes inbound
+// bytes and Get/List serialize outbound. PolicyRegister publishes
+// PolicyChanged from inside its mutators, so the orchestrators
+// re-evaluate without extra plumbing here.
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitSetDevicePolicy(DBusBackend::Impl& /*impl*/,
+                         std::uint16_t manufacturerId,
+                         std::uint16_t productTypeId,
+                         std::uint16_t productId,
+                         const std::vector<std::uint8_t>& policy) -> void
+{
+    const auto decoded = PolicyRegister::deserialize(policy);
+    if (!decoded.has_value())
+    {
+        Logger::warn("[DBusBackend] SetDevicePolicy: malformed policy blob, ignored");
+        return;
+    }
+    PolicyRegister::instance().setDevicePolicy(
+        PolicyRegister::DeviceId{
+            .manufacturerId = manufacturerId, .productTypeId = productTypeId, .productId = productId},
+        *decoded);
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitGetDevicePolicy(DBusBackend::Impl& /*impl*/,
+                         std::uint16_t manufacturerId,
+                         std::uint16_t productTypeId,
+                         std::uint16_t productId) -> std::vector<std::uint8_t>
+{
+    const auto policy = PolicyRegister::instance().devicePolicy(PolicyRegister::DeviceId{
+        .manufacturerId = manufacturerId, .productTypeId = productTypeId, .productId = productId});
+    return policy.has_value() ? PolicyRegister::serialize(*policy) : std::vector<std::uint8_t>{};
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitDeleteDevicePolicy(DBusBackend::Impl& /*impl*/,
+                            std::uint16_t manufacturerId,
+                            std::uint16_t productTypeId,
+                            std::uint16_t productId) -> void
+{
+    PolicyRegister::instance().deleteDevicePolicy(PolicyRegister::DeviceId{
+        .manufacturerId = manufacturerId, .productTypeId = productTypeId, .productId = productId});
+}
+
+auto emitListDevicePolicies(DBusBackend::Impl& /*impl*/) -> std::vector<DevicePolicyTuple>
+{
+    std::vector<DevicePolicyTuple> out;
+    for (const auto& row : PolicyRegister::instance().listDevicePolicies())
+    {
+        out.emplace_back(row.device.manufacturerId,
+                         row.device.productTypeId,
+                         row.device.productId,
+                         PolicyRegister::serialize(row.policy));
+    }
+    return out;
+}
+
+auto emitSetNodeOverride(DBusBackend::Impl& /*impl*/,
+                         std::uint8_t nodeId,
+                         const std::vector<std::uint8_t>& policy) -> void
+{
+    const auto decoded = PolicyRegister::deserialize(policy);
+    if (!decoded.has_value())
+    {
+        Logger::warn("[DBusBackend] SetNodeOverride: malformed policy blob, ignored");
+        return;
+    }
+    PolicyRegister::instance().setNodeOverride(nodeId, *decoded);
+}
+
+auto emitGetNodeOverride(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) -> std::vector<std::uint8_t>
+{
+    const auto policy = PolicyRegister::instance().nodeOverride(nodeId);
+    return policy.has_value() ? PolicyRegister::serialize(*policy) : std::vector<std::uint8_t>{};
+}
+
+auto emitDeleteNodeOverride(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) -> void
+{
+    PolicyRegister::instance().deleteNodeOverride(nodeId);
+}
+
+auto emitGetEffectivePolicy(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) -> std::vector<std::uint8_t>
+{
+    return PolicyRegister::serialize(PolicyRegister::instance().effectivePolicy(nodeId));
 }
 }  // namespace ExternalApi

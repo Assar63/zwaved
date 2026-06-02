@@ -182,6 +182,42 @@ TEST_F(PolicyRegisterTest, EffectivePolicyEmptyWhenNothingApplies)
     EXPECT_TRUE(reg.effectivePolicy(9).empty());
 }
 
+TEST_F(PolicyRegisterTest, ListsAllDevicePolicies)
+{
+    PolicyRegister::Register reg(dbPath_);
+    EXPECT_TRUE(reg.listDevicePolicies().empty());
+
+    Policy a;
+    a.emplace_back(ConfigurationEntry{.parameter = 1, .size = 1, .isSigned = false, .value = 1});
+    Policy b;
+    b.emplace_back(AssociationEntry{.groupId = 1, .members = {1}});
+    reg.setDevicePolicy(kDevice, a);
+    reg.setDevicePolicy(DeviceId{.manufacturerId = 0x1234, .productTypeId = 0x5, .productId = 0x6}, b);
+
+    const auto all = reg.listDevicePolicies();
+    ASSERT_EQ(all.size(), 2U);
+    // Order isn't guaranteed; find each by identity.
+    bool sawKDevice = false;
+    bool sawOther   = false;
+    for (const auto& row : all)
+    {
+        if (row.device.manufacturerId == kDevice.manufacturerId && row.device.productId == kDevice.productId)
+        {
+            sawKDevice = true;
+            ASSERT_EQ(row.policy.size(), 1U);
+            EXPECT_EQ(std::get<ConfigurationEntry>(row.policy[0]).value, 1);
+        }
+        else if (row.device.manufacturerId == 0x1234)
+        {
+            sawOther = true;
+            ASSERT_EQ(row.policy.size(), 1U);
+            EXPECT_EQ(std::get<AssociationEntry>(row.policy[0]).groupId, 1);
+        }
+    }
+    EXPECT_TRUE(sawKDevice);
+    EXPECT_TRUE(sawOther);
+}
+
 TEST_F(PolicyRegisterTest, PersistsAcrossRestart)
 {
     Policy device;

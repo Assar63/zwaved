@@ -253,6 +253,8 @@ constexpr const char* UPSERT_DEVICE_SQL =
     "ON CONFLICT(manufacturer_id, product_type_id, product_id) DO UPDATE SET policy = excluded.policy";
 constexpr const char* SELECT_DEVICE_SQL =
     "SELECT policy FROM device_policies WHERE manufacturer_id = ? AND product_type_id = ? AND product_id = ?";
+constexpr const char* SELECT_ALL_DEVICES_SQL =
+    "SELECT manufacturer_id, product_type_id, product_id, policy FROM device_policies";
 constexpr const char* DELETE_DEVICE_SQL =
     "DELETE FROM device_policies WHERE manufacturer_id = ? AND product_type_id = ? AND product_id = ?";
 
@@ -330,6 +332,10 @@ class Stmt
         {
             Logger::error(std::string("[PolicyRegister] ") + label_ + " failed: " + sqlite3_errmsg(database_));
         }
+    }
+    [[nodiscard]] auto columnInt(int col) const -> int
+    {
+        return sqlite3_column_int(stmt_, col);
     }
     [[nodiscard]] auto columnBlob(int col) const -> std::vector<std::uint8_t>
     {
@@ -512,6 +518,34 @@ auto PolicyRegister::Register::devicePolicy(DeviceId device) const -> std::optio
         return std::nullopt;
     }
     return deserialize(stmt.columnBlob(0));
+}
+
+auto PolicyRegister::Register::listDevicePolicies() const -> std::vector<DevicePolicyRow>
+{
+    std::vector<DevicePolicyRow> out;
+    const std::scoped_lock lock(state_->mutex);
+    if (state_->db == nullptr)
+    {
+        return out;
+    }
+    Stmt stmt(state_->db, SELECT_ALL_DEVICES_SQL, "SELECT all devices");
+    if (!stmt.valid())
+    {
+        return out;
+    }
+    while (stmt.step() == SQLITE_ROW)
+    {
+        DevicePolicyRow row;
+        row.device.manufacturerId = static_cast<std::uint16_t>(stmt.columnInt(0));
+        row.device.productTypeId  = static_cast<std::uint16_t>(stmt.columnInt(1));
+        row.device.productId      = static_cast<std::uint16_t>(stmt.columnInt(2));
+        if (const auto policy = deserialize(stmt.columnBlob(3)); policy.has_value())
+        {
+            row.policy = *policy;
+        }
+        out.push_back(std::move(row));
+    }
+    return out;
 }
 
 auto PolicyRegister::Register::nodeOverride(std::uint8_t nodeId) const -> std::optional<Policy>

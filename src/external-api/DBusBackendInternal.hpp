@@ -52,6 +52,11 @@ using InitDataTuple = sdbus::Struct<std::uint8_t, std::uint8_t, std::vector<std:
 
 using DaemonVersionTuple = sdbus::Struct<std::string, std::string>;
 
+// One ListDevicePolicies row: (manufacturerId, productTypeId, productId,
+// policy_bytes) — the device identity triple plus the serialized policy
+// BLOB. Matches the manifest's a(qqqay) return shape for the method.
+using DevicePolicyTuple = sdbus::Struct<std::uint16_t, std::uint16_t, std::uint16_t, std::vector<std::uint8_t>>;
+
 using NetworkStatusTuple = sdbus::Struct<bool,
                                          std::string,
                                          std::string,

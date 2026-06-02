@@ -1277,6 +1277,81 @@ dbus:
       action:
         custom: emitGetNetworkStatus
 
+    # ---- Policy CRUD (#69) ----------------------------------------
+    # Read/write the PolicyRegister (#66) over D-Bus. `policy` is the
+    # register's hand-rolled length-prefixed BLOB (see PolicyRegister
+    # serialize/deserialize) — clients build it the same way. Each
+    # Set/Delete publishes PolicyChanged so the orchestrators
+    # re-evaluate. All custom: handlers call PolicyRegister::instance()
+    # directly (state read/write, not a bus command).
+
+    - name: SetDevicePolicy
+      params:
+        - { name: manufacturerId, dbus: q,  cpp: u16 }
+        - { name: productTypeId,  dbus: q,  cpp: u16 }
+        - { name: productId,      dbus: q,  cpp: u16 }
+        - { name: policy,         dbus: ay, cpp: bytes }
+      action:
+        custom: emitSetDevicePolicy
+
+    - name: GetDevicePolicy
+      params:
+        - { name: manufacturerId, dbus: q, cpp: u16 }
+        - { name: productTypeId,  dbus: q, cpp: u16 }
+        - { name: productId,      dbus: q, cpp: u16 }
+      returns:
+        type: bytes
+        dbus: ay
+      action:
+        custom: emitGetDevicePolicy
+
+    - name: DeleteDevicePolicy
+      params:
+        - { name: manufacturerId, dbus: q, cpp: u16 }
+        - { name: productTypeId,  dbus: q, cpp: u16 }
+        - { name: productId,      dbus: q, cpp: u16 }
+      action:
+        custom: emitDeleteDevicePolicy
+
+    - name: ListDevicePolicies
+      params: []
+      returns:
+        type: list<DevicePolicyEntry>
+        dbus: a(qqqay)
+      action:
+        custom: emitListDevicePolicies
+
+    - name: SetNodeOverride
+      params:
+        - { name: nodeId, dbus: y,  cpp: u8 }
+        - { name: policy, dbus: ay, cpp: bytes }
+      action:
+        custom: emitSetNodeOverride
+
+    - name: GetNodeOverride
+      params:
+        - { name: nodeId, dbus: y, cpp: u8 }
+      returns:
+        type: bytes
+        dbus: ay
+      action:
+        custom: emitGetNodeOverride
+
+    - name: DeleteNodeOverride
+      params:
+        - { name: nodeId, dbus: y, cpp: u8 }
+      action:
+        custom: emitDeleteNodeOverride
+
+    - name: GetEffectivePolicy
+      params:
+        - { name: nodeId, dbus: y, cpp: u8 }
+      returns:
+        type: bytes
+        dbus: ay
+      action:
+        custom: emitGetEffectivePolicy
+
   # ---- 3b. Signals ------------------------------------------------
   # Each signal is triggered by one or more MessageBus events. The
   # default mapping copies named fields straight through; CC-decoder

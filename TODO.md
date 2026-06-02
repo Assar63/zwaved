@@ -87,6 +87,7 @@ Implementation order (each shippable independently):
 - [x] **SQLite-backed node registry** — `nodes.db` at `${ZWAVED_STATE_DIR:-/var/lib/zwaved}` keeps the included-node list across daemon restarts. Rows keyed by `(home_id, node_id)` so swapping dongles between networks is safe. Static info only.
 - [x] **Configuration file** — `src/config/` parses `${ZWAVED_CONFIG:-/etc/zwaved/zwaved.conf}` with a hand-rolled INI-flavoured key/value parser (no third-party dependency). Sections wired today: `[logger] min_level`, `[storage] state_dir`, `[dongles] accept = vid:pid:name` (one row per dongle, replaces hardcoded VID/PID), `[behavior] auto_lifeline`. Sample at `etc/zwaved.conf`.
 - [ ] [SIGHUP-driven config reload](https://github.com/Assar63/zwaved/issues/31)
+- [ ] [Human-usable per-node metadata](https://github.com/Assar63/zwaved/issues/83) — free-form key/value (name / house / room / purpose / …) in a `node_metadata` table keyed by `(home_id, node_id, key)`, with Set/Get/Delete D-Bus methods. Purely descriptive — distinct from the behavioural policy register (#66).
 
 ### Observability
 

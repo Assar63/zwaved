@@ -160,7 +160,8 @@ Implementation order (each shippable independently):
 - [x] **Remove failed node** — `[f]` prompts for a node ID and issues `RemoveFailedNode`; activity pane decodes the `RemoveFailedNodeStatus` response + result phases.
 - [ ] [Node control for non-binary CCs](https://github.com/Assar63/zwaved/issues/47)
 - [ ] [Scene control (zwave-terminal)](https://github.com/Assar63/zwaved/issues/48)
-- [ ] [Policy CRUD UI](https://github.com/Assar63/zwaved/issues/77) — view/edit device + per-node policies; blocked by the D-Bus policy surface #69.
+- [x] **Policy CRUD UI (read + node config override)** — [#77](https://github.com/Assar63/zwaved/issues/77): `[p]` view effective policy, `[o]` view node override, `[c]` add/update a Configuration entry in a node override (edit-in-place — preserves other entries), `[x]` delete node override, `[d]` list device policies. Policy BLOB codec reimplemented locally (terminal stays a standalone D-Bus client). 
+- [ ] [Device-policy authoring + assoc/wake-up override builders](https://github.com/Assar63/zwaved/issues/80) — follow-up to #77: Set/Delete device policies by mfr/type/id triple, and Association/Wake-Up entries in the node-override editor.
 
 ---
 

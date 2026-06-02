@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+#
+# scripts/bootstrap
+#
+# One command from nothing (or a fresh clone) to a built, ready-to-develop
+# zwaved tree. Dual-mode — it auto-detects how it was invoked:
+#
+#   * Standalone / download-and-run: fetched on its own and run OUTSIDE a
+#     checkout, it clones the repo into a target directory, then prepares
+#     it. Inspect-then-run is the recommended flow:
+#
+#         curl -fsSL https://raw.githubusercontent.com/Assar63/zwaved/master/scripts/bootstrap -o bootstrap
+#         less bootstrap            # read before you run
+#         bash bootstrap ~/src/zwaved
+#
+#   * In-place: run as ./scripts/bootstrap from inside an existing
+#     checkout, it skips the clone and just prepares the tree.
+#
+# "Prepare" = check (and on Debian/Ubuntu, optionally install) build
+# prerequisites, install the git hooks, configure a CMake preset, build
+# once so the codegen outputs exist for clangd, and point .clangd at the
+# configured build directory.
+#
+# Idempotent — safe to re-run. Run `scripts/bootstrap --help` for options.
+
+set -euo pipefail
+
+readonly DEFAULT_REPO="https://github.com/Assar63/zwaved.git"
+readonly DEFAULT_REF="master"
+readonly DEFAULT_PRESET="gnu"
+readonly DEFAULT_CLONE_DIR="zwaved"
+
+preset="$DEFAULT_PRESET"
+repo="$DEFAULT_REPO"
+ref="$DEFAULT_REF"
+target=""        # positional clone target (standalone mode)
+mode="auto"      # auto | here | clone
+install_deps=1   # attempt apt on Debian when prerequisites are missing
+
+usage() {
+    cat <<'EOF'
+Usage: bootstrap [options] [TARGET_DIR]
+
+Takes a fresh machine or clone to a built, ready-to-develop zwaved tree.
+
+Modes (auto-detected):
+  standalone   run outside a checkout -> clone into TARGET_DIR, then prepare
+  in-place     run inside a checkout  -> prepare the current tree
+
+Options:
+  --preset NAME    CMake preset to configure/build (default: gnu;
+                   also: llvm, gnu-tidy, llvm-tidy)
+  --repo URL       git URL to clone in standalone mode (default: upstream)
+  --ref REF        branch or tag to clone (default: master)
+  --here           force in-place mode (prepare the current tree)
+  --clone DIR      force standalone mode, cloning into DIR
+  --skip-deps      don't touch apt; only check prerequisites and report
+  -h, --help       show this help
+
+TARGET_DIR (positional) is the clone destination in standalone mode
+(default: ./zwaved). Ignored in in-place mode.
+EOF
+}
+
+log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m warning:\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m error:\033[0m %s\n' "$*" >&2; exit 1; }
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --preset) preset="${2:?--preset needs a value}"; shift 2 ;;
+        --repo)   repo="${2:?--repo needs a value}"; shift 2 ;;
+        --ref)    ref="${2:?--ref needs a value}"; shift 2 ;;
+        --here)   mode="here"; shift ;;
+        --clone)  mode="clone"; target="${2:?--clone needs a directory}"; shift 2 ;;
+        --skip-deps) install_deps=0; shift ;;
+        -h|--help) usage; exit 0 ;;
+        -*) die "unknown option: $1 (try --help)" ;;
+        *)  target="$1"; shift ;;
+    esac
+done
+
+readonly build_dir="cmake-build-${preset}"
+
+# Absolute directory this script lives in (resolved so detection works
+# whether invoked as ./scripts/bootstrap or by absolute path).
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" >/dev/null 2>&1 && pwd)"
+
+# Echo the zwaved checkout root if this script sits inside one, else fail.
+detect_repo_root() {
+    local root
+    if root="$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null)" &&
+        [[ -f "$root/InterfaceManifest.yml" ]]; then
+        printf '%s\n' "$root"
+        return 0
+    fi
+    return 1
+}
+
+# True if DIR looks like a zwaved checkout.
+is_zwaved_checkout() {
+    [[ -f "$1/InterfaceManifest.yml" && -f "$1/CMakePresets.json" ]]
+}
+
+# ---- prerequisite check / install -----------------------------------
+
+# command -> apt package. eventpp is handled separately (no stock apt
+# package — it's built from source, see docker/Dockerfile).
+readonly PREREQS=(
+    "cmake:cmake"
+    "git:git"
+    "pkg-config:pkg-config"
+    "g++-15:g++-15"
+    "clang++-20:clang-20"
+)
+readonly DEV_PKGS=(libudev-dev libsdbus-c++-dev libsqlite3-dev libgtest-dev)
+
+sudo_prefix() {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        printf ''
+    elif command -v sudo >/dev/null 2>&1; then
+        printf 'sudo'
+    else
+        die "need root to install packages, and sudo is not available — re-run as root or with --skip-deps"
+    fi
+}
+
+check_prereqs() {
+    local missing_cmds=() missing_pkgs=()
+    for pair in "${PREREQS[@]}"; do
+        local cmd="${pair%%:*}" pkg="${pair##*:}"
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing_cmds+=("$cmd")
+            missing_pkgs+=("$pkg")
+        fi
+    done
+    # The -dev packages don't map to a single command; probe via dpkg.
+    for pkg in "${DEV_PKGS[@]}"; do
+        if command -v dpkg-query >/dev/null 2>&1; then
+            dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed" || missing_pkgs+=("$pkg")
+        fi
+    done
+
+    if [[ ${#missing_pkgs[@]} -eq 0 ]]; then
+        log "build prerequisites present"
+    else
+        if [[ "$install_deps" -eq 1 ]] && command -v apt-get >/dev/null 2>&1; then
+            local sudo; sudo="$(sudo_prefix)"
+            log "installing missing prerequisites: ${missing_pkgs[*]}"
+            log "running: ${sudo} apt-get install -y ${missing_pkgs[*]}"
+            ${sudo} apt-get update
+            # g++-15 / clang-20 live in the LLVM / toolchain repos — if apt
+            # can't find them, point at the canonical recipe rather than
+            # failing cryptically.
+            if ! ${sudo} apt-get install -y "${missing_pkgs[@]}"; then
+                die "apt could not install all prerequisites. g++-15 and clang-20 may need the
+       Ubuntu toolchain PPA and llvm.sh — see docker/Dockerfile for the exact recipe."
+            fi
+        else
+            warn "missing prerequisites: ${missing_pkgs[*]}"
+            warn "install them (Debian/Ubuntu names above), then re-run. See docker/Dockerfile"
+            warn "for the toolchain (g++-15, clang-20) and eventpp source recipe."
+            [[ "$install_deps" -eq 1 ]] && die "no apt-get on this host — install the packages manually and re-run"
+        fi
+    fi
+
+    # eventpp: header-only, resolved by CMake find_package. No apt package,
+    # so just warn if CMake won't find it — configure will fail clearly.
+    if ! pkg-config --exists eventpp 2>/dev/null && [[ ! -d /usr/include/eventpp && ! -d /usr/local/include/eventpp ]]; then
+        warn "eventpp not found in the usual include paths — if CMake configure fails on"
+        warn "find_package(eventpp), build it from source per docker/Dockerfile (header-only)."
+    fi
+}
+
+# ---- prepare an existing checkout ------------------------------------
+
+point_clangd_at_build() {
+    local root="$1" clangd="$1/.clangd"
+    [[ -f "$clangd" ]] || { warn ".clangd not found at repo root — skipping clangd wiring"; return; }
+    local current
+    current="$(sed -n 's/^[[:space:]]*CompilationDatabase:[[:space:]]*//p' "$clangd" | head -n1)"
+    if [[ "$current" == "$build_dir" ]]; then
+        log ".clangd already points at ${build_dir}"
+        return
+    fi
+    sed -i "s|^\([[:space:]]*CompilationDatabase:[[:space:]]*\).*|\1${build_dir}|" "$clangd"
+    log ".clangd CompilationDatabase -> ${build_dir}"
+}
+
+prepare() {
+    local root="$1"
+    cd "$root"
+    log "preparing $root (preset: ${preset})"
+
+    check_prereqs
+
+    log "installing git hooks"
+    scripts/install-hooks
+
+    log "configuring CMake preset ${preset}"
+    cmake --preset "$preset"
+
+    log "building (so codegen outputs exist for clangd)"
+    cmake --build "$build_dir"
+
+    point_clangd_at_build "$root"
+
+    cat <<EOF
+
+$(printf '\033[1;32m==> you'\''re ready.\033[0m')
+  Tree:    $root
+  Build:   $build_dir/   (binary: $build_dir/zwaved)
+  Tests:   ctest --test-dir $build_dir --output-on-failure
+  Re-run this script any time; it's idempotent.
+EOF
+}
+
+# ---- clone for standalone mode --------------------------------------
+
+clone_and_prepare() {
+    local dest="${target:-$DEFAULT_CLONE_DIR}"
+    if [[ -e "$dest" ]]; then
+        if is_zwaved_checkout "$dest"; then
+            log "$dest is already a zwaved checkout — skipping clone, preparing it"
+            prepare "$(cd "$dest" && pwd)"
+            return
+        fi
+        if [[ -n "$(ls -A "$dest" 2>/dev/null)" ]]; then
+            die "$dest exists and is not empty (and isn't a zwaved checkout) — refusing to clobber it"
+        fi
+    fi
+    log "cloning $repo (ref: $ref) into $dest"
+    git clone --branch "$ref" "$repo" "$dest"
+    prepare "$(cd "$dest" && pwd)"
+}
+
+# ---- dispatch -------------------------------------------------------
+
+main() {
+    case "$mode" in
+        here)
+            local root
+            root="$(detect_repo_root)" || die "--here was given but this script isn't inside a zwaved checkout"
+            prepare "$root"
+            ;;
+        clone)
+            clone_and_prepare
+            ;;
+        auto)
+            local root
+            if root="$(detect_repo_root)"; then
+                prepare "$root"
+            else
+                clone_and_prepare
+            fi
+            ;;
+    esac
+}
+
+main

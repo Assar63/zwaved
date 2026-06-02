@@ -32,6 +32,20 @@ see the *Devcontainer* section in [README.md](README.md).
 
 ### Option B — native Linux
 
+**Fast path:** `scripts/bootstrap` does the whole native setup for you —
+checks (and on Debian/Ubuntu installs) the prerequisites, installs the git
+hooks, configures a preset, builds once, and wires `.clangd`. From nothing:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Assar63/zwaved/master/scripts/bootstrap -o bootstrap
+less bootstrap && bash bootstrap ~/src/zwaved   # inspect, then clone + prepare
+```
+
+or inside a clone, just `./scripts/bootstrap`. It's idempotent. See
+[README → Quick start](README.md#quick-start-scriptsbootstrap). If you'd
+rather do it by hand (or bootstrap can't install the toolchain on your
+host), the manual steps follow.
+
 Install the toolchain and runtime deps from
 [README.md → Installation](README.md#installation): GCC 15,
 Clang 20, CMake 3.20+, `libudev-dev`, `libsystemd-dev`,

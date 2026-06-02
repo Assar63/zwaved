@@ -39,9 +39,9 @@ Implementation order (each shippable independently):
 2. ~~[Per-node pending-command queue (SQLite)](https://github.com/Assar63/zwaved/issues/65)~~ — **done**; `src/pending-queue/`. Class-based `PendingQueue::Queue` owns one SQLite connection + path (shares `nodes.db` with NodeRegistry, separate connection). Production singleton via `PendingQueue::instance()` wired through `StorageConfig`. Three priority levels (HIGH/NORMAL/LOW = 50/100/200). Bus events `PendingCommandEnqueued` / `PendingCommandsDrained` fire from inside the queue. 10 unit tests including persist-across-restart via two `Queue` instances on the same file. Ready for #68 WakeUpOrchestrator to drive.
 3. ~~[WakeUpOrchestrator](https://github.com/Assar63/zwaved/issues/68)~~ — **done**; `src/orchestrator/WakeUpOrchestrator.cpp` (constructor priority 204, the new `CONFIG_ORCHESTRATOR_PRIO` slot, owns no thread). Subscribes to `WakeUpNotification`; on a wake-up it drains `PendingQueue::instance()` for the node, replays each payload as a new `SendDataCommand` (raw-payload command event added to the manifest — ProtocolThread wraps it in SendData), then issues `SendWakeUpNoMoreInformationCommand` so the node sleeps again, then publishes `WakeUpCycleComplete{nodeId, drainedCount}` (typed D-Bus signal, observability). Empty-queue path still sends the sleep nudge. 3 bus-driven unit tests. **Prerequisite fix:** `MessageBus` deadlocked on reentrant `publish()` (single non-recursive mutex held across dispatch) — the orchestrator publishes commands from inside the `WakeUpNotification` handler, and the cc-translator already republished typed reports the same way, so this had been latently broken for every typed report. Switched `bus().mutex` to `std::recursive_mutex` (nested depth-first dispatch on the same thread); regression test in `tests/MessageBus_test.cpp`.
 4. ~~[Configuration CC `0x70`](https://github.com/Assar63/zwaved/issues/16)~~ — **done**; `SetConfigurationCommand` + `GetConfigurationCommand` + typed `ConfigurationReport`. Codegen extended with `i32` support so `value` doesn't have to be smuggled through a `u32`.
-5. [Device + per-node policy register (SQLite)](https://github.com/Assar63/zwaved/issues/66) — device default + per-node override merge
-6. [InclusionOrchestrator](https://github.com/Assar63/zwaved/issues/67) — moves auto-lifeline out of ProtocolThread; adds policy + wake-up interval steps
-7. [D-Bus surface for policy CRUD](https://github.com/Assar63/zwaved/issues/69) — Set/Get/Delete/List for device + per-node policies
+5. ~~[Device + per-node policy register (SQLite)](https://github.com/Assar63/zwaved/issues/66)~~ — **done**; `src/policy-register/`. `Policy` = list of `variant{Configuration, Association, WakeUp}` entries; hand-rolled versioned length-prefixed BLOB (no JSON/protobuf). Two tables in the shared `nodes.db` (`device_policies` keyed by mfr/type/product, `node_policy_overrides` keyed by home+node). `effectivePolicy(nodeId)` = device default merged with per-node override (override wins per slot: Configuration by parameter, Association by groupId, Wake-Up singleton); device identity learned in-memory from `ManufacturerSpecificReport`. Retained `PolicyChanged{nodeId}` (nodeId 0 = device-level wildcard). `Register` class for tests + `instance()` singleton via `StorageConfig`. 9 unit tests.
+6. ~~[InclusionOrchestrator](https://github.com/Assar63/zwaved/issues/67)~~ — **done**; `src/orchestrator/InclusionOrchestrator.cpp` (prio 204). Auto-lifeline moved out of ProtocolThread: ProtocolThread now just publishes high-level `NodeIncluded{nodeId, commandClasses}` at terminal inclusion; the orchestrator sets the lifeline (group 1 → controller, gated on `[behavior] auto_lifeline` + Association CC + known controller id from retained `DongleInfo`), then applies `effectivePolicy` gated on the node's supported CCs (Configuration/Association/Wake-Up), then publishes progress events `InclusionLifelineSet` / `InclusionPolicyApplied{nodeId, entriesApplied}` / `InclusionComplete` (typed D-Bus signals). New raw command event `SetAssociationCommand` gained an `orchestrator` publisher; new `NodeIncluded` event; new `DaemonError` code `CODE_ORCHESTRATOR_NO_CONTROLLER`. 5 unit tests.
+7. [D-Bus surface for policy CRUD](https://github.com/Assar63/zwaved/issues/69) — Set/Get/Delete/List for device + per-node policies (now unblocked — the register #66 exists)
 
 ### Command classes
 
@@ -112,6 +112,7 @@ Implementation order (each shippable independently):
 
 - [x] **Unit tests** — six modules covered: `HostApi` (encoder + decoder round-trips for every `FUNC_ID` the daemon issues), `BinarySwitch` (encode + decodeReport), `Basic` (encode SET / GET + decode v1 3-byte and v2+ 5-byte Reports), `Association` (encode + decode for both Report and GroupingsReport), `MultichannelAssociation` (encode/decode for whole-node + endpoint-pair members, REMOVE-all elision of MARKER, malformed-frame rejection), `FrameTransport` (passive `pumpOnce` paths plus active `sendRequest` happy / NAK-retry / CAN-retry paths, driven over a `socketpair(2)` via `SerialPort::adoptFd`). GoogleTest via `libgtest-dev`; `ZWAVED_BUILD_TESTS=ON` default; 91/91 in ~2.5s via `ctest --test-dir cmake-build-gnu`.
 - [ ] [Refresh MANUAL.md, README.md, and add a dedicated README for utils/zwave-terminal/](https://github.com/Assar63/zwaved/issues/36)
+- [ ] [dev: bootstrap script for fresh clones](https://github.com/Assar63/zwaved/issues/72) — one idempotent `scripts/bootstrap` that installs prereqs, wires git hooks, configures a preset, builds once so the codegen outputs exist for clangd, and points `.clangd`'s `CompilationDatabase` at the configured build dir.
 
 ---
 
@@ -134,7 +135,13 @@ Implementation order (each shippable independently):
 
 ## zwave-terminal client
 
+> [epic: bring zwave-terminal up to parity with the daemon](https://github.com/Assar63/zwaved/issues/73) — the terminal lags the daemon's grown surface (~11 CCs, error feed, pending queue, orchestrators). Children: #74–#77 below.
+
 ### Display
+
+- [ ] [Surface typed CC reports in the activity pane](https://github.com/Assar63/zwaved/issues/74) — Battery / Configuration / Manufacturer / Version / Multilevel / Z-Wave+ / Wake-Up signals + matching GET actions.
+- [ ] [Pending-queue + wake-up orchestration visibility](https://github.com/Assar63/zwaved/issues/75) — show `PendingCommandEnqueued` / `PendingCommandsDrained` / `WakeUpCycleComplete` / `WakeUpNotification`.
+- [ ] [DaemonError banner](https://github.com/Assar63/zwaved/issues/76) — consume the retained `DaemonError` feed; colour by severity.
 
 - [ ] [Help window (zwave-terminal)](https://github.com/Assar63/zwaved/issues/41)
 - [ ] [Logs window (zwave-terminal)](https://github.com/Assar63/zwaved/issues/42)
@@ -151,6 +158,7 @@ Implementation order (each shippable independently):
 - [x] **Remove failed node** — `[f]` prompts for a node ID and issues `RemoveFailedNode`; activity pane decodes the `RemoveFailedNodeStatus` response + result phases.
 - [ ] [Node control for non-binary CCs](https://github.com/Assar63/zwaved/issues/47)
 - [ ] [Scene control (zwave-terminal)](https://github.com/Assar63/zwaved/issues/48)
+- [ ] [Policy CRUD UI](https://github.com/Assar63/zwaved/issues/77) — view/edit device + per-node policies; blocked by the D-Bus policy surface #69.
 
 ---
 

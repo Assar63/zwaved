@@ -189,11 +189,26 @@ events:
       - { name: CODE_DBUS_BIND_FAILED,            value: 0x30, doc: "couldn't acquire the system-bus name" }
       - { name: CODE_EXTERNAL_API_NO_BACKEND,     value: 0x31, doc: "no external-API backend compiled in" }
       - { name: CODE_CONFIG_LOAD_FAILED,          value: 0x40, doc: "config file present but unreadable / malformed" }
+      - { name: CODE_ORCHESTRATOR_NO_CONTROLLER,  value: 0x50, doc: "inclusion lifeline wanted but controller node id unknown" }
     fields:
       - { name: severity, type: u8,     default: SEVERITY_INFO }
       - { name: source,   type: string, doc: "publishing module — e.g. 'zwave-protocol'" }
       - { name: code,     type: u8,     default: CODE_NONE }
       - { name: message,  type: string, doc: "human-readable; empty for default 'no error' value" }
+
+  - name: PolicyChanged
+    category: state
+    direction: { publishers: [policy-register], subscribers: [orchestrator] }
+    doc: |
+      A device-default or per-node policy was created / updated / deleted
+      in the PolicyRegister (#66). Orchestrators that have already acted
+      on a node re-evaluate its effective policy when this fires.
+      `nodeId == 0` means a *device-level* change (the register doesn't
+      know which nodes it affects) — treat it as a wildcard "re-evaluate
+      anything that might be affected." Retained so an orchestrator that
+      subscribes late still sees the most recent change.
+    fields:
+      - { name: nodeId, type: u8, default: 0, doc: "0 = device-level / wildcard" }
 
   # ---- 2b. Configuration (retained, set once at startup) -----------
   # Published once by Config (priority 102) after parsing zwaved.conf;
@@ -251,6 +266,22 @@ events:
       - { name: genericDeviceType,  type: u8,  default: 0 }
       - { name: specificDeviceType, type: u8,  default: 0 }
       - { name: commandClasses,     type: bytes }
+
+  - name: NodeIncluded
+    category: transient
+    direction: { publishers: [zwave-protocol], subscribers: [orchestrator] }
+    doc: |
+      High-level "a node finished inclusion" event — published by
+      ProtocolThread when an ADD_NODE session reaches its terminal
+      status, carrying the node's supported/controlled command-class
+      list captured during inclusion. InclusionOrchestrator (#67)
+      consumes this (instead of the raw NodeInclusionStatus status
+      codes) to apply the lifeline + effective policy. `commandClasses`
+      is the raw NIF list including the COMMAND_CLASS_MARK (0xEF)
+      separator between the supported and controlled halves.
+    fields:
+      - { name: nodeId,         type: u8,    default: 0 }
+      - { name: commandClasses, type: bytes }
 
   - name: NodeExclusionStatus
     category: transient
@@ -439,6 +470,41 @@ events:
     fields:
       - { name: nodeId,       type: u8,  default: 0 }
       - { name: drainedCount, type: u32, default: 0 }
+
+  - name: InclusionLifelineSet
+    category: transient
+    direction: { publishers: [orchestrator], subscribers: [external-api] }
+    doc: |
+      InclusionOrchestrator (#67) set node `nodeId`'s lifeline
+      (Association group 1 → controller) during post-inclusion setup.
+      Progress event for observers (terminal, a future
+      SecurityOrchestrator); fire-and-forget, not an ack that the node
+      received the SET.
+    fields:
+      - { name: nodeId, type: u8, default: 0 }
+
+  - name: InclusionPolicyApplied
+    category: transient
+    direction: { publishers: [orchestrator], subscribers: [external-api] }
+    doc: |
+      InclusionOrchestrator (#67) finished dispatching the effective
+      policy (Configuration parameters / Associations / Wake-Up
+      interval) for node `nodeId`. `entriesApplied` is how many policy
+      entries were sent (0 means no policy applied to this node).
+    fields:
+      - { name: nodeId,         type: u8,  default: 0 }
+      - { name: entriesApplied, type: u32, default: 0 }
+
+  - name: InclusionComplete
+    category: transient
+    direction: { publishers: [orchestrator], subscribers: [external-api] }
+    doc: |
+      InclusionOrchestrator (#67) finished the whole post-inclusion
+      sequence for node `nodeId` (lifeline + policy). Always fires once
+      per NodeIncluded, even when nothing applied — the terminal marker
+      a SecurityOrchestrator (#26/#27) or the terminal can wait on.
+    fields:
+      - { name: nodeId, type: u8, default: 0 }
 
   - name: ConfigurationReport
     category: transient
@@ -794,7 +860,7 @@ events:
 
   - name: SetAssociationCommand
     category: command
-    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    direction: { publishers: [external-api, orchestrator], subscribers: [zwave-protocol] }
     doc: Add members to a group on the Association CC (0x85).
     fields:
       - { name: nodeId,     type: u8,    default: 0 }
@@ -1403,6 +1469,25 @@ dbus:
         - { name: drainedCount, dbus: u }
       triggered_by:
         event: WakeUpCycleComplete
+
+    - name: InclusionLifelineSet
+      params:
+        - { name: nodeId, dbus: y }
+      triggered_by:
+        event: InclusionLifelineSet
+
+    - name: InclusionPolicyApplied
+      params:
+        - { name: nodeId,         dbus: y }
+        - { name: entriesApplied, dbus: u }
+      triggered_by:
+        event: InclusionPolicyApplied
+
+    - name: InclusionComplete
+      params:
+        - { name: nodeId, dbus: y }
+      triggered_by:
+        event: InclusionComplete
 
 # =====================================================================
 # 4. Protocol modules

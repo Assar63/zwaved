@@ -20,7 +20,6 @@
 #include "application/WakeUp.hpp"
 #include "application/ZWavePlusInfo.hpp"
 
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -68,15 +67,6 @@ constexpr int SEND_DATA_CALLBACK_TIMEOUT_MS = 5000;
 // to clear before issuing the next SendData.
 constexpr int SEND_DATA_NO_CALLBACK_DELAY_MS = 300;
 
-// CC wire constants used for the Z-Wave Plus auto-lifeline hook.
-// COMMAND_CLASS_MARK separates the supported list (CCs the node will
-// answer) from the controlled list (CCs it will emit) inside an
-// inclusion's NodeInfo. We only count the supported half — a node that
-// merely *emits* Association traffic isn't one we can SET on.
-constexpr std::uint8_t CC_ZWAVEPLUS_INFO = 0x5E;
-constexpr std::uint8_t CC_ASSOCIATION    = 0x85;
-constexpr std::uint8_t CC_MARK           = 0xEF;
-constexpr std::uint8_t LIFELINE_GROUP_ID = 1;
 
 /// Internal protocol-thread request variant. Bus-command subscribers
 /// translate semantic events into one of these and push to the queue;
@@ -126,27 +116,22 @@ struct ZwaveProtocolState
     // NodeInfoUpdate event keyed on nodeId only.
     std::optional<HostApi::RequestNodeInfoRequest> activeRequestNodeInfo;
 
-    // Cached from FUNC_ID_MEMORY_GET_ID introspection — needed as the
-    // member byte for the Z-Wave Plus auto-lifeline SetAssociation.
+    // Cached from FUNC_ID_MEMORY_GET_ID introspection — used to skip the
+    // controller's own node id while seeding the registry.
     std::optional<std::uint8_t> controllerNodeId;
 
-    // If a freshly-included node advertised CC_ZWAVEPLUS_INFO and
-    // CC_ASSOCIATION in its supported list, the protocol thread queues
-    // a SetAssociation(group=1, members=[controllerNodeId]) once the
-    // inclusion reaches its terminal status. The pending nodeId is
-    // captured here on the first callback that carries node info, then
-    // dispatched (and cleared) on the terminal callback.
-    std::optional<std::uint8_t> pendingLifelineNodeId;
+    // Captured on the first inclusion callback that carries node info
+    // (nodeId + supported/controlled CC list), then published as the
+    // high-level NodeIncluded event — and cleared — when the inclusion
+    // reaches its terminal status. InclusionOrchestrator (#67) consumes
+    // NodeIncluded to apply the lifeline + effective policy; ProtocolThread
+    // no longer drives the lifeline itself.
+    std::optional<std::pair<std::uint8_t, std::vector<std::uint8_t>>> pendingInclusion;
 
     // Bus subscriptions, released on shutdown. Each guard auto-unsubscribes
     // on destruction — clearing the vector (from `unsubscribeBus` or
     // ultimately from this struct's destructor) tears them all down.
     std::vector<MessageBus::SubscriptionGuard> subscriptions;
-
-    // Cached `[behavior] auto_lifeline` toggle. Defaults to true to
-    // match the daemon's pre-config baseline; updated synchronously
-    // when the BehaviorConfig subscription fires (replay-on-subscribe).
-    std::atomic<bool> autoLifeline{true};
 
     // Static-state destructor handles teardown — see the comment in
     // ExternalApiThread.cpp for why we can't rely on
@@ -219,34 +204,6 @@ auto pushSendData(std::uint8_t nodeId, std::uint8_t callbackId, std::vector<std:
     req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
     req.callbackId = callbackId;
     pushRequest(req);
-}
-
-/// True if `commandClasses` (as captured during inclusion) advertises
-/// both Z-Wave Plus Info and Association in its *supported* half — the
-/// portion before the COMMAND_CLASS_MARK separator. Z-Wave Plus devices
-/// ship with an empty lifeline group (group 1) and expect the including
-/// controller to populate it; this predicate is the gate for the
-/// auto-lifeline hook.
-auto needsAutoLifeline(const std::vector<std::uint8_t>& commandClasses) -> bool
-{
-    bool hasPlus  = false;
-    bool hasAssoc = false;
-    for (const auto cls : commandClasses)
-    {
-        if (cls == CC_MARK)
-        {
-            break;
-        }
-        if (cls == CC_ZWAVEPLUS_INFO)
-        {
-            hasPlus = true;
-        }
-        else if (cls == CC_ASSOCIATION)
-        {
-            hasAssoc = true;
-        }
-    }
-    return hasPlus && hasAssoc;
 }
 
 auto onDongleStatus(const MessageBus::DongleStatus& status) -> void
@@ -820,10 +777,11 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
                                    .genericType    = nodeCb->genericDeviceType,
                                    .specificType   = nodeCb->specificDeviceType,
                                    .commandClasses = nodeCb->commandClasses});
-                if (needsAutoLifeline(nodeCb->commandClasses))
-                {
-                    state().pendingLifelineNodeId = static_cast<std::uint8_t>(nodeCb->nodeId);
-                }
+                // Stash nodeId + CC list; published as NodeIncluded when
+                // the session reaches its terminal status. The terminal
+                // (0x05/0x06) callback is usually thin (no CC list), so we
+                // capture it here on the payload-bearing callback.
+                state().pendingInclusion = {static_cast<std::uint8_t>(nodeCb->nodeId), nodeCb->commandClasses};
             }
         }
         // Exclusion: only nodeId is needed; trigger on a session-ending status.
@@ -835,27 +793,19 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
 
         if (HostApi::isTerminalStatus(nodeCb->commandId, nodeCb->status))
         {
-            // Z-Wave Plus auto-lifeline: queue the SetAssociation now that
-            // inclusion has reached its terminal step, so the node is
-            // ready to answer application-layer commands. Goes through the
-            // same request queue as any user-issued request, so it serializes
-            // naturally with anything else the dongle is already routing.
-            if (const auto pendingNode = state().pendingLifelineNodeId, controller = state().controllerNodeId;
-                nodeCb->commandId == HostApi::CMD_ADD_NODE_TO_NETWORK && pendingNode.has_value() &&
-                controller.has_value() && state().autoLifeline.load(std::memory_order_relaxed))
+            // Announce the completed inclusion at the high level so
+            // InclusionOrchestrator (#67) can apply the lifeline + policy.
+            // ProtocolThread no longer drives the lifeline itself.
+            if (nodeCb->commandId == HostApi::CMD_ADD_NODE_TO_NETWORK && state().pendingInclusion.has_value())
             {
-                const std::array<std::uint8_t, 1> members{*controller};
-                HostApi::SendDataRequest req{};
-                req.nodeId     = *pendingNode;
-                req.data       = Association::encodeSet(LIFELINE_GROUP_ID, std::span<const std::uint8_t>(members));
-                req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
-                req.callbackId = 0;  // fire-and-forget; SendDataStatus would only be noise
-                pushRequest(req);
-                Logger::info("[ProtocolThread] auto-lifeline: SetAssociation node=" +
-                             std::to_string(static_cast<int>(*pendingNode)) +
-                             " group=1 controller=" + std::to_string(static_cast<int>(*controller)));
+                // NOLINTNEXTLINE(bugprone-unchecked-optional-access): checked above; tidy can't track the short-circuit
+                const auto& included = *state().pendingInclusion;
+                MessageBus::publish(MessageBus::NodeIncluded{
+                    .nodeId         = included.first,
+                    .commandClasses = included.second,
+                });
             }
-            state().pendingLifelineNodeId.reset();
+            state().pendingInclusion.reset();
             tracker.end();
             MessageBus::publish(MessageBus::SessionStatus{.active = false, .commandId = 0, .sessionId = 0});
         }
@@ -1033,7 +983,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 30;
+constexpr std::size_t SUBSCRIPTION_COUNT = 29;
 
 auto subscribeBus() -> void
 {
@@ -1068,8 +1018,6 @@ auto subscribeBus() -> void
     subscribe<MessageBus::RemoveMultichannelAssociationCommand>(onRemoveMultichannelAssociation);
     subscribe<MessageBus::GetMultichannelAssociationCommand>(onGetMultichannelAssociation);
     subscribe<MessageBus::GetMultichannelAssociationGroupingsCommand>(onGetMultichannelAssociationGroupings);
-    subscribe<MessageBus::BehaviorConfig>([](const MessageBus::BehaviorConfig& cfg) -> void
-                                          { state().autoLifeline.store(cfg.autoLifeline, std::memory_order_relaxed); });
 }
 
 auto unsubscribeBus() -> void
@@ -1163,7 +1111,7 @@ auto zwaveCommunicationThread() -> void
         clearRequests();
         state().activeFailedNodeRemoval.reset();
         state().activeRequestNodeInfo.reset();
-        state().pendingLifelineNodeId.reset();
+        state().pendingInclusion.reset();
         runConnectedSession(port);
     }
 

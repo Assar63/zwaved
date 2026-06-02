@@ -8,4 +8,5 @@
 
 target_sources(zwaved PRIVATE
     WakeUpOrchestrator.cpp
+    InclusionOrchestrator.cpp
 )

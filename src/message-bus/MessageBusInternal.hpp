@@ -38,9 +38,19 @@ template <typename T> struct Topic
 // bottom suffices). One shared mutex serializes all topics so that
 // publish/subscribe interleave atomically — the cost is negligible at
 // our event rates and keeps the replay-on-subscribe sequencing simple.
+//
+// The mutex is *recursive* on purpose: dispatch happens while the lock
+// is held (so retained-value writes and callback invocation stay
+// atomic against other threads), and handlers are allowed to publish()
+// or subscribe() reentrantly — e.g. cc-translator republishes a typed
+// event from inside its ApplicationCommand handler, and the
+// orchestrators publish commands from inside notification handlers. A
+// reentrant call re-enters on the same thread and runs as a nested,
+// depth-first dispatch that completes before the outer handler resumes.
+// A plain std::mutex would self-deadlock the moment a handler published.
 struct BusState
 {
-    std::mutex mutex;
+    std::recursive_mutex mutex;
     std::atomic<MessageBus::SubscriptionId> nextId{1};
     std::unordered_map<MessageBus::SubscriptionId, std::function<void()>> removers;
 };

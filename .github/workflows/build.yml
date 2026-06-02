@@ -62,12 +62,42 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ===================================================================
+  # bootstrap-smoke — verify scripts/bootstrap's in-place setup path
+  # still works end to end (mode detection, prereq check, install-hooks,
+  # preset configure, .clangd rewrite) in the canonical toolchain image.
+  # Targets the `bootstrap-smoke` Dockerfile stage, which runs bootstrap
+  # with --no-build so the compile (already covered by build-and-test)
+  # isn't paid for twice. cache-from only — it reuses the toolchain layer
+  # build-and-test writes, and its own COPY+configure layer is cheap.
+  # ===================================================================
+  bootstrap-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Smoke-test scripts/bootstrap (in-place, configure-only)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: bootstrap-smoke
+          push: false
+          load: false
+          cache-from: type=gha
+
+  # ===================================================================
   # publish-image — only runs on `v*` tags. Builds the full Dockerfile
   # (build + runtime stages), tags as `<repo>:<tag>` and `<repo>:latest`,
   # and pushes to ghcr.io.
   # ===================================================================
   publish-image:
-    needs: build-and-test
+    needs: [build-and-test, bootstrap-smoke]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:

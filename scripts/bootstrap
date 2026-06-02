@@ -36,6 +36,7 @@ ref="$DEFAULT_REF"
 target=""        # positional clone target (standalone mode)
 mode="auto"      # auto | here | clone
 install_deps=1   # attempt apt on Debian when prerequisites are missing
+do_build=1       # run cmake --build (off: configure + wire only)
 
 usage() {
     cat <<'EOF'
@@ -55,6 +56,7 @@ Options:
   --here           force in-place mode (prepare the current tree)
   --clone DIR      force standalone mode, cloning into DIR
   --skip-deps      don't touch apt; only check prerequisites and report
+  --no-build       configure + wire only; skip the compile step
   -h, --help       show this help
 
 TARGET_DIR (positional) is the clone destination in standalone mode
@@ -74,6 +76,7 @@ while [[ $# -gt 0 ]]; do
         --here)   mode="here"; shift ;;
         --clone)  mode="clone"; target="${2:?--clone needs a directory}"; shift 2 ;;
         --skip-deps) install_deps=0; shift ;;
+        --no-build) do_build=0; shift ;;
         -h|--help) usage; exit 0 ;;
         -*) die "unknown option: $1 (try --help)" ;;
         *)  target="$1"; shift ;;
@@ -200,16 +203,22 @@ prepare() {
     log "configuring CMake preset ${preset}"
     cmake --preset "$preset"
 
-    log "building (so codegen outputs exist for clangd)"
-    cmake --build "$build_dir"
+    if [[ "$do_build" -eq 1 ]]; then
+        log "building (so codegen outputs exist for clangd)"
+        cmake --build "$build_dir" --parallel
+    else
+        log "skipping build (--no-build); run: cmake --build ${build_dir} --parallel"
+    fi
 
     point_clangd_at_build "$root"
 
+    local built_note="binary: $build_dir/zwaved"
+    [[ "$do_build" -eq 1 ]] || built_note="not built yet (--no-build) — cmake --build $build_dir --parallel"
     cat <<EOF
 
 $(printf '\033[1;32m==> you'\''re ready.\033[0m')
   Tree:    $root
-  Build:   $build_dir/   (binary: $build_dir/zwaved)
+  Build:   $build_dir/   ($built_note)
   Tests:   ctest --test-dir $build_dir --output-on-failure
   Re-run this script any time; it's idempotent.
 EOF

@@ -2,6 +2,7 @@
 
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
+#include "../node-metadata/NodeMetadata.hpp"
 #include "../policy-register/PolicyRegister.hpp"
 #include "DBusBackendInternal.hpp"
 #include "Version.hpp"
@@ -417,5 +418,35 @@ auto emitDeleteNodeOverride(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) ->
 auto emitGetEffectivePolicy(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) -> std::vector<std::uint8_t>
 {
     return PolicyRegister::serialize(PolicyRegister::instance().effectivePolicy(nodeId));
+}
+
+// ---- Node metadata CRUD (#83) ---------------------------------------
+// Thin adapters over NodeMetadata::instance(). Set with an empty value
+// clears the key (the store handles that idiom); the store publishes
+// NodeMetadataChanged from inside its mutators.
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitSetNodeMetadata(DBusBackend::Impl& /*impl*/,
+                         std::uint8_t nodeId,
+                         const std::string& key,
+                         const std::string& value) -> void
+{
+    NodeMetadata::instance().set(nodeId, key, value);
+}
+
+auto emitGetNodeMetadata(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) -> std::vector<NodeMetadataTuple>
+{
+    std::vector<NodeMetadataTuple> out;
+    for (const auto& entry : NodeMetadata::instance().getAll(nodeId))
+    {
+        out.emplace_back(entry.key, entry.value);
+    }
+    return out;
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitDeleteNodeMetadata(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId, const std::string& key) -> void
+{
+    NodeMetadata::instance().remove(nodeId, key);
 }
 }  // namespace ExternalApi

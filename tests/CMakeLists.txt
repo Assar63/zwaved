@@ -278,6 +278,31 @@ target_link_libraries(PolicyRegister_test PRIVATE
 zwaved_test_target(PolicyRegister_test)
 gtest_discover_tests(PolicyRegister_test)
 
+# ---- NodeMetadata ---------------------------------------------------
+# Descriptive per-node key/value store. Links sqlite3 (real file per
+# fixture) and the bus (mutations publish NodeMetadataChanged).
+add_executable(NodeMetadata_test
+    NodeMetadata_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/node-metadata/NodeMetadata.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
+    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
+)
+target_include_directories(NodeMetadata_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/node-metadata"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(NodeMetadata_test zwaved_codegen)
+target_link_libraries(NodeMetadata_test PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    PkgConfig::SQLITE3
+    eventpp::eventpp
+)
+zwaved_test_target(NodeMetadata_test)
+gtest_discover_tests(NodeMetadata_test)
+
 # ---- WakeUpOrchestrator ---------------------------------------------
 # Bus-driven: seeds the persistent queue, publishes a wake-up, asserts
 # on the emitted command sequence. Links the orchestrator (armed by its

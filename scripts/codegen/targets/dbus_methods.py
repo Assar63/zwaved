@@ -128,6 +128,7 @@ RETURN_TUPLE_ALIASES: dict[str, str] = {
     "GetVersion":         "DaemonVersionTuple",
     "GetNetworkStatus":   "NetworkStatusTuple",
     "ListDevicePolicies": "DevicePolicyTuple",
+    "GetNodeMetadata":    "NodeMetadataTuple",
 }
 
 

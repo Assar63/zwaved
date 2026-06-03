@@ -57,6 +57,9 @@ using DaemonVersionTuple = sdbus::Struct<std::string, std::string>;
 // BLOB. Matches the manifest's a(qqqay) return shape for the method.
 using DevicePolicyTuple = sdbus::Struct<std::uint16_t, std::uint16_t, std::uint16_t, std::vector<std::uint8_t>>;
 
+// One GetNodeMetadata row: (key, value). Matches the a(ss) return shape.
+using NodeMetadataTuple = sdbus::Struct<std::string, std::string>;
+
 using NetworkStatusTuple = sdbus::Struct<bool,
                                          std::string,
                                          std::string,

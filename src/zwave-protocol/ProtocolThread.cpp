@@ -1,7 +1,9 @@
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
+#include "../node-metadata/NodeMetadata.hpp"
 #include "../node-registry/NodeRegistry.hpp"
 #include "../pending-queue/PendingQueue.hpp"
+#include "../policy-register/PolicyRegister.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 #include "FrameTransport.hpp"
 #include "HostApi.hpp"
@@ -1077,10 +1079,12 @@ auto zwaveCommunicationThread() -> void
             // Bind the registry to this network *before* seeding from
             // init-data, so seeded entries land in the right home_id.
             NodeRegistry::setHomeId(info.homeId);
-            // Keep the pending-command queue scoped to the same
-            // network as the registry — both live in nodes.db
-            // and use (home_id, node_id) as the key.
+            // Keep the pending-command queue, policy register, and
+            // metadata store scoped to the same network as the registry —
+            // all live in nodes.db and key on (home_id, node_id[, …]).
             PendingQueue::instance().setHomeId(info.homeId);
+            PolicyRegister::instance().setHomeId(info.homeId);
+            NodeMetadata::instance().setHomeId(info.homeId);
             MessageBus::publish(info);
 
             if (introspection.initData.has_value())

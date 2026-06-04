@@ -210,6 +210,18 @@ events:
     fields:
       - { name: nodeId, type: u8, default: 0, doc: "0 = device-level / wildcard" }
 
+  - name: NodeMetadataChanged
+    category: state
+    direction: { publishers: [node-metadata], subscribers: [external-api] }
+    doc: |
+      A human-authored metadata key for `nodeId` was set / cleared in the
+      NodeMetadata store (#83). Re-emitted as a D-Bus signal so a UI can
+      refresh the node's labels without polling. Retained so a client that
+      subscribes late sees the most recent change. Purely descriptive —
+      the daemon takes no action on it.
+    fields:
+      - { name: nodeId, type: u8, default: 0 }
+
   # ---- 2b. Configuration (retained, set once at startup) -----------
   # Published once by Config (priority 102) after parsing zwaved.conf;
   # consumers subscribe from their own constructor and pick up the
@@ -1352,6 +1364,34 @@ dbus:
       action:
         custom: emitGetEffectivePolicy
 
+    # ---- Node metadata CRUD (#83) ---------------------------------
+    # Human-authored descriptive key/value per node. Set with an empty
+    # value clears the key. Custom: handlers call NodeMetadata::instance().
+
+    - name: SetNodeMetadata
+      params:
+        - { name: nodeId, dbus: y, cpp: u8 }
+        - { name: key,    dbus: s, cpp: string }
+        - { name: value,  dbus: s, cpp: string }
+      action:
+        custom: emitSetNodeMetadata
+
+    - name: GetNodeMetadata
+      params:
+        - { name: nodeId, dbus: y, cpp: u8 }
+      returns:
+        type: list<MetadataEntry>
+        dbus: a(ss)
+      action:
+        custom: emitGetNodeMetadata
+
+    - name: DeleteNodeMetadata
+      params:
+        - { name: nodeId, dbus: y, cpp: u8 }
+        - { name: key,    dbus: s, cpp: string }
+      action:
+        custom: emitDeleteNodeMetadata
+
   # ---- 3b. Signals ------------------------------------------------
   # Each signal is triggered by one or more MessageBus events. The
   # default mapping copies named fields straight through; CC-decoder
@@ -1563,6 +1603,12 @@ dbus:
         - { name: nodeId, dbus: y }
       triggered_by:
         event: InclusionComplete
+
+    - name: NodeMetadataChanged
+      params:
+        - { name: nodeId, dbus: y }
+      triggered_by:
+        event: NodeMetadataChanged
 
 # =====================================================================
 # 4. Protocol modules

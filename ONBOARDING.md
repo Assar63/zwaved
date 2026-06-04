@@ -107,8 +107,12 @@ editing — it's the canonical map. The 30-second version:
 | `src/zwave-dongle/` | `libudev` USB hot-plug monitor (priority 201). |
 | `src/zwave-protocol/` | Serial framing, Host-API codec, send-data dispatch (priority 202). Per-CC encoders under `application/`. |
 | `src/external-api/` | Transport-agnostic backend interface. `DBusBackend` is the only impl today (priority 203). |
+| `src/orchestrator/` | Bus-only post-event state machines (priority 204): `WakeUpOrchestrator` (drain pending queue on wake-up), `InclusionOrchestrator` (lifeline + policy on inclusion). |
 | `src/message-bus/` | Thin wrapper over eventpp — the only coupling between threads. |
 | `src/node-registry/` | SQLite-backed registry of included nodes. |
+| `src/pending-queue/` | SQLite per-node queue of commands for sleeping nodes; drained on wake-up. |
+| `src/policy-register/` | SQLite per-device / per-node post-inclusion policy (config / association / wake-up). |
+| `src/node-metadata/` | SQLite human-authored descriptive per-node key/value (name / room / …). |
 | `src/cc-translator/` | Generated CC encode/decode shims; driven by the manifest. |
 | `tests/` | GoogleTest suites for the protocol-layer codecs. |
 | `utils/zwave-terminal/` | ncurses TUI client over D-Bus — handy for poking at a running daemon. |

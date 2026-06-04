@@ -742,6 +742,31 @@ policy, `[o]` view its override, `[c]` add/update a Configuration entry in
 the override (preserves other entries), `[x]` delete the override, `[d]`
 list device policies.
 
+## 16c. Node metadata (human labels)
+
+Per-node, human-authored **descriptive** key/value strings — `name`,
+`room`, `house`, `purpose`, `notes`, or any key you like. The daemon never
+acts on this; it's so operators and UIs can label a network in human terms
+("Kitchen light") instead of bare node IDs. Stored in `nodes.db`, scoped
+per network. Distinct from policies (§16b), which are *behavioural*.
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `SetNodeMetadata` | `(y s s) → ()` | nodeId, key, value; an **empty value clears the key** |
+| `GetNodeMetadata` | `(y) → (a(ss))` | all key/value pairs for a node, ordered by key |
+| `DeleteNodeMetadata` | `(y s) → ()` | clear one key |
+
+Every Set/Delete emits a `NodeMetadataChanged(y)` signal (retained) so a UI
+can refresh without polling. Example — label node 5:
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetNodeMetadata yss 5 name "Kitchen light"
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetNodeMetadata y 5
+# → a(ss)  1  "name" "Kitchen light"
+```
+
 ## 17. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's

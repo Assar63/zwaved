@@ -60,6 +60,8 @@ using DevicePolicyTuple = sdbus::Struct<std::uint16_t, std::uint16_t, std::uint1
 // One GetNodeMetadata row: (key, value). Matches the a(ss) return shape.
 using NodeMetadataTuple = sdbus::Struct<std::string, std::string>;
 
+using DaemonErrorTuple = sdbus::Struct<std::uint8_t, std::string, std::uint8_t, std::string>;
+
 using NetworkStatusTuple = sdbus::Struct<bool,
                                          std::string,
                                          std::string,
@@ -101,6 +103,7 @@ struct DBusBackend::Impl
     MessageBus::InitData lastInitData;
     std::vector<MessageBus::NodeInfo> lastNodes;
     MessageBus::SessionStatus lastSessionStatus;
+    MessageBus::DaemonError lastDaemonError;
 
     // Captured the first time `run()` is called; powers the uptime
     // field of GetNetworkStatus. steady_clock so it doesn't jump

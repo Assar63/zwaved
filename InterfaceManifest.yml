@@ -1289,6 +1289,17 @@ dbus:
       action:
         custom: emitGetNetworkStatus
 
+    - name: GetDaemonError
+      params: []
+      returns:
+        struct:
+          - { name: severity, dbus: y, source: cached.DaemonError.severity }
+          - { name: source,   dbus: s, source: cached.DaemonError.source }
+          - { name: code,     dbus: y, source: cached.DaemonError.code }
+          - { name: message,  dbus: s, source: cached.DaemonError.message }
+      action:
+        custom: emitGetDaemonError
+
     # ---- Policy CRUD (#69) ----------------------------------------
     # Read/write the PolicyRegister (#66) over D-Bus. `policy` is the
     # register's hand-rolled length-prefixed BLOB (see PolicyRegister

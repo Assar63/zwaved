@@ -739,9 +739,11 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 ### In the terminal
 
 `zwave-terminal` drives this interactively: `[p]` view a node's effective
-policy, `[o]` view its override, `[c]` add/update a Configuration entry in
-the override (preserves other entries), `[x]` delete the override, `[d]`
-list device policies.
+policy, `[o]` view its override, `[c]` add/update an override entry —
+Configuration, Association, or Wake-Up — (preserves other entries), `[x]`
+delete the override, `[d]` list device policies, and `[e]` author device
+policies (set an entry or delete a whole policy, by manufacturer/type/
+product id).
 
 ## 16c. Node metadata (human labels)
 

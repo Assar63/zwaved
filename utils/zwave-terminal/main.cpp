@@ -115,6 +115,13 @@ constexpr std::size_t NODE_ID_INPUT_BUFFER = 8;
 
 // Wider input buffer for signed Configuration values (e.g. "-2147483648").
 constexpr std::size_t INT_INPUT_BUFFER = 16;
+// Free-form line input (e.g. a space/comma-separated association member list).
+constexpr std::size_t LINE_INPUT_BUFFER = 64;
+
+constexpr int DECIMAL_BASE      = 10;
+constexpr int HEX_BASE          = 16;
+constexpr std::uint32_t U16_MAX = 0xFFFFU;
+constexpr std::uint32_t U32_MAX = 0xFFFFFFFFU;
 
 // PolicyRegister BLOB wire format (see src/policy-register/PolicyRegister.cpp).
 // Reimplemented here because the terminal is a standalone D-Bus client —
@@ -374,6 +381,135 @@ auto promptInt32(const char* label) -> std::optional<std::int32_t>
     return value;
 }
 
+/// Blocking bottom-row line prompt. Returns the entered text, or nullopt
+/// on empty input / read error. Shared by the typed prompts below.
+auto promptLine(const char* label) -> std::optional<std::string>
+{
+    const int rows = getmaxy(stdscr);
+    move(rows - 1, 0);
+    clrtoeol();
+    mvprintw(rows - 1, 0, "%s ", label);
+    refresh();
+
+    echo();
+    curs_set(1);
+    timeout(-1);  // blocking
+
+    std::array<char, LINE_INPUT_BUFFER> buffer{};
+    int const got = getnstr(buffer.data(), static_cast<int>(buffer.size()) - 1);
+
+    noecho();
+    curs_set(0);
+    timeout(UI_REFRESH_MS);
+
+    if (got != OK)
+    {
+        return std::nullopt;
+    }
+    std::string text(buffer.data());
+    if (text.empty())
+    {
+        return std::nullopt;
+    }
+    return text;
+}
+
+/// Parse an unsigned integer, accepting a `0x` prefix for hex. nullopt on
+/// trailing junk or out-of-range.
+auto parseUint(const std::string& text, std::uint32_t maxVal) -> std::optional<std::uint32_t>
+{
+    const char* begin = text.data();
+    const char* end   = begin + text.size();
+    int base          = DECIMAL_BASE;
+    if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X'))
+    {
+        begin += 2;
+        base = HEX_BASE;
+    }
+    std::uint32_t value         = 0;
+    auto const [ptr, errorCode] = std::from_chars(begin, end, value, base);
+    if (errorCode != std::errc{} || ptr != end || value > maxVal)
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
+auto promptU16(const char* label) -> std::optional<std::uint16_t>
+{
+    auto text = promptLine(label);
+    if (!text.has_value())
+    {
+        return std::nullopt;
+    }
+    auto value = parseUint(*text, U16_MAX);
+    if (!value.has_value())
+    {
+        return std::nullopt;
+    }
+    return static_cast<std::uint16_t>(*value);
+}
+
+auto promptU32(const char* label) -> std::optional<std::uint32_t>
+{
+    auto text = promptLine(label);
+    if (!text.has_value())
+    {
+        return std::nullopt;
+    }
+    return parseUint(*text, U32_MAX);
+}
+
+/// Read a single character from a line prompt, restricted to `valid`.
+auto promptChar(const char* label, const std::string& valid) -> std::optional<char>
+{
+    auto text = promptLine(label);
+    if (!text.has_value())
+    {
+        return std::nullopt;
+    }
+    const char chosen = (*text)[0];
+    if (valid.find(chosen) == std::string::npos)
+    {
+        return std::nullopt;
+    }
+    return chosen;
+}
+
+/// Parse a space/comma-separated list of node IDs (each 1..232). Requires
+/// at least one. nullopt on any malformed / out-of-range token.
+auto promptNodeList(const char* label) -> std::optional<std::vector<std::uint8_t>>
+{
+    auto text = promptLine(label);
+    if (!text.has_value())
+    {
+        return std::nullopt;
+    }
+    for (auto& character : *text)
+    {
+        if (character == ',')
+        {
+            character = ' ';
+        }
+    }
+    std::istringstream stream(*text);
+    std::vector<std::uint8_t> members;
+    int member = 0;
+    while (stream >> member)
+    {
+        if (member < NODE_ID_MIN || member > NODE_ID_MAX)
+        {
+            return std::nullopt;
+        }
+        members.push_back(static_cast<std::uint8_t>(member));
+    }
+    if (!stream.eof() || members.empty())
+    {
+        return std::nullopt;
+    }
+    return members;
+}
+
 auto draw(std::uint8_t lastSession) -> void
 {
     erase();
@@ -445,7 +581,8 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [f] Remove failed node (prompts for node id)");
     mvprintw(row++, 0, "  [i] Dongle info");
     mvprintw(row++, 0, "  [p] View effective policy   [o] View node override");
-    mvprintw(row++, 0, "  [c] Set node config override [x] Delete node override [d] List device policies");
+    mvprintw(row++, 0, "  [c] Set node override entry [x] Delete node override");
+    mvprintw(row++, 0, "  [d] List device policies    [e] Device policy authoring (set/delete)");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));
     mvprintw(row++, 0, "  [q] Quit");
     mvhline(row++, 0, '-', getmaxx(stdscr));
@@ -1651,10 +1788,133 @@ auto handleDeleteNodeOverride(sdbus::IProxy& proxy) -> void
     }
 }
 
-// Add or update a single Configuration entry in a node's override,
-// preserving any other entries: read the current override, decode it,
-// upsert the entry keyed by parameter, re-encode, and write it back.
-auto handleSetConfigOverride(sdbus::IProxy& proxy) -> void
+// Prompt for one policy entry: kind, then the kind-specific fields.
+// Returns nullopt on cancel / invalid input at any step.
+auto promptPolicyEntry() -> std::optional<PolicyEntry>
+{
+    auto kind = promptChar("Entry kind: [c]onfiguration  [a]ssociation  [w]ake-up:", "caw");
+    if (!kind.has_value())
+    {
+        logLine("policy entry: cancelled");
+        return std::nullopt;
+    }
+    if (*kind == 'c')
+    {
+        auto parameter = promptByte("Config parameter (0-255):", BYTE_MIN, BYTE_MAX);
+        auto size      = promptByte("Value size bytes (1, 2, or 4):", CONFIG_SIZE_MIN, CONFIG_SIZE_MAX);
+        auto value     = promptInt32("Value (signed int32):");
+        if (!parameter.has_value() || !size.has_value() || !value.has_value() ||
+            (*size != 1 && *size != 2 && *size != 4))
+        {
+            logLine("config entry: cancelled or invalid (size must be 1/2/4)");
+            return std::nullopt;
+        }
+        return PolicyEntry{.kind      = POLICY_KIND_CONFIG,
+                           .parameter = *parameter,
+                           .size      = *size,
+                           .isSigned  = *value < 0,
+                           .value     = *value};
+    }
+    if (*kind == 'a')
+    {
+        auto group   = promptByte("Group id (1-255):", GROUP_ID_MIN, GROUP_ID_MAX);
+        auto members = promptNodeList("Member node ids (space/comma separated):");
+        if (!group.has_value() || !members.has_value())
+        {
+            logLine("association entry: cancelled or invalid");
+            return std::nullopt;
+        }
+        return PolicyEntry{.kind = POLICY_KIND_ASSOC, .groupId = *group, .members = *members};
+    }
+    // wake-up
+    auto interval = promptU32("Interval seconds (0..16777215):");
+    auto notify   = promptByte("Notify node id (0=controller):", BYTE_MIN, BYTE_MAX);
+    if (!interval.has_value() || !notify.has_value())
+    {
+        logLine("wake-up entry: cancelled or invalid");
+        return std::nullopt;
+    }
+    return PolicyEntry{.kind = POLICY_KIND_WAKEUP, .intervalSeconds = *interval, .notificationNodeId = *notify};
+}
+
+// True iff two entries occupy the same policy slot — an override of this
+// identity replaces rather than appends (Configuration keyed by
+// parameter, Association by groupId, Wake-Up a singleton).
+auto sameSlot(const PolicyEntry& lhs, const PolicyEntry& rhs) -> bool
+{
+    if (lhs.kind != rhs.kind)
+    {
+        return false;
+    }
+    if (lhs.kind == POLICY_KIND_CONFIG)
+    {
+        return lhs.parameter == rhs.parameter;
+    }
+    if (lhs.kind == POLICY_KIND_ASSOC)
+    {
+        return lhs.groupId == rhs.groupId;
+    }
+    return true;  // wake-up singleton
+}
+
+// Decode the existing blob, upsert `entry` (replace same-slot or append),
+// and return the re-encoded blob. nullopt if the existing blob is
+// non-empty but undecodable — don't clobber data we can't read. `replaced`
+// reports whether an existing entry was overwritten.
+auto applyEntryToBlob(const std::vector<std::uint8_t>& existing,
+                      const PolicyEntry& entry,
+                      bool& replaced) -> std::optional<std::vector<std::uint8_t>>
+{
+    std::vector<PolicyEntry> policy;
+    if (!existing.empty())
+    {
+        auto decoded = decodePolicy(existing);
+        if (!decoded.has_value())
+        {
+            return std::nullopt;
+        }
+        policy = *decoded;
+    }
+    replaced = false;
+    for (auto& existingEntry : policy)
+    {
+        if (sameSlot(existingEntry, entry))
+        {
+            existingEntry = entry;
+            replaced      = true;
+            break;
+        }
+    }
+    if (!replaced)
+    {
+        policy.push_back(entry);
+    }
+    return encodePolicy(policy);
+}
+
+// One-line summary of an entry for log messages.
+auto entrySummary(const PolicyEntry& entry) -> std::string
+{
+    std::ostringstream stream;
+    if (entry.kind == POLICY_KIND_CONFIG)
+    {
+        stream << "config param=" << static_cast<unsigned>(entry.parameter) << " value=" << entry.value;
+    }
+    else if (entry.kind == POLICY_KIND_ASSOC)
+    {
+        stream << "assoc group=" << static_cast<unsigned>(entry.groupId) << " members=" << entry.members.size();
+    }
+    else
+    {
+        stream << "wakeup interval=" << entry.intervalSeconds << "s";
+    }
+    return stream.str();
+}
+
+// Add or update a policy entry (Configuration / Association / Wake-Up) in
+// a node's override, preserving any other entries: read the current
+// override, decode it, upsert the entry, re-encode, and write it back.
+auto handleSetNodeOverrideEntry(sdbus::IProxy& proxy) -> void
 {
     auto nodeId = promptNodeId("Node ID (1-232):");
     if (!nodeId.has_value())
@@ -1662,25 +1922,11 @@ auto handleSetConfigOverride(sdbus::IProxy& proxy) -> void
         logLine("SetNodeOverride: cancelled or invalid node id");
         return;
     }
-    auto parameter = promptByte("Config parameter (0-255):", BYTE_MIN, BYTE_MAX);
-    if (!parameter.has_value())
+    auto entry = promptPolicyEntry();
+    if (!entry.has_value())
     {
-        logLine("SetNodeOverride: cancelled or invalid parameter");
         return;
     }
-    auto size = promptByte("Value size bytes (1, 2, or 4):", CONFIG_SIZE_MIN, CONFIG_SIZE_MAX);
-    if (!size.has_value() || (*size != 1 && *size != 2 && *size != 4))
-    {
-        logLine("SetNodeOverride: size must be 1, 2, or 4");
-        return;
-    }
-    auto value = promptInt32("Value (signed int32):");
-    if (!value.has_value())
-    {
-        logLine("SetNodeOverride: cancelled or invalid value");
-        return;
-    }
-
     std::vector<std::uint8_t> existing;
     try
     {
@@ -1691,51 +1937,99 @@ auto handleSetConfigOverride(sdbus::IProxy& proxy) -> void
         logLine(std::string{"SetNodeOverride: read-back failed: "} + err.what());
         return;
     }
-    std::vector<PolicyEntry> policy;
-    if (!existing.empty())
-    {
-        auto decoded = decodePolicy(existing);
-        if (!decoded.has_value())
-        {
-            logLine("SetNodeOverride: existing override is undecodable — aborting to avoid overwriting it");
-            return;
-        }
-        policy = *decoded;
-    }
-
     bool replaced = false;
-    for (auto& entry : policy)
+    auto blob     = applyEntryToBlob(existing, *entry, replaced);
+    if (!blob.has_value())
     {
-        if (entry.kind == POLICY_KIND_CONFIG && entry.parameter == *parameter)
-        {
-            entry.size     = *size;
-            entry.isSigned = *value < 0;
-            entry.value    = *value;
-            replaced       = true;
-            break;
-        }
+        logLine("SetNodeOverride: existing override is undecodable — aborting to avoid overwriting it");
+        return;
     }
-    if (!replaced)
-    {
-        policy.push_back(PolicyEntry{.kind      = POLICY_KIND_CONFIG,
-                                     .parameter = *parameter,
-                                     .size      = *size,
-                                     .isSigned  = *value < 0,
-                                     .value     = *value});
-    }
-
     try
     {
-        proxy.callMethod("SetNodeOverride").onInterface(IFACE_NAME).withArguments(*nodeId, encodePolicy(policy));
-        std::ostringstream stream;
-        stream << "SetNodeOverride node=" << static_cast<unsigned>(*nodeId)
-               << " config param=" << static_cast<unsigned>(*parameter) << " size=" << static_cast<unsigned>(*size)
-               << " value=" << *value << (replaced ? " (updated)" : " (added)");
-        logLine(stream.str());
+        proxy.callMethod("SetNodeOverride").onInterface(IFACE_NAME).withArguments(*nodeId, *blob);
+        logLine("SetNodeOverride node=" + std::to_string(static_cast<unsigned>(*nodeId)) + " " + entrySummary(*entry) +
+                (replaced ? " (updated)" : " (added)"));
     }
     catch (const sdbus::Error& err)
     {
         logLine(std::string{"SetNodeOverride failed: "} + err.what());
+    }
+}
+
+// Device-policy authoring: set/update an entry or delete the whole policy
+// for a (manufacturer, type, product) device, by the same edit-in-place
+// flow as node overrides.
+auto handleDevicePolicyEdit(sdbus::IProxy& proxy) -> void
+{
+    auto action = promptChar("Device policy: [s]et entry  [d]elete policy:", "sd");
+    if (!action.has_value())
+    {
+        logLine("Device policy: cancelled");
+        return;
+    }
+    auto manufacturerId = promptU16("Manufacturer id (dec or 0xHEX):");
+    auto productTypeId  = promptU16("Product type id:");
+    auto productId      = promptU16("Product id:");
+    if (!manufacturerId.has_value() || !productTypeId.has_value() || !productId.has_value())
+    {
+        logLine("Device policy: cancelled or invalid device id");
+        return;
+    }
+
+    if (*action == 'd')
+    {
+        try
+        {
+            proxy.callMethod("DeleteDevicePolicy")
+                .onInterface(IFACE_NAME)
+                .withArguments(*manufacturerId, *productTypeId, *productId);
+            logLine("DeleteDevicePolicy mfr=" + std::to_string(*manufacturerId));
+        }
+        catch (const sdbus::Error& err)
+        {
+            logLine(std::string{"DeleteDevicePolicy failed: "} + err.what());
+        }
+        return;
+    }
+
+    auto entry = promptPolicyEntry();
+    if (!entry.has_value())
+    {
+        return;
+    }
+    std::vector<std::uint8_t> existing;
+    try
+    {
+        proxy.callMethod("GetDevicePolicy")
+            .onInterface(IFACE_NAME)
+            .withArguments(*manufacturerId, *productTypeId, *productId)
+            .storeResultsTo(existing);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetDevicePolicy: read-back failed: "} + err.what());
+        return;
+    }
+    bool replaced = false;
+    auto blob     = applyEntryToBlob(existing, *entry, replaced);
+    if (!blob.has_value())
+    {
+        logLine("SetDevicePolicy: existing policy is undecodable — aborting to avoid overwriting it");
+        return;
+    }
+    try
+    {
+        proxy.callMethod("SetDevicePolicy")
+            .onInterface(IFACE_NAME)
+            .withArguments(*manufacturerId, *productTypeId, *productId, *blob);
+        std::ostringstream stream;
+        stream << "SetDevicePolicy mfr=0x" << std::hex << std::setw(4) << std::setfill('0') << *manufacturerId
+               << std::dec << " " << entrySummary(*entry) << (replaced ? " (updated)" : " (added)");
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetDevicePolicy failed: "} + err.what());
     }
 }
 
@@ -1933,7 +2227,7 @@ auto main() -> int
             }
             else if (key == 'c' || key == 'C')
             {
-                handleSetConfigOverride(*proxy);
+                handleSetNodeOverrideEntry(*proxy);
             }
             else if (key == 'x' || key == 'X')
             {
@@ -1942,6 +2236,10 @@ auto main() -> int
             else if (key == 'd' || key == 'D')
             {
                 handleListDevicePolicies(*proxy);
+            }
+            else if (key == 'e' || key == 'E')
+            {
+                handleDevicePolicyEdit(*proxy);
             }
             else if (key == 'L')
             {

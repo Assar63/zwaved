@@ -27,7 +27,7 @@ set -euo pipefail
 
 readonly DEFAULT_REPO="https://github.com/Assar63/zwaved.git"
 readonly DEFAULT_REF="master"
-readonly DEFAULT_PRESET="gnu"
+readonly DEFAULT_PRESET="llvm"
 readonly DEFAULT_CLONE_DIR="zwaved"
 
 preset="$DEFAULT_PRESET"
@@ -49,8 +49,8 @@ Modes (auto-detected):
   in-place     run inside a checkout  -> prepare the current tree
 
 Options:
-  --preset NAME    CMake preset to configure/build (default: gnu;
-                   also: llvm, gnu-tidy, llvm-tidy)
+  --preset NAME    CMake preset to configure/build (default: llvm;
+                   also: gnu, gnu-tidy, llvm-tidy)
   --repo URL       git URL to clone in standalone mode (default: upstream)
   --ref REF        branch or tag to clone (default: master)
   --here           force in-place mode (prepare the current tree)

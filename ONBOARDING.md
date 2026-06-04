@@ -24,8 +24,9 @@ Codespaces, …).
    cache.
 
 The `postCreateCommand` runs `scripts/install-hooks` and `cmake
---preset gnu` for you, so the pre-commit hook is active and clangd
-finds `compile_commands.json` before the editor finishes loading.
+--preset llvm` (the default) for you, so the pre-commit hook is active
+and clangd finds `compile_commands.json` before the editor finishes
+loading.
 
 Hardware passthrough (real Z-Wave dongle) needs extra `runArgs` —
 see the *Devcontainer* section in [README.md](README.md).
@@ -59,15 +60,18 @@ Then:
 
 ```bash
 scripts/install-hooks      # points git's core.hooksPath at scripts/git-hooks/
-cmake --preset gnu         # configures cmake-build-gnu/ and emits compile_commands.json
+cmake --preset llvm        # configures cmake-build-llvm/ and emits compile_commands.json
 ```
+
+(`llvm` is the default preset — clang-20, ~10% smaller binary. Swap in
+`gnu` anywhere below if you prefer GCC; CI builds both.)
 
 ## 2. First build and test
 
 ```bash
-cmake --build cmake-build-gnu                 # build
-./cmake-build-gnu/zwaved --version            # smoke test
-ctest --test-dir cmake-build-gnu --output-on-failure   # run the unit suite
+cmake --build cmake-build-llvm                 # build
+./cmake-build-llvm/zwaved --version            # smoke test
+ctest --test-dir cmake-build-llvm --output-on-failure   # run the unit suite
 ```
 
 The unit tests are tiny and finish in milliseconds — run them

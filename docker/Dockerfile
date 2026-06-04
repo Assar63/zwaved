@@ -65,6 +65,12 @@ ARG DEBIAN_FRONTEND=noninteractive
 #     configure step probes for both and FATAL_ERRORs without them.
 #   * clang-format + clang-tidy for the pre-commit hook and the
 #     `scripts/check-format --fix` workflow.
+#   * clang-20 / clang++-20 (the compiler, distinct from clang-format /
+#     clang-tidy) for the `llvm` preset. Stock noble only ships up to
+#     clang-18, so it comes from apt.llvm.org — same hand-rolled key +
+#     sources.list pattern as the toolchain PPA above (no
+#     add-apt-repository / REST API). The `llvm` preset is the project's
+#     default; CI builds both it and `gnu`.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -74,6 +80,10 @@ RUN apt-get update \
         | gpg --dearmor -o /usr/share/keyrings/ubuntu-toolchain-r.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/ubuntu-toolchain-r.gpg] https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu noble main" \
         > /etc/apt/sources.list.d/ubuntu-toolchain-r.list \
+    && curl -fsSL "https://apt.llvm.org/llvm-snapshot.gpg.key" \
+        | gpg --dearmor -o /usr/share/keyrings/llvm.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" \
+        > /etc/apt/sources.list.d/llvm.list \
     && apt-get -o Acquire::Retries=3 update \
     && { apt-cache madison g++-15 | grep -q "g++-15"; } \
         || { \
@@ -83,9 +93,16 @@ RUN apt-get update \
             echo " unrelated *-15 packages and produce a build with no /usr/bin/g++-15.)"; \
             exit 1; \
         } \
+    && { apt-cache madison clang-20 | grep -q "clang-20"; } \
+        || { \
+            echo "ERROR: clang-20 not available — apt.llvm.org fetch failed."; \
+            echo "Check network reachability of apt.llvm.org and rerun."; \
+            exit 1; \
+        } \
     && apt-get install -y --no-install-recommends \
         cmake \
         g++-15 \
+        clang-20 \
         git \
         libudev-dev \
         libsdbus-c++-dev \
@@ -127,6 +144,22 @@ RUN cmake --preset gnu \
     && ctest --test-dir cmake-build-gnu --output-on-failure
 
 # ---------------------------------------------------------------------
+# Stage 2a: build-llvm — same configure / compile / test cycle with the
+# `llvm` preset (clang-20). The `llvm` preset is the project's default,
+# so this is the primary compiler check; the `gnu` stage above keeps the
+# GCC build honest. The published runtime image still ships the `gnu`
+# binary (see the runtime stage's COPY) — switching the released artifact
+# to clang is a deliberate separate change.
+# ---------------------------------------------------------------------
+FROM toolchain AS build-llvm
+
+WORKDIR /src
+COPY . .
+RUN cmake --preset llvm \
+    && cmake --build cmake-build-llvm --parallel \
+    && ctest --test-dir cmake-build-llvm --output-on-failure
+
+# ---------------------------------------------------------------------
 # Stage 2b: bootstrap-smoke — prove scripts/bootstrap's in-place setup
 # path works in the canonical toolchain environment. Runs configure +
 # wiring only (`--no-build`): the compile + ctest are already covered by
@@ -143,8 +176,8 @@ WORKDIR /src
 COPY . .
 RUN git config --global --add safe.directory /src \
     && scripts/bootstrap --here --skip-deps --no-build \
-    && test -f cmake-build-gnu/compile_commands.json \
-    && grep -q 'CompilationDatabase: cmake-build-gnu' .clangd
+    && test -f cmake-build-llvm/compile_commands.json \
+    && grep -q 'CompilationDatabase: cmake-build-llvm' .clangd
 
 # ---------------------------------------------------------------------
 # Stage 3: runtime — ubuntu base + dynamic deps + the daemon binary.

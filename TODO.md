@@ -45,6 +45,10 @@ Implementation order (each shippable independently):
 
 **The full inclusion + wake-up orchestration plan is now complete (steps 1–7).**
 
+### Closed-loop automation (epic)
+
+> [epic: daemon-side closed-loop automation](https://github.com/Assar63/zwaved/issues/101) — behaviour where the daemon *reacts* to node events by *driving* other nodes/CCs, beyond today's open-loop "client Sets, node Reports" model. Raised by the HVAC quartet (#23): grouping CCs does **not** justify an orchestrator, but genuine closed-loop logic does. CC vertical slices stay open-loop and independent; aggregated read-models are a **client** concern; cross-CC validity is **device**-enforced. Candidate children (each ships independently): **PolicyRegister desired-state entries** (setpoint/mode entries the existing Inclusion/WakeUp orchestrators re-assert — do-first, open-loop), **verify-after-set** (Set→Get→compare→retry), **event-triggered cross-node reactions** (e.g. window-contact open → thermostat off — the textbook orchestrator case), **set/level coalescing**, and **schedules/setback** (likely its own epic when reached). Orchestrators stay in `src/orchestrator/` (prio 204, no thread, bus-only).
+
 ### Command classes
 
 **Simple — single fixed-shape payload, mirrors the existing BinarySwitch / Association pattern:**
@@ -69,7 +73,11 @@ Implementation order (each shippable independently):
 - [x] **Meter (CC `0x32`)** — [#20](https://github.com/Assar63/zwaved/issues/20): `GetMeter(nodeId, scale, callbackId)` (v2+ scale-selecting Get) over D-Bus; `Meter.decodeReport` extracts meterType + rateType + the packed precision/scale/size flag, the signed 1/2/4-byte current value, the 16-bit deltaTime, and (only when deltaTime != 0) the previous value — so clients compute instantaneous rate stateless. Republished by the cc-translator as the typed `MeterReport(y y y y y i q i b)` signal. Codec also exposes `meterTypeName` / `scaleUnit` helpers. Terminal `[j]` prompts node + scale and renders e.g. `MeterReport node=5 electric 12.345 kWh (Δ3600s, prev 12.000)`. 6 codec unit tests. v4 dual-scale, SUPPORTED_GET/REPORT, and RESET deferred.
 - [ ] [Color Switch (CC 0x33)](https://github.com/Assar63/zwaved/issues/21)
 - [ ] [Central Scene (CC 0x5B)](https://github.com/Assar63/zwaved/issues/22)
-- [ ] [Thermostat HVAC quartet (CC 0x40 Mode / 0x43 Setpoint / 0x42 Operating State / 0x44 Fan Mode)](https://github.com/Assar63/zwaved/issues/23)
+- [ ] [epic: Thermostat HVAC quartet](https://github.com/Assar63/zwaved/issues/23) — split into per-CC subtasks (each an independent slice):
+  - [ ] [Thermostat Mode (CC 0x40)](https://github.com/Assar63/zwaved/issues/103)
+  - [ ] [Thermostat Setpoint (CC 0x43)](https://github.com/Assar63/zwaved/issues/104) — shares the precision/scale/size value codec with Sensor Multilevel (#17)
+  - [ ] [Thermostat Operating State (CC 0x42)](https://github.com/Assar63/zwaved/issues/105) — read-only
+  - [ ] [Thermostat Fan Mode (CC 0x44)](https://github.com/Assar63/zwaved/issues/106)
 - [ ] [Door Lock (CC 0x62) + User Code (CC 0x63)](https://github.com/Assar63/zwaved/issues/24)
 - [ ] [Transport Service (CC 0x55)](https://github.com/Assar63/zwaved/issues/25)
 

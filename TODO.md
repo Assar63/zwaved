@@ -142,7 +142,7 @@ Implementation order (each shippable independently):
 
 ### Display
 
-- [ ] [Surface typed CC reports in the activity pane](https://github.com/Assar63/zwaved/issues/74) — Battery / Configuration / Manufacturer / Version / Multilevel / Z-Wave+ / Wake-Up signals + matching GET actions.
+- [x] **Surface typed CC reports in the activity pane** — [#74](https://github.com/Assar63/zwaved/issues/74): terminal now subscribes to `BatteryReport` / `ConfigurationReport` / `ManufacturerSpecificReport` / `NodeVersionReport` / `ZWavePlusInfoReport` / `WakeUpIntervalReport` / `WakeUpNotification` (on top of the existing SwitchBinary/Multilevel), each rendered as a readable one-liner. New GET keys: `[b]` Battery, `[v]` Version, `[m]` Mfr-specific, `[z]` Z-Wave+, `[7]` Configuration. Undecoded CCs still fall back to the raw `ApplicationCommand` hex dump.
 - [ ] [Pending-queue + wake-up orchestration visibility](https://github.com/Assar63/zwaved/issues/75) — show `PendingCommandEnqueued` / `PendingCommandsDrained` / `WakeUpCycleComplete` / `WakeUpNotification`.
 - [ ] [DaemonError banner](https://github.com/Assar63/zwaved/issues/76) — consume the retained `DaemonError` feed; colour by severity.
 

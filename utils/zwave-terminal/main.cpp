@@ -572,7 +572,9 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [5] Switch multilevel set (prompts for node, level, duration)");
     mvprintw(row++, 0, "  [6] Switch multilevel get (prompts for node id)");
     mvprintw(
-        row++, 0, "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  (GET, prompt node)");
+        row++,
+        0,
+        "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  [t] Sensor  (GET, prompt node)");
     mvprintw(row++, 0, "  [8] Basic set  [9] Config set  [w] Wake-up interval  [u] Assoc add  [r] Assoc remove");
     mvprintw(row++, 0, "  [a] Get association group members");
     mvprintw(row++, 0, "  [g] Get association group count");
@@ -602,6 +604,50 @@ auto draw(std::uint8_t lastSession) -> void
     }
     refresh();
 }
+
+// Human name for a Sensor Multilevel sensor type (the common subset of
+// the SDS13781 table); unknown types render as bare hex.
+// NOLINTBEGIN(cppcoreguidelines-avoid-magic-numbers): Z-Wave sensor-type IDs from the AWG spec
+auto sensorTypeName(std::uint8_t sensorType) -> const char*
+{
+    switch (sensorType)
+    {
+    case 0x01:
+        return "Air temperature";
+    case 0x03:
+        return "Luminance";
+    case 0x04:
+        return "Power";
+    case 0x05:
+        return "Humidity";
+    case 0x11:
+        return "Moisture";
+    case 0x1B:
+        return "Ultraviolet";
+    default:
+        return nullptr;
+    }
+}
+
+// Unit string for a (sensorType, scale) pair; empty when unknown.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): both are wire fields, named at the call site
+auto sensorUnit(std::uint8_t sensorType, std::uint8_t scale) -> const char*
+{
+    switch (sensorType)
+    {
+    case 0x01:  // air temperature
+        return scale == 0 ? "C" : "F";
+    case 0x03:  // luminance
+        return scale == 0 ? "%" : "lux";
+    case 0x04:  // power
+        return scale == 0 ? "W" : "BTU/h";
+    case 0x05:  // humidity
+        return scale == 0 ? "%" : "g/m3";
+    default:
+        return "";
+    }
+}
+// NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 
 // NOLINTBEGIN(readability-function-cognitive-complexity): flat list of signal subscriptions
 auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
@@ -713,6 +759,42 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 }
                 logLine(stream.str());
             });
+
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+    proxy.uponSignal("SensorMultilevelReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t sensorType,
+               std::uint8_t scale,
+               std::uint8_t precision,
+               std::int32_t value) -> void
+            {
+                // reading = value / 10^precision, with `precision` decimals.
+                int divisor = 1;
+                for (std::uint8_t i = 0; i < precision; ++i)
+                {
+                    divisor *= DECIMAL_BASE;
+                }
+                std::ostringstream stream;
+                stream << "SensorMultilevelReport node=" << static_cast<unsigned>(sourceNodeId) << " ";
+                if (const char* name = sensorTypeName(sensorType); name != nullptr)
+                {
+                    stream << name;
+                }
+                else
+                {
+                    stream << "type=0x" << std::hex << std::setw(2) << std::setfill('0')
+                           << static_cast<unsigned>(sensorType) << std::dec;
+                }
+                stream << "=" << std::fixed << std::setprecision(precision) << static_cast<double>(value) / divisor;
+                if (const char* unit = sensorUnit(sensorType, scale); *unit != '\0')
+                {
+                    stream << " " << unit;
+                }
+                logLine(stream.str());
+            });
+    // NOLINTEND(bugprone-easily-swappable-parameters)
 
     proxy.uponSignal("ConfigurationReport")
         .onInterface(IFACE_NAME)
@@ -2303,6 +2385,10 @@ auto main() -> int
             else if (key == 'z' || key == 'Z')
             {
                 handleSimpleGet(*proxy, sessionCounter, "GetZWavePlusInfo");
+            }
+            else if (key == 't' || key == 'T')
+            {
+                handleSimpleGet(*proxy, sessionCounter, "GetSensorMultilevel");
             }
             else if (key == '7')
             {

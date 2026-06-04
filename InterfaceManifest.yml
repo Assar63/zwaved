@@ -408,6 +408,23 @@ events:
       - { name: level,        type: u8,   default: 0 }
       - { name: lowBattery,   type: bool, default: false }
 
+  - name: SensorMultilevelReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Sensor Multilevel (CC 0x31) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose ccData
+      parses as a Sensor Multilevel Report. The reading is
+      `value / 10^precision` in the unit selected by `(sensorType,
+      scale)`. Raw integer fields are carried so no precision is lost on
+      the wire; clients apply the decimal shift + unit lookup.
+    fields:
+      - { name: sourceNodeId, type: u8,  default: 0 }
+      - { name: sensorType,   type: u8,  default: 0 }
+      - { name: scale,        type: u8,  default: 0 }
+      - { name: precision,    type: u8,  default: 0 }
+      - { name: value,        type: i32, default: 0, doc: "raw; reading = value / 10^precision" }
+
   - name: WakeUpIntervalReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -741,6 +758,14 @@ events:
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
     doc: Query a node's Multilevel Switch value.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetSensorMultilevelCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's primary multilevel sensor (v1 Get, no type filter).
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
@@ -1083,6 +1108,13 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetBatteryCommand
+
+    - name: GetSensorMultilevel
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetSensorMultilevelCommand
 
     - name: GetManufacturerSpecific
       params:
@@ -1535,6 +1567,16 @@ dbus:
       triggered_by:
         event: BatteryReport
 
+    - name: SensorMultilevelReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: sensorType,   dbus: y, doc: "0x01 air temp, 0x03 luminance, 0x05 humidity, …" }
+        - { name: scale,        dbus: y, doc: "0..3, sensor-type-specific unit" }
+        - { name: precision,    dbus: y, doc: "reading = value / 10^precision" }
+        - { name: value,        dbus: i, doc: "raw signed value" }
+      triggered_by:
+        event: SensorMultilevelReport
+
     - name: ManufacturerSpecificReport
       params:
         - { name: sourceNodeId,   dbus: y }
@@ -1752,6 +1794,40 @@ modules:
         decoded_struct:
           - { name: level,      type: u8,   doc: "raw wire byte: 0x00..0x64 = 0..100%, 0xFF = low" }
           - { name: lowBattery, type: bool, doc: "true iff level == LEVEL_LOW_WARNING" }
+
+  - name: SensorMultilevel
+    wire:
+      class_byte: 0x31
+      prefix: SENSOR_MULTILEVEL
+    description: |
+      Multilevel sensor reporting — temperature, humidity, luminance,
+      power, etc. A Report carries a sensorType byte, a packed
+      precision/scale/size flag byte, and a signed big-endian value of
+      1, 2, or 4 bytes. The real reading is value / 10^precision in the
+      unit selected by (sensorType, scale) — e.g. air temperature
+      (type 0x01) scale 0 = Celsius, 1 = Fahrenheit. v1 Get takes no
+      payload (returns the device's primary sensor); the v5+ type-filtered
+      Get and SUPPORTED_GET/REPORT are not implemented yet.
+    constants:
+      - { name: FLAG_SIZE_MASK,       value: 0x07 }
+      - { name: FLAG_SCALE_MASK,      value: 0x18 }
+      - { name: FLAG_SCALE_SHIFT,     value: 3 }
+      - { name: FLAG_PRECISION_MASK,  value: 0xE0 }
+      - { name: FLAG_PRECISION_SHIFT, value: 5 }
+    commands:
+      - name: Get
+        wire:
+          byte: 0x04
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x05
+        decoded_struct:
+          - { name: sensorType, type: u8,  doc: "0x01 air temp, 0x03 luminance, 0x05 humidity, …" }
+          - { name: scale,      type: u8,  doc: "0..3, sensor-type-specific unit selector" }
+          - { name: precision,  type: u8,  doc: "decimal-point shift: reading = value / 10^precision" }
+          - { name: value,      type: i32, doc: "raw signed value (1/2/4-byte BE, sign-extended)" }
 
   - name: Configuration
     wire:
@@ -2032,6 +2108,19 @@ translations:
       sourceNodeId: event.sourceNodeId
       level:        decoded.level
       lowBattery:   decoded.lowBattery
+
+  - publishes: SensorMultilevelReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: SensorMultilevel.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      sensorType:   decoded.sensorType
+      scale:        decoded.scale
+      precision:    decoded.precision
+      value:        decoded.value
 
   - publishes: ManufacturerSpecificReport
     triggered_by: ApplicationCommand

@@ -450,6 +450,31 @@ The same typed signal also fires whenever the node sends an
 unsolicited Report after a manual dim, programmed scene change, or
 the tail end of an in-flight transition.
 
+## 11d. Reading a multilevel sensor (CC 0x31)
+
+`GetSensorMultilevel(nodeId, callbackId)` asks a node for its primary
+sensor reading (temperature, humidity, luminance, …). The reply arrives
+as the typed `SensorMultilevelReport(y y y y i)` signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the reporting node |
+| `sensorType` | `y` | 0x01 air temp, 0x03 luminance, 0x05 humidity, … (SDS13781) |
+| `scale` | `y` | unit selector, sensor-type-specific (air temp 0=°C, 1=°F) |
+| `precision` | `y` | decimal-point shift — the reading is `value / 10^precision` |
+| `value` | `i` | raw signed value (1/2/4-byte field, sign-extended) |
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetSensorMultilevel yy 5 7
+# e.g. → SensorMultilevelReport y y y y i  5 1 0 1 215   = 21.5 °C
+```
+
+Only the v1 Get (primary sensor, no type filter) is implemented;
+`SUPPORTED_GET`/`REPORT` and the v5+ type-filtered Get are not. In the
+terminal, `[t]` issues the Get and reports render as
+`Air temperature=21.5 C`.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

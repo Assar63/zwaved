@@ -573,6 +573,7 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [6] Switch multilevel get (prompts for node id)");
     mvprintw(
         row++, 0, "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  (GET, prompt node)");
+    mvprintw(row++, 0, "  [8] Basic set  [9] Config set  [w] Wake-up interval  [u] Assoc add  [r] Assoc remove");
     mvprintw(row++, 0, "  [a] Get association group members");
     mvprintw(row++, 0, "  [g] Get association group count");
     mvprintw(row++, 0, "  [L] Set lifeline (controller -> group 1)");
@@ -1122,6 +1123,120 @@ auto handleGetConfiguration(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) 
     catch (const sdbus::Error& err)
     {
         logLine(std::string{"GetConfiguration failed: "} + err.what());
+    }
+}
+
+// ---- Node control for non-binary CCs (#47) --------------------------
+// Drive the daemon's Set methods for CCs beyond binary switch. Each is a
+// fire-and-forget SendData; completion arrives as SendDataStatus and any
+// reply as the matching typed report signal.
+
+auto handleSetBasic(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    auto value  = promptByte("Basic value (0=off, 0xFF=on, 1-99=level):", BYTE_MIN, BYTE_MAX);
+    if (!nodeId.has_value() || !value.has_value())
+    {
+        logLine("SetBasic: cancelled or invalid");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetBasic").onInterface(IFACE_NAME).withArguments(*nodeId, *value, sessionCounter);
+        logLine("SetBasic node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " value=" + std::to_string(static_cast<unsigned>(*value)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetBasic failed: "} + err.what());
+    }
+}
+
+auto handleSetConfiguration(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId    = promptNodeId("Node ID (1-232):");
+    auto parameter = promptByte("Config parameter (0-255):", BYTE_MIN, BYTE_MAX);
+    auto size      = promptByte("Value size bytes (1, 2, or 4):", CONFIG_SIZE_MIN, CONFIG_SIZE_MAX);
+    auto value     = promptInt32("Value (signed int32):");
+    if (!nodeId.has_value() || !parameter.has_value() || !value.has_value() || !size.has_value() ||
+        (*size != 1 && *size != 2 && *size != 4))
+    {
+        logLine("SetConfiguration: cancelled or invalid (size must be 1/2/4)");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetConfiguration")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, *parameter, *size, *value < 0, *value, sessionCounter);
+        std::ostringstream stream;
+        stream << "SetConfiguration node=" << static_cast<unsigned>(*nodeId)
+               << " param=" << static_cast<unsigned>(*parameter) << " size=" << static_cast<unsigned>(*size)
+               << " value=" << *value << " callback=" << static_cast<unsigned>(sessionCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetConfiguration failed: "} + err.what());
+    }
+}
+
+auto handleSetWakeUpInterval(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId  = promptNodeId("Node ID (1-232):");
+    auto seconds = promptU32("Interval seconds (0..16777215):");
+    auto notify  = promptByte("Notify node id (0=controller):", BYTE_MIN, BYTE_MAX);
+    if (!nodeId.has_value() || !seconds.has_value() || !notify.has_value())
+    {
+        logLine("SetWakeUpInterval: cancelled or invalid");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetWakeUpInterval")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, *seconds, *notify, sessionCounter);
+        std::ostringstream stream;
+        stream << "SetWakeUpInterval node=" << static_cast<unsigned>(*nodeId) << " interval=" << *seconds
+               << "s notify=" << static_cast<unsigned>(*notify)
+               << " callback=" << static_cast<unsigned>(sessionCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetWakeUpInterval failed: "} + err.what());
+    }
+}
+
+// Add or remove association members for a group. `method` is
+// "SetAssociation" (add) or "RemoveAssociation".
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): proxy and counter are distinct types; method is a label
+auto handleAssociationEdit(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, const char* method) -> void
+{
+    auto nodeId  = promptNodeId("Node ID (1-232):");
+    auto groupId = promptByte("Group id (1-255):", GROUP_ID_MIN, GROUP_ID_MAX);
+    auto members = promptNodeList("Member node ids (space/comma separated):");
+    if (!nodeId.has_value() || !groupId.has_value() || !members.has_value())
+    {
+        logLine(std::string{method} + ": cancelled or invalid");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod(method).onInterface(IFACE_NAME).withArguments(*nodeId, *groupId, *members, sessionCounter);
+        std::ostringstream stream;
+        stream << method << " node=" << static_cast<unsigned>(*nodeId) << " group=" << static_cast<unsigned>(*groupId)
+               << " members=" << members->size() << " callback=" << static_cast<unsigned>(sessionCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{method} + " failed: " + err.what());
     }
 }
 
@@ -2192,6 +2307,26 @@ auto main() -> int
             else if (key == '7')
             {
                 handleGetConfiguration(*proxy, sessionCounter);
+            }
+            else if (key == '8')
+            {
+                handleSetBasic(*proxy, sessionCounter);
+            }
+            else if (key == '9')
+            {
+                handleSetConfiguration(*proxy, sessionCounter);
+            }
+            else if (key == 'w' || key == 'W')
+            {
+                handleSetWakeUpInterval(*proxy, sessionCounter);
+            }
+            else if (key == 'u' || key == 'U')
+            {
+                handleAssociationEdit(*proxy, sessionCounter, "SetAssociation");
+            }
+            else if (key == 'r' || key == 'R')
+            {
+                handleAssociationEdit(*proxy, sessionCounter, "RemoveAssociation");
             }
             else if (key == 'l')
             {

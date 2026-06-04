@@ -480,6 +480,18 @@ events:
       - { name: previousValue, type: i32,  default: 0, doc: "raw; valid only when hasPrevious" }
       - { name: hasPrevious,   type: bool, default: false }
 
+  - name: ThermostatModeReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Thermostat Mode (CC 0x40) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose ccData
+      parses as a Thermostat Mode Report. `mode`: 0 off, 1 heat, 2 cool,
+      3 auto, 6 fan only, 8 dry, … (raw byte; naming left to clients).
+    fields:
+      - { name: sourceNodeId, type: u8, default: 0 }
+      - { name: mode,         type: u8, default: 0 }
+
   - name: WakeUpIntervalReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -851,6 +863,23 @@ events:
       - { name: scale,      type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
 
+  - name: SetThermostatModeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: "Set a node's thermostat mode (0 off, 1 heat, 2 cool, 3 auto, …)."
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: mode,       type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetThermostatModeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's current thermostat mode.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
   - name: GetBatteryCommand
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
@@ -1219,6 +1248,21 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetMeterCommand
+
+    - name: SetThermostatMode
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: mode,       dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: SetThermostatModeCommand
+
+    - name: GetThermostatMode
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetThermostatModeCommand
 
     - name: GetManufacturerSpecific
       params:
@@ -1713,6 +1757,13 @@ dbus:
       triggered_by:
         event: MeterReport
 
+    - name: ThermostatModeReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: mode,         dbus: y, doc: "0 off, 1 heat, 2 cool, 3 auto, 6 fan only, 8 dry, …" }
+      triggered_by:
+        event: ThermostatModeReport
+
     - name: ManufacturerSpecificReport
       params:
         - { name: sourceNodeId,   dbus: y }
@@ -2071,6 +2122,42 @@ modules:
           - { name: previousValue, type: i32,  doc: "raw signed previous value; valid iff hasPrevious" }
           - { name: hasPrevious,   type: bool, doc: "true iff deltaTime != 0 and previousValue present" }
 
+  - name: ThermostatMode
+    wire:
+      class_byte: 0x40
+      prefix: THERMOSTAT_MODE
+    description: |
+      HVAC operating mode. SET takes a single mode byte (the low 5 bits;
+      the high 3 bits are a v3 manufacturer-data length, sent as 0 here);
+      REPORT carries the current mode. mode: 0 off, 1 heat, 2 cool, 3 auto,
+      4 aux heat, 6 fan only, 7 furnace, 8 dry, 9 moist, 10 auto changeover,
+      11 energy-save heat, 12 energy-save cool, 13 away. The decoder returns
+      the raw byte and leaves naming to clients. First of the split
+      thermostat quartet (epic #23).
+    constants:
+      - { name: MODE_OFF,  value: 0x00 }
+      - { name: MODE_HEAT, value: 0x01 }
+      - { name: MODE_COOL, value: 0x02 }
+      - { name: MODE_AUTO, value: 0x03 }
+    commands:
+      - name: Set
+        wire:
+          byte: 0x01
+          payload:
+            - "mode"
+        encode_args:
+          - { name: mode, type: u8 }
+      - name: Get
+        wire:
+          byte: 0x02
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: mode, type: u8, doc: "0 off, 1 heat, 2 cool, 3 auto, 6 fan only, 8 dry, …" }
+
   - name: Configuration
     wire:
       class_byte: 0x70
@@ -2404,6 +2491,16 @@ translations:
       deltaTime:     decoded.deltaTime
       previousValue: decoded.previousValue
       hasPrevious:   decoded.hasPrevious
+
+  - publishes: ThermostatModeReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: ThermostatMode.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      mode:         decoded.mode
 
   - publishes: ManufacturerSpecificReport
     triggered_by: ApplicationCommand

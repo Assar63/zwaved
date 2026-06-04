@@ -74,7 +74,7 @@ Implementation order (each shippable independently):
 - [ ] [Color Switch (CC 0x33)](https://github.com/Assar63/zwaved/issues/21)
 - [ ] [Central Scene (CC 0x5B)](https://github.com/Assar63/zwaved/issues/22)
 - [ ] [epic: Thermostat HVAC quartet](https://github.com/Assar63/zwaved/issues/23) — split into per-CC subtasks (each an independent slice):
-  - [ ] [Thermostat Mode (CC 0x40)](https://github.com/Assar63/zwaved/issues/103)
+  - [x] **Thermostat Mode (CC `0x40`)** — [#103](https://github.com/Assar63/zwaved/issues/103): `SetThermostatMode(nodeId, mode, callbackId)` + `GetThermostatMode(nodeId, callbackId)` over D-Bus; generated `encodeSet`/`encodeGet`, hand-written `decodeReport` (masks the mode byte's low 5 bits — high 3 are a v3 manufacturer-data count). Republished by the cc-translator as the typed `ThermostatModeReport(y y)` signal. Terminal `[0]` sets / `[y]` gets, rendered with mode names. 5 codec unit tests. **Note:** terminal is now out of single-key bindings (only `[y]`/`[0]` were left) — the remaining quartet CCs need a submenu/rebinding scheme (follow-up under terminal epic #73). SUPPORTED_GET/REPORT deferred.
   - [ ] [Thermostat Setpoint (CC 0x43)](https://github.com/Assar63/zwaved/issues/104) — shares the precision/scale/size value codec with Sensor Multilevel (#17)
   - [ ] [Thermostat Operating State (CC 0x42)](https://github.com/Assar63/zwaved/issues/105) — read-only
   - [ ] [Thermostat Fan Mode (CC 0x44)](https://github.com/Assar63/zwaved/issues/106)

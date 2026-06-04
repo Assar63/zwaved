@@ -568,6 +568,35 @@ the v4 dual-scale extension, `SUPPORTED_GET`/`REPORT`, and `RESET` are not.
 In the terminal, `[j]` prompts for node + scale, issues the Get, and reports
 render as `MeterReport node=5 electric 12.345 kWh (Δ3600s, prev 12.000)`.
 
+## 11h. Thermostat mode (CC 0x40)
+
+The Thermostat Mode Command Class sets/reads an HVAC unit's operating mode.
+It is the first CC of the thermostat quartet (Setpoint 0x43, Operating
+State 0x42, Fan Mode 0x44 follow). `SetThermostatMode(nodeId, mode,
+callbackId)` changes the mode; `GetThermostatMode(nodeId, callbackId)`
+queries it. The reply and any unsolicited Reports arrive as the typed
+`ThermostatModeReport(y y)` signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the reporting node |
+| `mode` | `y` | 0 off, 1 heat, 2 cool, 3 auto, 4 aux heat, 6 fan only, 8 dry, 10 auto changeover, 11 energy-save heat, 12 energy-save cool, 13 away |
+
+```bash
+# set node 5 to heat, then read it back
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetThermostatMode yyy 5 1 7
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetThermostatMode yy 5 8
+# → ThermostatModeReport y y  5 1   = node 5 heat
+```
+
+The decoder masks the mode byte's low 5 bits (the high 3 bits are a v3
+manufacturer-data-field count) and returns the raw mode; naming is left to
+clients. `SUPPORTED_GET`/`REPORT` are not implemented. In the terminal,
+`[0]` sets the mode and `[y]` gets it; reports render as
+`ThermostatModeReport node=5 mode=heat`.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

@@ -575,8 +575,11 @@ auto draw(std::uint8_t lastSession) -> void
         row++,
         0,
         "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  [t] Sensor  [h] Bin-sensor  "
-        "[k] Notification  [j] Meter  (GET, prompt node)");
-    mvprintw(row++, 0, "  [8] Basic set  [9] Config set  [w] Wake-up interval  [u] Assoc add  [r] Assoc remove");
+        "[k] Notification  [j] Meter  [y] Thermostat mode  (GET, prompt node)");
+    mvprintw(row++,
+             0,
+             "  [8] Basic set  [9] Config set  [0] Thermostat mode  [w] Wake-up interval  [u] Assoc add  "
+             "[r] Assoc remove");
     mvprintw(row++, 0, "  [a] Get association group members");
     mvprintw(row++, 0, "  [g] Get association group count");
     mvprintw(row++, 0, "  [L] Set lifeline (controller -> group 1)");
@@ -692,6 +695,38 @@ auto meterUnit(std::uint8_t meterType, std::uint8_t scale) -> const char*
         return scale == 0 ? "m3" : "";
     default:
         return "";
+    }
+}
+
+// Thermostat Mode (CC 0x40) name; nullptr when unknown.
+auto thermostatModeName(std::uint8_t mode) -> const char*
+{
+    switch (mode)
+    {
+    case 0:
+        return "off";
+    case 1:
+        return "heat";
+    case 2:
+        return "cool";
+    case 3:
+        return "auto";
+    case 4:
+        return "aux heat";
+    case 6:
+        return "fan only";
+    case 8:
+        return "dry";
+    case 10:
+        return "auto changeover";
+    case 11:
+        return "energy-save heat";
+    case 12:
+        return "energy-save cool";
+    case 13:
+        return "away";
+    default:
+        return nullptr;
     }
 }
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
@@ -942,6 +977,26 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
     // NOLINTEND(bugprone-easily-swappable-parameters)
+
+    proxy.uponSignal("ThermostatModeReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId, std::uint8_t mode) -> void
+            {
+                std::ostringstream stream;
+                stream << "ThermostatModeReport node=" << static_cast<unsigned>(sourceNodeId) << " mode=";
+                if (const char* name = thermostatModeName(mode); name != nullptr)
+                {
+                    stream << name;
+                }
+                else
+                {
+                    stream << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(mode)
+                           << std::dec;
+                }
+                logLine(stream.str());
+            });
 
     proxy.uponSignal("ConfigurationReport")
         .onInterface(IFACE_NAME)
@@ -1441,6 +1496,29 @@ auto handleSetBasic(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
     catch (const sdbus::Error& err)
     {
         logLine(std::string{"SetBasic failed: "} + err.what());
+    }
+}
+
+auto handleSetThermostatMode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    auto mode   = promptByte("Thermostat mode (0=off, 1=heat, 2=cool, 3=auto):", BYTE_MIN, BYTE_MAX);
+    if (!nodeId.has_value() || !mode.has_value())
+    {
+        logLine("SetThermostatMode: cancelled or invalid");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetThermostatMode").onInterface(IFACE_NAME).withArguments(*nodeId, *mode, sessionCounter);
+        logLine("SetThermostatMode node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " mode=" + std::to_string(static_cast<unsigned>(*mode)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetThermostatMode failed: "} + err.what());
     }
 }
 
@@ -2614,9 +2692,17 @@ auto main() -> int
             {
                 handleGetNotification(*proxy, sessionCounter);
             }
+            else if (key == 'y' || key == 'Y')
+            {
+                handleSimpleGet(*proxy, sessionCounter, "GetThermostatMode");
+            }
             else if (key == '8')
             {
                 handleSetBasic(*proxy, sessionCounter);
+            }
+            else if (key == '0')
+            {
+                handleSetThermostatMode(*proxy, sessionCounter);
             }
             else if (key == '9')
             {

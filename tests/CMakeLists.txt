@@ -30,6 +30,7 @@ set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/ZWavePlusInfo.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/SensorMultilevel.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/SensorBinary.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/ThermostatMode.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
@@ -138,6 +139,20 @@ target_include_directories(SensorBinary_test PRIVATE
 target_link_libraries(SensorBinary_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(SensorBinary_test)
 gtest_discover_tests(SensorBinary_test)
+
+# ---- ThermostatMode -------------------------------------------------
+add_executable(ThermostatMode_test
+    ThermostatMode_test.cpp
+    "${SRC_DIR}/application/ThermostatMode.cpp"
+    "${GENERATED_APPLICATION_DIR}/ThermostatMode.gen.cpp"
+)
+target_include_directories(ThermostatMode_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(ThermostatMode_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(ThermostatMode_test)
+gtest_discover_tests(ThermostatMode_test)
 
 # ---- ManufacturerSpecific -------------------------------------------
 add_executable(ManufacturerSpecific_test

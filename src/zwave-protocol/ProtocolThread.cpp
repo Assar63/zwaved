@@ -23,6 +23,7 @@
 #include "application/Notification.hpp"
 #include "application/SensorBinary.hpp"
 #include "application/SensorMultilevel.hpp"
+#include "application/ThermostatMode.hpp"
 #include "application/WakeUp.hpp"
 #include "application/ZWavePlusInfo.hpp"
 
@@ -322,6 +323,16 @@ auto onGetNotification(const MessageBus::GetNotificationCommand& cmd) -> void
 auto onGetMeter(const MessageBus::GetMeterCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, Meter::encodeGet(cmd.scale));
+}
+
+auto onSetThermostatMode(const MessageBus::SetThermostatModeCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, ThermostatMode::encodeSet(cmd.mode));
+}
+
+auto onGetThermostatMode(const MessageBus::GetThermostatModeCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, ThermostatMode::encodeGet());
 }
 
 auto onGetManufacturerSpecific(const MessageBus::GetManufacturerSpecificCommand& cmd) -> void
@@ -1009,7 +1020,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 33;
+constexpr std::size_t SUBSCRIPTION_COUNT = 35;
 
 auto subscribeBus() -> void
 {
@@ -1031,6 +1042,8 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetSensorBinaryCommand>(onGetSensorBinary);
     subscribe<MessageBus::GetNotificationCommand>(onGetNotification);
     subscribe<MessageBus::GetMeterCommand>(onGetMeter);
+    subscribe<MessageBus::SetThermostatModeCommand>(onSetThermostatMode);
+    subscribe<MessageBus::GetThermostatModeCommand>(onGetThermostatMode);
     subscribe<MessageBus::GetManufacturerSpecificCommand>(onGetManufacturerSpecific);
     subscribe<MessageBus::GetZWavePlusInfoCommand>(onGetZWavePlusInfo);
     subscribe<MessageBus::GetNodeVersionCommand>(onGetNodeVersion);

@@ -74,9 +74,11 @@ TEST(SensorMultilevel, RejectsInvalidSizeAndMalformed)
     EXPECT_FALSE(SensorMultilevel::decodeReport(report(0x01, 0x03, {0x00, 0x01, 0x02})).has_value());
     // truncated: flag says size 4 but only 2 value bytes present
     EXPECT_FALSE(SensorMultilevel::decodeReport(report(0x01, 0x04, {0x00, 0x01})).has_value());
-    // wrong command class
-    EXPECT_FALSE(SensorMultilevel::decodeReport({0x80, 0x05, 0x01, 0x22, 0x00, 0xD7}).has_value());
+    // wrong command class (build the vector explicitly: a braced-init-list
+    // doesn't implicitly convert to std::span under GCC).
+    const std::vector<std::uint8_t> wrongCc{0x80, 0x05, 0x01, 0x22, 0x00, 0xD7};
+    EXPECT_FALSE(SensorMultilevel::decodeReport(wrongCc).has_value());
     // wrong command byte (Get, not Report)
-    EXPECT_FALSE(
-        SensorMultilevel::decodeReport({SensorMultilevel::COMMAND_CLASS, 0x04, 0x01, 0x22, 0x00, 0xD7}).has_value());
+    const std::vector<std::uint8_t> wrongCmd{SensorMultilevel::COMMAND_CLASS, 0x04, 0x01, 0x22, 0x00, 0xD7};
+    EXPECT_FALSE(SensorMultilevel::decodeReport(wrongCmd).has_value());
 }

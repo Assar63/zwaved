@@ -361,6 +361,8 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(row++, 0, "  [4] Switch binary OFF (prompts for node id)");
     mvprintw(row++, 0, "  [5] Switch multilevel set (prompts for node, level, duration)");
     mvprintw(row++, 0, "  [6] Switch multilevel get (prompts for node id)");
+    mvprintw(
+        row++, 0, "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  (GET, prompt node)");
     mvprintw(row++, 0, "  [a] Get association group members");
     mvprintw(row++, 0, "  [g] Get association group count");
     mvprintw(row++, 0, "  [L] Set lifeline (controller -> group 1)");
@@ -476,6 +478,116 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                        << " target=" << static_cast<unsigned>(targetValue) << " duration=0x" << std::hex << std::setw(2)
                        << std::setfill('0') << static_cast<unsigned>(duration) << std::dec;
                 logLine(stream.str());
+            });
+
+    proxy.uponSignal("BatteryReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId, std::uint8_t level, bool lowBattery) -> void
+            {
+                std::ostringstream stream;
+                stream << "BatteryReport node=" << static_cast<unsigned>(sourceNodeId) << " level=";
+                if (level == BYTE_MAX)
+                {
+                    stream << "low(0xFF)";
+                }
+                else
+                {
+                    stream << static_cast<unsigned>(level) << "%";
+                }
+                if (lowBattery)
+                {
+                    stream << " [LOW]";
+                }
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("ConfigurationReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId, std::uint8_t parameter, std::uint8_t size, std::int32_t value) -> void
+            {
+                std::ostringstream stream;
+                stream << "ConfigurationReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " param=" << static_cast<unsigned>(parameter) << " size=" << static_cast<unsigned>(size)
+                       << " value=" << value;
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("ManufacturerSpecificReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId,
+               std::uint16_t manufacturerId,
+               std::uint16_t productTypeId,
+               std::uint16_t productId) -> void
+            {
+                std::ostringstream stream;
+                stream << "ManufacturerSpecificReport node=" << static_cast<unsigned>(sourceNodeId) << std::hex
+                       << std::setfill('0') << " mfr=0x" << std::setw(4) << manufacturerId << " type=0x" << std::setw(4)
+                       << productTypeId << " product=0x" << std::setw(4) << productId << std::dec;
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("NodeVersionReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t libraryType,
+               std::uint8_t protocolVersion,
+               std::uint8_t protocolSubVersion,
+               std::uint8_t applicationVersion,
+               std::uint8_t applicationSubVersion) -> void
+            {
+                std::ostringstream stream;
+                stream << "NodeVersionReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " lib=" << static_cast<unsigned>(libraryType)
+                       << " proto=" << static_cast<unsigned>(protocolVersion) << "."
+                       << static_cast<unsigned>(protocolSubVersion)
+                       << " app=" << static_cast<unsigned>(applicationVersion) << "."
+                       << static_cast<unsigned>(applicationSubVersion);
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("ZWavePlusInfoReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t zwavePlusVersion,
+               std::uint8_t roleType,
+               std::uint8_t nodeType,
+               std::uint16_t installerIconType,
+               std::uint16_t userIconType) -> void
+            {
+                std::ostringstream stream;
+                stream << "ZWavePlusInfoReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " ver=" << static_cast<unsigned>(zwavePlusVersion)
+                       << " role=" << static_cast<unsigned>(roleType) << " nodeType=" << static_cast<unsigned>(nodeType)
+                       << std::hex << std::setfill('0') << " icons=0x" << std::setw(4) << installerIconType << "/0x"
+                       << std::setw(4) << userIconType << std::dec;
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("WakeUpIntervalReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId, std::uint32_t seconds, std::uint8_t controllerNodeId) -> void
+            {
+                std::ostringstream stream;
+                stream << "WakeUpIntervalReport node=" << static_cast<unsigned>(sourceNodeId) << " interval=" << seconds
+                       << "s notify=" << static_cast<unsigned>(controllerNodeId);
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("WakeUpNotification")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId) -> void {
+                logLine("WakeUpNotification node=" + std::to_string(static_cast<unsigned>(sourceNodeId)) + " (awake)");
             });
 
     proxy.uponSignal("ApplicationCommand")
@@ -690,6 +802,61 @@ auto handleGetMultilevelSwitch(sdbus::IProxy& proxy, std::uint8_t& sessionCounte
     stream << "GetMultilevelSwitch node=" << static_cast<unsigned>(*nodeId)
            << " callback=" << static_cast<unsigned>(sessionCounter);
     logLine(stream.str());
+}
+
+/// Drive a simple `(nodeId, callbackId)` GET method (Battery, Version,
+/// Manufacturer Specific, Z-Wave Plus Info). The decoded answer arrives
+/// asynchronously as the matching typed report signal.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): proxy and counter are distinct types; method is a label
+auto handleSimpleGet(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, const char* method) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine(std::string{method} + ": cancelled or invalid node id");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod(method).onInterface(IFACE_NAME).withArguments(*nodeId, sessionCounter);
+        logLine(std::string{method} + " node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{method} + " failed: " + err.what());
+    }
+}
+
+auto handleGetConfiguration(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("GetConfiguration: cancelled or invalid node id");
+        return;
+    }
+    auto parameter = promptByte("Config parameter (0-255):", BYTE_MIN, BYTE_MAX);
+    if (!parameter.has_value())
+    {
+        logLine("GetConfiguration: cancelled or invalid parameter");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("GetConfiguration").onInterface(IFACE_NAME).withArguments(*nodeId, *parameter, sessionCounter);
+        std::ostringstream stream;
+        stream << "GetConfiguration node=" << static_cast<unsigned>(*nodeId)
+               << " param=" << static_cast<unsigned>(*parameter)
+               << " callback=" << static_cast<unsigned>(sessionCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetConfiguration failed: "} + err.what());
+    }
 }
 
 /// Z-Wave Command Class human-readable names. Covers the most commonly
@@ -1556,6 +1723,26 @@ auto main() -> int
             else if (key == '6')
             {
                 handleGetMultilevelSwitch(*proxy, sessionCounter);
+            }
+            else if (key == 'b' || key == 'B')
+            {
+                handleSimpleGet(*proxy, sessionCounter, "GetBattery");
+            }
+            else if (key == 'v' || key == 'V')
+            {
+                handleSimpleGet(*proxy, sessionCounter, "GetNodeVersion");
+            }
+            else if (key == 'm' || key == 'M')
+            {
+                handleSimpleGet(*proxy, sessionCounter, "GetManufacturerSpecific");
+            }
+            else if (key == 'z' || key == 'Z')
+            {
+                handleSimpleGet(*proxy, sessionCounter, "GetZWavePlusInfo");
+            }
+            else if (key == '7')
+            {
+                handleGetConfiguration(*proxy, sessionCounter);
             }
             else if (key == 'l' || key == 'L')
             {

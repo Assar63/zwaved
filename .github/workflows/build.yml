@@ -62,6 +62,34 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ===================================================================
+  # build-and-test-llvm — same configure / compile / test cycle with the
+  # `llvm` preset (clang-20). llvm is the project's default; this is the
+  # primary compiler check, with build-and-test (gnu) keeping the GCC
+  # build honest. cache-from only — reuses the toolchain layer the gnu
+  # job writes; its own build layer is distinct.
+  # ===================================================================
+  build-and-test-llvm:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build & test (Dockerfile build-llvm stage)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: build-llvm
+          push: false
+          load: false
+          cache-from: type=gha
+
+  # ===================================================================
   # bootstrap-smoke — verify scripts/bootstrap's in-place setup path
   # still works end to end (mode detection, prereq check, install-hooks,
   # preset configure, .clangd rewrite) in the canonical toolchain image.
@@ -97,7 +125,7 @@ jobs:
   # and pushes to ghcr.io.
   # ===================================================================
   publish-image:
-    needs: [build-and-test, bootstrap-smoke]
+    needs: [build-and-test, build-and-test-llvm, bootstrap-smoke]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:

@@ -55,7 +55,7 @@ git clone https://github.com/Assar63/zwaved.git && cd zwaved
 ./scripts/bootstrap
 ```
 
-Useful flags: `--preset llvm` (default `gnu`; also `gnu-tidy`, `llvm-tidy`),
+Useful flags: `--preset gnu` (default `llvm`; also `gnu-tidy`, `llvm-tidy`),
 `--ref <branch|tag>`, `--skip-deps` (don't touch apt — just check and
 report), `--help`. On non-Debian hosts, or when the toolchain (`g++-15`,
 `clang-20`) or `eventpp` isn't apt-installable, bootstrap prints what's

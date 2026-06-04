@@ -25,9 +25,9 @@
     "remoteUser": "root",
 
     // After the container starts: install the git pre-commit hook
-    // and run the GCC preset's first configure so clangd's
+    // and run the default (llvm) preset's first configure so clangd's
     // compile_commands.json is ready.
-    "postCreateCommand": "scripts/install-hooks && cmake --preset gnu",
+    "postCreateCommand": "scripts/install-hooks && cmake --preset llvm",
 
     "customizations": {
         "vscode": {
@@ -39,12 +39,12 @@
                 "redhat.vscode-yaml"
             ],
             "settings": {
-                // Point clangd at the gnu-preset compile_commands.
+                // Point clangd at the llvm-preset compile_commands.
                 // Disable the bundled C/C++ IntelliSense engine to
                 // avoid duplicate diagnostics.
                 "C_Cpp.intelliSenseEngine": "disabled",
                 "clangd.arguments": [
-                    "--compile-commands-dir=cmake-build-gnu",
+                    "--compile-commands-dir=cmake-build-llvm",
                     "--background-index"
                 ],
                 "files.associations": {

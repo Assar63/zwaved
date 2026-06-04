@@ -574,7 +574,8 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(
         row++,
         0,
-        "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  [t] Sensor  (GET, prompt node)");
+        "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  [t] Sensor  [k] Notification  "
+        "(GET, prompt node)");
     mvprintw(row++, 0, "  [8] Basic set  [9] Config set  [w] Wake-up interval  [u] Assoc add  [r] Assoc remove");
     mvprintw(row++, 0, "  [a] Get association group members");
     mvprintw(row++, 0, "  [g] Get association group count");
@@ -795,6 +796,40 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
     // NOLINTEND(bugprone-easily-swappable-parameters)
+
+    proxy.uponSignal("NotificationReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t notificationType,
+               std::uint8_t event,
+               std::uint8_t status,
+               const std::vector<std::uint8_t>& parameters) -> void
+            {
+                std::ostringstream stream;
+                stream << "NotificationReport node=" << static_cast<unsigned>(sourceNodeId) << std::hex
+                       << std::setfill('0') << " type=0x" << std::setw(2) << static_cast<unsigned>(notificationType)
+                       << " event=0x" << std::setw(2) << static_cast<unsigned>(event) << " status=0x" << std::setw(2)
+                       << static_cast<unsigned>(status);
+                if (!parameters.empty())
+                {
+                    stream << " params=[";
+                    bool first = true;
+                    for (const auto byte : parameters)
+                    {
+                        if (!first)
+                        {
+                            stream << " ";
+                        }
+                        first = false;
+                        stream << std::setw(2) << static_cast<unsigned>(byte);
+                    }
+                    stream << "]";
+                }
+                stream << std::dec;
+                logLine(stream.str());
+            });
 
     proxy.uponSignal("ConfigurationReport")
         .onInterface(IFACE_NAME)
@@ -1205,6 +1240,38 @@ auto handleGetConfiguration(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) 
     catch (const sdbus::Error& err)
     {
         logLine(std::string{"GetConfiguration failed: "} + err.what());
+    }
+}
+
+auto handleGetNotification(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("GetNotification: cancelled or invalid node id");
+        return;
+    }
+    auto notificationType = promptByte("Notification type (0-255):", BYTE_MIN, BYTE_MAX);
+    if (!notificationType.has_value())
+    {
+        logLine("GetNotification: cancelled or invalid notification type");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("GetNotification")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, *notificationType, sessionCounter);
+        std::ostringstream stream;
+        stream << "GetNotification node=" << static_cast<unsigned>(*nodeId) << " type=" << std::hex << "0x"
+               << static_cast<unsigned>(*notificationType) << std::dec
+               << " callback=" << static_cast<unsigned>(sessionCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetNotification failed: "} + err.what());
     }
 }
 
@@ -2393,6 +2460,10 @@ auto main() -> int
             else if (key == '7')
             {
                 handleGetConfiguration(*proxy, sessionCounter);
+            }
+            else if (key == 'k' || key == 'K')
+            {
+                handleGetNotification(*proxy, sessionCounter);
             }
             else if (key == '8')
             {

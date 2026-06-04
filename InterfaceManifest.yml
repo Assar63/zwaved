@@ -425,6 +425,23 @@ events:
       - { name: precision,    type: u8,  default: 0 }
       - { name: value,        type: i32, default: 0, doc: "raw; reading = value / 10^precision" }
 
+  - name: NotificationReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Notification (CC 0x71) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose ccData
+      parses as a v3+ Notification Report. Carries the
+      `(notificationType, event)` pair, the notificationStatus byte, and
+      the variable-length event parameters. Legacy v1 alarm fields are
+      not surfaced here (only on the raw ApplicationCommand signal).
+    fields:
+      - { name: sourceNodeId,     type: u8,    default: 0 }
+      - { name: notificationType, type: u8,    default: 0 }
+      - { name: event,            type: u8,    default: 0 }
+      - { name: status,           type: u8,    default: 0 }
+      - { name: parameters,       type: bytes }
+
   - name: WakeUpIntervalReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -769,6 +786,15 @@ events:
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetNotificationCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's notification status for a given notificationType (v3 Get).
+    fields:
+      - { name: nodeId,           type: u8, default: 0 }
+      - { name: notificationType, type: u8, default: 0 }
+      - { name: callbackId,       type: u8, default: 0 }
 
   - name: GetBatteryCommand
     category: command
@@ -1115,6 +1141,14 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetSensorMultilevelCommand
+
+    - name: GetNotification
+      params:
+        - { name: nodeId,           dbus: y, cpp: u8 }
+        - { name: notificationType, dbus: y, cpp: u8 }
+        - { name: callbackId,       dbus: y, cpp: u8 }
+      action:
+        publish: GetNotificationCommand
 
     - name: GetManufacturerSpecific
       params:
@@ -1577,6 +1611,16 @@ dbus:
       triggered_by:
         event: SensorMultilevelReport
 
+    - name: NotificationReport
+      params:
+        - { name: sourceNodeId,     dbus: y }
+        - { name: notificationType, dbus: y, doc: "0x06 access, 0x07 home security, 0x08 power, …" }
+        - { name: event,            dbus: y, doc: "type-specific (0x07/0x08 = motion)" }
+        - { name: status,           dbus: y, doc: "notificationStatus: 0x00 or 0xFF" }
+        - { name: parameters,       dbus: ay, doc: "event-specific, often empty" }
+      triggered_by:
+        event: NotificationReport
+
     - name: ManufacturerSpecificReport
       params:
         - { name: sourceNodeId,   dbus: y }
@@ -1828,6 +1872,37 @@ modules:
           - { name: scale,      type: u8,  doc: "0..3, sensor-type-specific unit selector" }
           - { name: precision,  type: u8,  doc: "decimal-point shift: reading = value / 10^precision" }
           - { name: value,      type: i32, doc: "raw signed value (1/2/4-byte BE, sign-extended)" }
+
+  - name: Notification
+    wire:
+      class_byte: 0x71
+      prefix: NOTIFICATION
+    description: |
+      Push events from sensors — motion, water leak, smoke, tamper, etc.
+      Supersedes Sensor Binary (CC 0x30) for modern devices. A v3+ Report
+      carries legacy v1 alarm fields (ignored by the typed decoder — they
+      still ride the raw ApplicationCommand signal), then a
+      notificationStatus, a `(notificationType, event)` pair, and a
+      variable-length event-parameter blob. notificationType: 0x06 access
+      control, 0x07 home security (event 0x08 = motion), 0x08 power, etc.
+      The `(type, event)` matrix is large, so the codec returns the raw
+      triple and leaves naming to callers (a name table is a follow-up).
+      Get/Report carry variable-width payloads the simple-encoder
+      generator can't express, so they live in the hand-written
+      Notification.cpp. v1 alarm Get/Report, Set, and SUPPORTED_GET/REPORT
+      are not implemented.
+    commands:
+      - name: Get
+        wire:
+          byte: 0x04
+      - name: Report
+        wire:
+          byte: 0x05
+        decoded_struct:
+          - { name: notificationType, type: u8 }
+          - { name: event,            type: u8 }
+          - { name: status,           type: u8,    doc: "notificationStatus: 0x00 or 0xFF" }
+          - { name: parameters,       type: bytes, doc: "event-specific, often empty" }
 
   - name: Configuration
     wire:
@@ -2121,6 +2196,19 @@ translations:
       scale:        decoded.scale
       precision:    decoded.precision
       value:        decoded.value
+
+  - publishes: NotificationReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: Notification.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:     event.sourceNodeId
+      notificationType: decoded.notificationType
+      event:            decoded.event
+      status:           decoded.status
+      parameters:       decoded.parameters
 
   - publishes: ManufacturerSpecificReport
     triggered_by: ApplicationCommand

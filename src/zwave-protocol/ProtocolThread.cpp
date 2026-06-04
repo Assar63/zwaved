@@ -19,6 +19,7 @@
 #include "application/MultichannelAssociation.hpp"
 #include "application/MultilevelSwitch.hpp"
 #include "application/NodeVersion.hpp"
+#include "application/Notification.hpp"
 #include "application/SensorMultilevel.hpp"
 #include "application/WakeUp.hpp"
 #include "application/ZWavePlusInfo.hpp"
@@ -304,6 +305,11 @@ auto onGetBattery(const MessageBus::GetBatteryCommand& cmd) -> void
 auto onGetSensorMultilevel(const MessageBus::GetSensorMultilevelCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, SensorMultilevel::encodeGet());
+}
+
+auto onGetNotification(const MessageBus::GetNotificationCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, Notification::encodeGet(cmd.notificationType));
 }
 
 auto onGetManufacturerSpecific(const MessageBus::GetManufacturerSpecificCommand& cmd) -> void
@@ -991,7 +997,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 30;
+constexpr std::size_t SUBSCRIPTION_COUNT = 31;
 
 auto subscribeBus() -> void
 {
@@ -1010,6 +1016,7 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetMultilevelSwitchCommand>(onGetMultilevelSwitch);
     subscribe<MessageBus::GetBatteryCommand>(onGetBattery);
     subscribe<MessageBus::GetSensorMultilevelCommand>(onGetSensorMultilevel);
+    subscribe<MessageBus::GetNotificationCommand>(onGetNotification);
     subscribe<MessageBus::GetManufacturerSpecificCommand>(onGetManufacturerSpecific);
     subscribe<MessageBus::GetZWavePlusInfoCommand>(onGetZWavePlusInfo);
     subscribe<MessageBus::GetNodeVersionCommand>(onGetNodeVersion);

@@ -475,6 +475,36 @@ Only the v1 Get (primary sensor, no type filter) is implemented;
 terminal, `[t]` issues the Get and reports render as
 `Air temperature=21.5 C`.
 
+## 11e. Reading notifications (CC 0x71)
+
+The Notification Command Class carries push events from sensors —
+motion, water leak, smoke, tamper, door/window, access control, … Most
+nodes send these unsolicited (see §12), but `GetNotification(nodeId,
+notificationType, callbackId)` polls a node for the latest pending event
+of a given type. Both the polled reply and unsolicited reports arrive as
+the typed `NotificationReport(y y y y ay)` signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the reporting node |
+| `notificationType` | `y` | 0x05 water, 0x06 access control, 0x07 home security, … (SDS13713) |
+| `event` | `y` | type-scoped event code (e.g. home-security 0x08 = motion detected) |
+| `status` | `y` | notificationStatus — `0xFF` active, `0x00` cleared/idle |
+| `parameters` | `ay` | optional event-parameter bytes, carried through verbatim |
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetNotification yyy 5 7 9
+# e.g. → NotificationReport y y y y ay  5 7 8 255 0   = node 5 home-security motion
+```
+
+Only the v3 type-scoped Get and the v3+ Report are decoded; the v1 alarm
+Get/Report, `Set`, and `SUPPORTED_GET`/`REPORT` are not. The
+`(notificationType, event)` matrix is large, so the daemon forwards the
+raw triple and leaves interpretation to the client. In the terminal,
+`[k]` issues the Get and reports render as
+`NotificationReport node=5 type=0x07 event=0x08 status=0xff`.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

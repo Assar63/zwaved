@@ -181,6 +181,21 @@ target_link_libraries(Configuration_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Configuration_test)
 gtest_discover_tests(Configuration_test)
 
+# ---- Notification ---------------------------------------------------
+# Note: Notification has no .gen.cpp (constants-only header), so the
+# test executable links only the hand-written Notification.cpp.
+add_executable(Notification_test
+    Notification_test.cpp
+    "${SRC_DIR}/application/Notification.cpp"
+)
+target_include_directories(Notification_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(Notification_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(Notification_test)
+gtest_discover_tests(Notification_test)
+
 # ---- WakeUp ---------------------------------------------------------
 add_executable(WakeUp_test
     WakeUp_test.cpp

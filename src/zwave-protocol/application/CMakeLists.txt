@@ -41,6 +41,7 @@ target_sources(zwaved PRIVATE
     Association.cpp
     MultichannelAssociation.cpp
     SensorMultilevel.cpp
+    Notification.cpp
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/MultilevelSwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"

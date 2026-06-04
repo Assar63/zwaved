@@ -210,6 +210,17 @@ prepare() {
         log "skipping build (--no-build); run: cmake --build ${build_dir} --parallel"
     fi
 
+    # The pre-commit hook runs clang-tidy, which can't parse GCC 15's
+    # libstdc++ <format> under clang flags — so it needs a GCC
+    # compile_commands.json. When the build preset isn't gnu, drop a
+    # cmake-build-gnu with just the configure + codegen step (no full
+    # compile) so `scripts/check-format` has what it needs.
+    if [[ "$do_build" -eq 1 && "$preset" != "gnu" && "$preset" != "gnu-tidy" ]]; then
+        log "setting up cmake-build-gnu for the clang-tidy pre-commit hook (config + codegen only)"
+        cmake --preset gnu
+        cmake --build cmake-build-gnu --target zwaved_codegen
+    fi
+
     point_clangd_at_build "$root"
 
     local built_note="binary: $build_dir/zwaved"

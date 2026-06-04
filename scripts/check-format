@@ -108,8 +108,15 @@ echo "Running clang-tidy check..."
 
 # Locate a build directory with compile_commands.json so clang-tidy can
 # resolve C++26 features and third-party headers (sdbus-c++, eventpp, ...).
+#
+# Only GCC build dirs are accepted: clang-tidy can't parse GCC 15's
+# libstdc++ <format> under clang flags (the header's immediate functions
+# trip "not a constant expression"), so the `llvm` preset's
+# compile_commands makes clang-tidy fail across the board. GCC flags parse
+# fine. `scripts/bootstrap` drops a cmake-build-gnu (config + codegen) for
+# exactly this, even when llvm is the default build.
 tidy_build_dir=""
-for candidate in cmake-build-gnu cmake-build-llvm cmake-build-gnu-tidy cmake-build-llvm-tidy; do
+for candidate in cmake-build-gnu cmake-build-gnu-tidy; do
     if [[ -f "${candidate}/compile_commands.json" ]]; then
         tidy_build_dir="${candidate}"
         break
@@ -117,7 +124,10 @@ for candidate in cmake-build-gnu cmake-build-llvm cmake-build-gnu-tidy cmake-bui
 done
 
 if [[ -z "${tidy_build_dir}" ]]; then
-    echo "error: no compile_commands.json found under cmake-build-*; configure a preset first (e.g. cmake --preset gnu)"
+    echo "error: clang-tidy needs a GCC build dir (cmake-build-gnu), but none has a"
+    echo "       compile_commands.json. clang-tidy can't parse GCC 15's libstdc++"
+    echo "       <format> under clang flags, so the llvm build dir won't do."
+    echo "       Run:  cmake --preset gnu   (or: scripts/bootstrap, which sets one up)"
     exit 1
 fi
 

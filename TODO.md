@@ -143,7 +143,7 @@ Implementation order (each shippable independently):
 ### Display
 
 - [x] **Surface typed CC reports in the activity pane** — [#74](https://github.com/Assar63/zwaved/issues/74): terminal now subscribes to `BatteryReport` / `ConfigurationReport` / `ManufacturerSpecificReport` / `NodeVersionReport` / `ZWavePlusInfoReport` / `WakeUpIntervalReport` / `WakeUpNotification` (on top of the existing SwitchBinary/Multilevel), each rendered as a readable one-liner. New GET keys: `[b]` Battery, `[v]` Version, `[m]` Mfr-specific, `[z]` Z-Wave+, `[7]` Configuration. Undecoded CCs still fall back to the raw `ApplicationCommand` hex dump.
-- [ ] [Pending-queue + wake-up orchestration visibility](https://github.com/Assar63/zwaved/issues/75) — show `PendingCommandEnqueued` / `PendingCommandsDrained` / `WakeUpCycleComplete` / `WakeUpNotification`.
+- [x] **Pending-queue + wake-up orchestration visibility** — [#75](https://github.com/Assar63/zwaved/issues/75): terminal shows `PendingCommandEnqueued` / `PendingCommandsDrained` / `WakeUpCycleComplete` / `WakeUpNotification` in the activity pane. `PendingCommandEnqueued` / `PendingCommandsDrained` were bus-only — added their D-Bus signals to the manifest so the terminal (and any D-Bus client) can observe them. Per-node "pending count" column deferred (needs a `peek` D-Bus accessor — noted as a future follow-up).
 - [ ] [DaemonError banner](https://github.com/Assar63/zwaved/issues/76) — consume the retained `DaemonError` feed; colour by severity.
 
 - [ ] [Help window (zwave-terminal)](https://github.com/Assar63/zwaved/issues/41)

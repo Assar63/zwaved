@@ -1585,6 +1585,21 @@ dbus:
       triggered_by:
         event: WakeUpCycleComplete
 
+    - name: PendingCommandEnqueued
+      params:
+        - { name: nodeId,   dbus: y }
+        - { name: sequence, dbus: u }
+        - { name: priority, dbus: y }
+      triggered_by:
+        event: PendingCommandEnqueued
+
+    - name: PendingCommandsDrained
+      params:
+        - { name: nodeId, dbus: y }
+        - { name: count,  dbus: u }
+      triggered_by:
+        event: PendingCommandsDrained
+
     - name: InclusionLifelineSet
       params:
         - { name: nodeId, dbus: y }

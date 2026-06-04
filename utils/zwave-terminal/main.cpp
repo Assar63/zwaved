@@ -590,6 +590,43 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine("WakeUpNotification node=" + std::to_string(static_cast<unsigned>(sourceNodeId)) + " (awake)");
             });
 
+    // Pending-command queue + wake-up orchestration traffic (#75): the
+    // daemon stashes commands for sleeping nodes and drains them on
+    // wake-up. These are observability signals only — the queue is fed
+    // indirectly by Set/Get calls, not driven from here.
+    proxy.uponSignal("PendingCommandEnqueued")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t nodeId, std::uint32_t sequence, std::uint8_t priority) -> void
+            {
+                std::ostringstream stream;
+                stream << "PendingCommandEnqueued node=" << static_cast<unsigned>(nodeId) << " seq=" << sequence
+                       << " priority=" << static_cast<unsigned>(priority);
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("PendingCommandsDrained")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t nodeId, std::uint32_t count) -> void
+            {
+                std::ostringstream stream;
+                stream << "PendingCommandsDrained node=" << static_cast<unsigned>(nodeId) << " count=" << count;
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("WakeUpCycleComplete")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t nodeId, std::uint32_t drainedCount) -> void
+            {
+                std::ostringstream stream;
+                stream << "WakeUpCycleComplete node=" << static_cast<unsigned>(nodeId) << " drained=" << drainedCount
+                       << " (back to sleep)";
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("ApplicationCommand")
         .onInterface(IFACE_NAME)
         .call(

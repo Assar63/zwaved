@@ -533,6 +533,41 @@ both v1 (single value byte) and v2 (value + sensorType) Reports. In the
 terminal, `[h]` issues the Get and reports render as
 `SensorBinaryReport node=5 active`.
 
+## 11g. Reading a meter (CC 0x32)
+
+The Meter Command Class reports accumulated consumption — electric
+(kWh/W/V/A), gas, water — and is common on smart plugs.
+`GetMeter(nodeId, scale, callbackId)` polls a node for a given scale; the
+reply and any unsolicited Reports arrive as the typed
+`MeterReport(y y y y y i q i b)` signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the reporting node |
+| `meterType` | `y` | 1 electric, 2 gas, 3 water |
+| `rateType` | `y` | 1 import, 2 export (v2+) |
+| `scale` | `y` | unit selector, meterType-specific (electric 0=kWh, 2=W, …) |
+| `precision` | `y` | decimal-point shift — the reading is `value / 10^precision` |
+| `value` | `i` | raw signed current reading (1/2/4-byte field, sign-extended) |
+| `deltaTime` | `q` | seconds since the previous sample; `0` = none |
+| `previousValue` | `i` | raw signed previous reading (valid only when `hasPrevious`) |
+| `hasPrevious` | `b` | true when `deltaTime != 0` and a previous value was present |
+
+When `hasPrevious` is true the client can compute an instantaneous rate as
+`(value - previousValue) / 10^precision / deltaTime` without keeping any
+state of its own.
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetMeter yyy 5 0 7
+# e.g. → MeterReport y y y y y i q i b  5 1 1 0 3 12345 3600 12000 true   = 12.345 kWh
+```
+
+Only the v3+ Report shape and a v2+ scale-selecting Get are implemented;
+the v4 dual-scale extension, `SUPPORTED_GET`/`REPORT`, and `RESET` are not.
+In the terminal, `[j]` prompts for node + scale, issues the Get, and reports
+render as `MeterReport node=5 electric 12.345 kWh (Δ3600s, prev 12.000)`.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

@@ -44,6 +44,7 @@ target_sources(zwaved PRIVATE
     SensorMultilevel.cpp
     SensorBinary.cpp
     Notification.cpp
+    Meter.cpp
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/MultilevelSwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"

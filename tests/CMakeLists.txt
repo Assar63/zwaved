@@ -29,6 +29,7 @@ set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/WakeUp.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ZWavePlusInfo.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/SensorMultilevel.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/SensorBinary.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
@@ -123,6 +124,20 @@ target_include_directories(SensorMultilevel_test PRIVATE
 target_link_libraries(SensorMultilevel_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(SensorMultilevel_test)
 gtest_discover_tests(SensorMultilevel_test)
+
+# ---- SensorBinary ---------------------------------------------------
+add_executable(SensorBinary_test
+    SensorBinary_test.cpp
+    "${SRC_DIR}/application/SensorBinary.cpp"
+    "${GENERATED_APPLICATION_DIR}/SensorBinary.gen.cpp"
+)
+target_include_directories(SensorBinary_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(SensorBinary_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(SensorBinary_test)
+gtest_discover_tests(SensorBinary_test)
 
 # ---- ManufacturerSpecific -------------------------------------------
 add_executable(ManufacturerSpecific_test

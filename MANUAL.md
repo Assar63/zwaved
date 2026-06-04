@@ -505,6 +505,34 @@ raw triple and leaves interpretation to the client. In the terminal,
 `[k]` issues the Get and reports render as
 `NotificationReport node=5 type=0x07 event=0x08 status=0xff`.
 
+## 11f. Reading a binary sensor (CC 0x30)
+
+The Sensor Binary Command Class carries simple open/closed / motion /
+tamper state. It is officially deprecated by Notification (CC 0x71, §11e)
+but is still present on most legacy contact and motion sensors — many
+controllers map both to the same semantic event, so decode both and dedupe
+upstream. `GetSensorBinary(nodeId, callbackId)` polls a node; the reply and
+any unsolicited Reports arrive as the typed `SensorBinaryReport(y y y)`
+signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the reporting node |
+| `sensorType` | `y` | `0` for a v1 report (no type byte on the wire); device sensor-type code for v2+ |
+| `value` | `y` | `0x00` idle / `0xFF` active (triggered) |
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetSensorBinary yy 5 7
+# e.g. → SensorBinaryReport y y y  5 0 255   = node 5 active
+```
+
+Only the v1 Get (primary sensor, no type filter) is implemented; the v2
+type-filtered Get and `SUPPORTED_GET`/`REPORT` are not. The decoder accepts
+both v1 (single value byte) and v2 (value + sensorType) Reports. In the
+terminal, `[h]` issues the Get and reports render as
+`SensorBinaryReport node=5 active`.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

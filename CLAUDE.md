@@ -15,12 +15,19 @@ cmake --build cmake-build-llvm
 
 # Build with clang-tidy integrated — tidy errors fail the build, only changed files re-checked
 cmake --preset gnu-tidy && cmake --build cmake-build-gnu-tidy
-cmake --preset llvm-tidy && cmake --build cmake-build-llvm-tidy
 
 # Run
 ./cmake-build-gnu/zwaved
 ./cmake-build-llvm/zwaved
 ```
+
+**clang-tidy requires the GCC toolchain.** The `llvm-tidy` preset (and
+any clang-tidy run against the `llvm` preset's `compile_commands.json`)
+fails on GCC 15's libstdc++ `<format>` — its immediate functions trip
+clang's "not a constant expression" during analysis. Run clang-tidy via
+`gnu-tidy` / a `cmake-build-gnu` `compile_commands.json`; `scripts/check-format`
+(the pre-commit hook) only accepts a GCC build dir for this reason, and
+`scripts/bootstrap` sets one up even when `llvm` is the default build.
 
 Requires: GCC 15 (`g++-15`), LLVM/Clang 20 (`clang++-20`), CMake 3.20+, `libudev-dev`, `libsdbus-c++-dev` (pulls in `libsystemd-dev`), `libsqlite3-dev`, eventpp (header-only via `find_package`). C++26 standard.
 

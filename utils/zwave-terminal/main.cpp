@@ -1744,7 +1744,7 @@ auto main() -> int
             {
                 handleGetConfiguration(*proxy, sessionCounter);
             }
-            else if (key == 'l' || key == 'L')
+            else if (key == 'l')
             {
                 handleListNodes(*proxy);
             }

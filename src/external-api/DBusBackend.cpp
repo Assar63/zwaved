@@ -134,6 +134,12 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
             std::scoped_lock const lock(impl->stateMutex);
             impl->lastSessionStatus = status;
         }));
+    subs.emplace_back(MessageBus::subscribe<MessageBus::DaemonError>(
+        [this](const MessageBus::DaemonError& error) -> void
+        {
+            std::scoped_lock const lock(impl->stateMutex);
+            impl->lastDaemonError = error;
+        }));
 
     subscribeGeneratedSignals(*impl);
 
@@ -329,6 +335,15 @@ auto emitGetNetworkStatus(DBusBackend::Impl& impl) -> NetworkStatusTuple
                               impl.lastSessionStatus.commandId,
                               impl.lastSessionStatus.sessionId,
                               static_cast<std::uint64_t>(uptime)};
+}
+
+auto emitGetDaemonError(DBusBackend::Impl& impl) -> DaemonErrorTuple
+{
+    std::scoped_lock const lock(impl.stateMutex);
+    return DaemonErrorTuple{impl.lastDaemonError.severity,
+                            impl.lastDaemonError.source,
+                            impl.lastDaemonError.code,
+                            impl.lastDaemonError.message};
 }
 
 // ---- Policy CRUD (#69) ----------------------------------------------

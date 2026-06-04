@@ -136,12 +136,34 @@ constexpr int CONFIG_SIZE_MAX = 4;
 constexpr unsigned BITS_PER_BYTE      = 8;
 constexpr std::uint32_t U32_BYTE_MASK = 0xFFU;
 
+// DaemonError severity values (mirror MessageBus::DaemonError::SEVERITY_*).
+constexpr std::uint8_t SEVERITY_INFO     = 1;
+constexpr std::uint8_t SEVERITY_WARN     = 2;
+constexpr std::uint8_t SEVERITY_ERROR    = 3;
+constexpr std::uint8_t SEVERITY_CRITICAL = 4;
+
+// ncurses colour-pair ids for the DaemonError banner.
+constexpr int CP_WARN     = 1;
+constexpr int CP_ERROR    = 2;
+constexpr int CP_CRITICAL = 3;
+
+// Latest operator-visible daemon error (the retained DaemonError feed).
+// An empty `message` means "no current problem" — banner hidden.
+struct DaemonErrorState
+{
+    std::uint8_t severity = 0;
+    std::string source;
+    std::uint8_t code = 0;
+    std::string message;
+};
+
 struct ActivityState
 {
     std::mutex mutex;
     std::deque<std::string> log;
     bool dongleConnected{false};
     std::string donglePath;
+    DaemonErrorState daemonError;
 };
 
 auto activity() -> ActivityState&
@@ -169,6 +191,16 @@ auto logLine(const std::string& message) -> void
     {
         activity().log.pop_front();
     }
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal/method
+auto setDaemonError(std::uint8_t severity,
+                    const std::string& source,
+                    std::uint8_t code,
+                    const std::string& message) -> void
+{
+    std::scoped_lock const lock(activity().mutex);
+    activity().daemonError = DaemonErrorState{.severity = severity, .source = source, .code = code, .message = message};
 }
 
 auto setDongleStatus(bool connected, const std::string& path) -> void
@@ -352,6 +384,48 @@ auto draw(std::uint8_t lastSession) -> void
         const std::string status =
             activity().dongleConnected ? "connected (" + activity().donglePath + ")" : "disconnected";
         mvprintw(row++, 0, " zwave-terminal  -  Dongle: %s", status.c_str());
+
+        // DaemonError banner — only shown while there's a current error
+        // (empty message == recovered). Colour-coded by severity.
+        const auto& err = activity().daemonError;
+        if (!err.message.empty())
+        {
+            const char* label = "INFO";
+            int colorPair     = 0;
+            switch (err.severity)
+            {
+            case SEVERITY_WARN:
+                label     = "WARN";
+                colorPair = CP_WARN;
+                break;
+            case SEVERITY_ERROR:
+                label     = "ERROR";
+                colorPair = CP_ERROR;
+                break;
+            case SEVERITY_CRITICAL:
+                label     = "CRITICAL";
+                colorPair = CP_CRITICAL;
+                break;
+            default:
+                break;
+            }
+            const bool coloured = colorPair != 0 && has_colors();
+            if (coloured)
+            {
+                attron(COLOR_PAIR(colorPair) | A_BOLD);
+            }
+            mvprintw(row++,
+                     0,
+                     " ! %s [%s code=0x%02X]: %s",
+                     label,
+                     err.source.c_str(),
+                     static_cast<unsigned>(err.code),
+                     err.message.c_str());
+            if (coloured)
+            {
+                attroff(COLOR_PAIR(colorPair) | A_BOLD);
+            }
+        }
     }
     mvhline(row++, 0, '-', getmaxx(stdscr));
 
@@ -769,6 +843,24 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 }
                 stream << std::dec << " controllerNode=" << static_cast<unsigned>(controllerNodeId);
                 logLine(stream.str());
+            });
+
+    // Structured error feed (#76): drive the persistent banner. An empty
+    // message means "recovered" and clears it. Retained on the daemon
+    // side, so a terminal that connects after a failure picks up the
+    // current value via GetDaemonError at startup (see main()).
+    proxy.uponSignal("DaemonError")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t severity, const std::string& source, std::uint8_t code, const std::string& message) -> void
+            {
+                setDaemonError(severity, source, code, message);
+                if (!message.empty())
+                {
+                    logLine("DaemonError [" + source + " code=" + std::to_string(static_cast<unsigned>(code)) +
+                            "]: " + message);
+                }
             });
 }
 // NOLINTEND(readability-function-cognitive-complexity)
@@ -1704,12 +1796,38 @@ auto main() -> int
     timeout(UI_REFRESH_MS);
     curs_set(0);
 
+    // Colour pairs for the DaemonError banner. -1 background keeps the
+    // terminal's default; use_default_colors() makes -1 valid.
+    if (has_colors())
+    {
+        start_color();
+        use_default_colors();
+        init_pair(CP_WARN, COLOR_YELLOW, -1);
+        init_pair(CP_ERROR, COLOR_RED, -1);
+        init_pair(CP_CRITICAL, COLOR_WHITE, COLOR_RED);
+    }
+
     std::uint8_t sessionCounter = 0;
     std::uint8_t lastSession    = 0;
     bool lastWasAdd             = false;
     bool running                = true;
 
     logLine(std::string{"Connected to "} + BUS_NAME);
+
+    // Pick up any error the daemon is already reporting (the DaemonError
+    // feed is retained, but a D-Bus signal isn't replayed to late
+    // subscribers — so query the cached value once at startup).
+    try
+    {
+        using DaemonErrorTuple = sdbus::Struct<std::uint8_t, std::string, std::uint8_t, std::string>;
+        DaemonErrorTuple current;
+        proxy->callMethod("GetDaemonError").onInterface(IFACE_NAME).storeResultsTo(current);
+        setDaemonError(std::get<0>(current), std::get<1>(current), std::get<2>(current), std::get<3>(current));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetDaemonError failed: "} + err.what());
+    }
 
     while (running)
     {

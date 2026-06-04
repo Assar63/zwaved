@@ -425,6 +425,20 @@ events:
       - { name: precision,    type: u8,  default: 0 }
       - { name: value,        type: i32, default: 0, doc: "raw; reading = value / 10^precision" }
 
+  - name: SensorBinaryReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Sensor Binary (CC 0x30) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose ccData
+      parses as a Sensor Binary Report. `value` is 0x00 (idle) or 0xFF
+      (active/triggered). `sensorType` is 0 for v1 reports (no type byte
+      on the wire) and the device's sensor-type code for v2+.
+    fields:
+      - { name: sourceNodeId, type: u8, default: 0 }
+      - { name: sensorType,   type: u8, default: 0 }
+      - { name: value,        type: u8, default: 0, doc: "0x00 idle / 0xFF active" }
+
   - name: NotificationReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -787,6 +801,14 @@ events:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
 
+  - name: GetSensorBinaryCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's binary sensor state (v1 Get, no type filter).
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
   - name: GetNotificationCommand
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
@@ -1141,6 +1163,13 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetSensorMultilevelCommand
+
+    - name: GetSensorBinary
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetSensorBinaryCommand
 
     - name: GetNotification
       params:
@@ -1611,6 +1640,14 @@ dbus:
       triggered_by:
         event: SensorMultilevelReport
 
+    - name: SensorBinaryReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: sensorType,   dbus: y, doc: "0 for v1 reports; device sensor-type code for v2+" }
+        - { name: value,        dbus: y, doc: "0x00 idle / 0xFF active" }
+      triggered_by:
+        event: SensorBinaryReport
+
     - name: NotificationReport
       params:
         - { name: sourceNodeId,     dbus: y }
@@ -1872,6 +1909,35 @@ modules:
           - { name: scale,      type: u8,  doc: "0..3, sensor-type-specific unit selector" }
           - { name: precision,  type: u8,  doc: "decimal-point shift: reading = value / 10^precision" }
           - { name: value,      type: i32, doc: "raw signed value (1/2/4-byte BE, sign-extended)" }
+
+  - name: SensorBinary
+    wire:
+      class_byte: 0x30
+      prefix: SENSOR_BINARY
+    description: |
+      Binary sensor reporting — door/window contact, motion, tamper.
+      Officially deprecated by Notification (CC 0x71) but still present on
+      most legacy sensors, and many controllers map its Reports to the same
+      semantic event (decode both, dedupe upstream). A v1 Report is a single
+      value byte (0x00 idle / 0xFF active); v2 appends a sensorType byte for
+      devices packing multiple binary sensors. v1 Get takes no payload
+      (returns the device's primary sensor); the v2 type-filtered Get and
+      SUPPORTED_GET/REPORT are not implemented yet.
+    constants:
+      - { name: VALUE_IDLE,   value: 0x00 }
+      - { name: VALUE_ACTIVE, value: 0xFF }
+    commands:
+      - name: Get
+        wire:
+          byte: 0x02
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: sensorType, type: u8, doc: "0 for v1 reports; device sensor-type code for v2+" }
+          - { name: value,      type: u8, doc: "0x00 idle / 0xFF active" }
 
   - name: Notification
     wire:
@@ -2195,6 +2261,17 @@ translations:
       sensorType:   decoded.sensorType
       scale:        decoded.scale
       precision:    decoded.precision
+      value:        decoded.value
+
+  - publishes: SensorBinaryReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: SensorBinary.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      sensorType:   decoded.sensorType
       value:        decoded.value
 
   - publishes: NotificationReport

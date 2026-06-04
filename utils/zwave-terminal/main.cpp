@@ -574,8 +574,8 @@ auto draw(std::uint8_t lastSession) -> void
     mvprintw(
         row++,
         0,
-        "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  [t] Sensor  [k] Notification  "
-        "(GET, prompt node)");
+        "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  [t] Sensor  [h] Bin-sensor  "
+        "[k] Notification  (GET, prompt node)");
     mvprintw(row++, 0, "  [8] Basic set  [9] Config set  [w] Wake-up interval  [u] Assoc add  [r] Assoc remove");
     mvprintw(row++, 0, "  [a] Get association group members");
     mvprintw(row++, 0, "  [g] Get association group count");
@@ -796,6 +796,23 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
     // NOLINTEND(bugprone-easily-swappable-parameters)
+
+    proxy.uponSignal("SensorBinaryReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId, std::uint8_t sensorType, std::uint8_t value) -> void
+            {
+                std::ostringstream stream;
+                stream << "SensorBinaryReport node=" << static_cast<unsigned>(sourceNodeId);
+                if (sensorType != 0)
+                {
+                    stream << " type=0x" << std::hex << std::setw(2) << std::setfill('0')
+                           << static_cast<unsigned>(sensorType) << std::dec;
+                }
+                stream << (value != 0 ? " active" : " idle");
+                logLine(stream.str());
+            });
 
     proxy.uponSignal("NotificationReport")
         .onInterface(IFACE_NAME)
@@ -2456,6 +2473,10 @@ auto main() -> int
             else if (key == 't' || key == 'T')
             {
                 handleSimpleGet(*proxy, sessionCounter, "GetSensorMultilevel");
+            }
+            else if (key == 'h' || key == 'H')
+            {
+                handleSimpleGet(*proxy, sessionCounter, "GetSensorBinary");
             }
             else if (key == '7')
             {

@@ -22,6 +22,7 @@ set_source_files_properties(
     "${ZWAVED_GENERATED_DIR}/application/WakeUp.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ZWavePlusInfo.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/SensorMultilevel.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/SensorBinary.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
@@ -41,6 +42,7 @@ target_sources(zwaved PRIVATE
     Association.cpp
     MultichannelAssociation.cpp
     SensorMultilevel.cpp
+    SensorBinary.cpp
     Notification.cpp
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/MultilevelSwitch.gen.cpp"
@@ -51,6 +53,7 @@ target_sources(zwaved PRIVATE
     "${ZWAVED_GENERATED_DIR}/application/WakeUp.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ZWavePlusInfo.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/SensorMultilevel.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/SensorBinary.gen.cpp"
 )
 
 # Hand-written .{hpp,cpp} pairs `#include "<Name>.gen.hpp"`; expose

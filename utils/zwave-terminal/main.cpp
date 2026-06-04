@@ -575,7 +575,7 @@ auto draw(std::uint8_t lastSession) -> void
         row++,
         0,
         "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  [t] Sensor  [h] Bin-sensor  "
-        "[k] Notification  (GET, prompt node)");
+        "[k] Notification  [j] Meter  (GET, prompt node)");
     mvprintw(row++, 0, "  [8] Basic set  [9] Config set  [w] Wake-up interval  [u] Assoc add  [r] Assoc remove");
     mvprintw(row++, 0, "  [a] Get association group members");
     mvprintw(row++, 0, "  [g] Get association group count");
@@ -644,6 +644,52 @@ auto sensorUnit(std::uint8_t sensorType, std::uint8_t scale) -> const char*
         return scale == 0 ? "W" : "BTU/h";
     case 0x05:  // humidity
         return scale == 0 ? "%" : "g/m3";
+    default:
+        return "";
+    }
+}
+
+// Meter (CC 0x32) type name; nullptr when unknown.
+auto meterTypeName(std::uint8_t meterType) -> const char*
+{
+    switch (meterType)
+    {
+    case 0x01:
+        return "electric";
+    case 0x02:
+        return "gas";
+    case 0x03:
+        return "water";
+    default:
+        return nullptr;
+    }
+}
+
+// Unit string for a (meterType, scale) pair; empty when unknown.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): both are wire fields, named at the call site
+auto meterUnit(std::uint8_t meterType, std::uint8_t scale) -> const char*
+{
+    switch (meterType)
+    {
+    case 0x01:  // electric
+        switch (scale)
+        {
+        case 0:
+            return "kWh";
+        case 1:
+            return "kVAh";
+        case 2:
+            return "W";
+        case 4:
+            return "V";
+        case 5:
+            return "A";
+        default:
+            return "";
+        }
+    case 0x02:  // gas
+    case 0x03:  // water
+        return scale == 0 ? "m3" : "";
     default:
         return "";
     }
@@ -847,6 +893,55 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 stream << std::dec;
                 logLine(stream.str());
             });
+
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+    proxy.uponSignal("MeterReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t meterType,
+               std::uint8_t rateType,
+               std::uint8_t scale,
+               std::uint8_t precision,
+               std::int32_t value,
+               std::uint16_t deltaTime,
+               std::int32_t previousValue,
+               bool hasPrevious) -> void
+            {
+                // reading = value / 10^precision, with `precision` decimals.
+                int divisor = 1;
+                for (std::uint8_t i = 0; i < precision; ++i)
+                {
+                    divisor *= DECIMAL_BASE;
+                }
+                std::ostringstream stream;
+                stream << "MeterReport node=" << static_cast<unsigned>(sourceNodeId) << " ";
+                if (const char* name = meterTypeName(meterType); name != nullptr)
+                {
+                    stream << name;
+                }
+                else
+                {
+                    stream << "type=0x" << std::hex << std::setw(2) << std::setfill('0')
+                           << static_cast<unsigned>(meterType) << std::dec;
+                }
+                if (rateType == 2)
+                {
+                    stream << " (export)";
+                }
+                stream << " " << std::fixed << std::setprecision(precision) << static_cast<double>(value) / divisor;
+                if (const char* unit = meterUnit(meterType, scale); *unit != '\0')
+                {
+                    stream << " " << unit;
+                }
+                if (hasPrevious)
+                {
+                    stream << " (Δ" << static_cast<unsigned>(deltaTime) << "s, prev "
+                           << static_cast<double>(previousValue) / divisor << ")";
+                }
+                logLine(stream.str());
+            });
+    // NOLINTEND(bugprone-easily-swappable-parameters)
 
     proxy.uponSignal("ConfigurationReport")
         .onInterface(IFACE_NAME)
@@ -1289,6 +1384,35 @@ auto handleGetNotification(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -
     catch (const sdbus::Error& err)
     {
         logLine(std::string{"GetNotification failed: "} + err.what());
+    }
+}
+
+auto handleGetMeter(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("GetMeter: cancelled or invalid node id");
+        return;
+    }
+    auto scale = promptByte("Meter scale (0=kWh, 2=W, …):", BYTE_MIN, BYTE_MAX);
+    if (!scale.has_value())
+    {
+        logLine("GetMeter: cancelled or invalid scale");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("GetMeter").onInterface(IFACE_NAME).withArguments(*nodeId, *scale, sessionCounter);
+        std::ostringstream stream;
+        stream << "GetMeter node=" << static_cast<unsigned>(*nodeId) << " scale=" << static_cast<unsigned>(*scale)
+               << " callback=" << static_cast<unsigned>(sessionCounter);
+        logLine(stream.str());
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetMeter failed: "} + err.what());
     }
 }
 
@@ -2477,6 +2601,10 @@ auto main() -> int
             else if (key == 'h' || key == 'H')
             {
                 handleSimpleGet(*proxy, sessionCounter, "GetSensorBinary");
+            }
+            else if (key == 'j' || key == 'J')
+            {
+                handleGetMeter(*proxy, sessionCounter);
             }
             else if (key == '7')
             {

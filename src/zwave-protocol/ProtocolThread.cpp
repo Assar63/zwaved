@@ -16,6 +16,7 @@
 #include "application/BinarySwitch.hpp"
 #include "application/Configuration.hpp"
 #include "application/ManufacturerSpecific.hpp"
+#include "application/Meter.hpp"
 #include "application/MultichannelAssociation.hpp"
 #include "application/MultilevelSwitch.hpp"
 #include "application/NodeVersion.hpp"
@@ -316,6 +317,11 @@ auto onGetSensorBinary(const MessageBus::GetSensorBinaryCommand& cmd) -> void
 auto onGetNotification(const MessageBus::GetNotificationCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, Notification::encodeGet(cmd.notificationType));
+}
+
+auto onGetMeter(const MessageBus::GetMeterCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, Meter::encodeGet(cmd.scale));
 }
 
 auto onGetManufacturerSpecific(const MessageBus::GetManufacturerSpecificCommand& cmd) -> void
@@ -1003,7 +1009,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 32;
+constexpr std::size_t SUBSCRIPTION_COUNT = 33;
 
 auto subscribeBus() -> void
 {
@@ -1024,6 +1030,7 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetSensorMultilevelCommand>(onGetSensorMultilevel);
     subscribe<MessageBus::GetSensorBinaryCommand>(onGetSensorBinary);
     subscribe<MessageBus::GetNotificationCommand>(onGetNotification);
+    subscribe<MessageBus::GetMeterCommand>(onGetMeter);
     subscribe<MessageBus::GetManufacturerSpecificCommand>(onGetManufacturerSpecific);
     subscribe<MessageBus::GetZWavePlusInfoCommand>(onGetZWavePlusInfo);
     subscribe<MessageBus::GetNodeVersionCommand>(onGetNodeVersion);

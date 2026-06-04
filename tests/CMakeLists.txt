@@ -211,6 +211,21 @@ target_link_libraries(Notification_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Notification_test)
 gtest_discover_tests(Notification_test)
 
+# ---- Meter ----------------------------------------------------------
+# Note: Meter has no .gen.cpp (the Get carries a scale arg, so the encoder
+# is hand-written), so the test links only the hand-written Meter.cpp.
+add_executable(Meter_test
+    Meter_test.cpp
+    "${SRC_DIR}/application/Meter.cpp"
+)
+target_include_directories(Meter_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(Meter_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(Meter_test)
+gtest_discover_tests(Meter_test)
+
 # ---- WakeUp ---------------------------------------------------------
 add_executable(WakeUp_test
     WakeUp_test.cpp

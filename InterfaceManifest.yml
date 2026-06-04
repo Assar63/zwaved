@@ -456,6 +456,30 @@ events:
       - { name: status,           type: u8,    default: 0 }
       - { name: parameters,       type: bytes }
 
+  - name: MeterReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Meter (CC 0x32) Report. Republished by the cc-translator from
+      inbound ApplicationCommand frames whose ccData parses as a v3+ Meter
+      Report. `value` is the current reading (raw signed; the real value is
+      `value / 10^precision` in the unit selected by `(meterType, scale)`).
+      `deltaTime` is seconds since the previous sample; when it is nonzero
+      the frame also carried a `previousValue` (raw, same scaling) and
+      `hasPrevious` is true, letting clients compute an instantaneous rate
+      without keeping state. meterType: 1 electric, 2 gas, 3 water.
+      rateType: 1 import, 2 export.
+    fields:
+      - { name: sourceNodeId,  type: u8,   default: 0 }
+      - { name: meterType,     type: u8,   default: 0 }
+      - { name: rateType,      type: u8,   default: 0 }
+      - { name: scale,         type: u8,   default: 0 }
+      - { name: precision,     type: u8,   default: 0 }
+      - { name: value,         type: i32,  default: 0, doc: "raw; reading = value / 10^precision" }
+      - { name: deltaTime,     type: u16,  default: 0, doc: "seconds since previousValue sample; 0 = none" }
+      - { name: previousValue, type: i32,  default: 0, doc: "raw; valid only when hasPrevious" }
+      - { name: hasPrevious,   type: bool, default: false }
+
   - name: WakeUpIntervalReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -818,6 +842,15 @@ events:
       - { name: notificationType, type: u8, default: 0 }
       - { name: callbackId,       type: u8, default: 0 }
 
+  - name: GetMeterCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's meter reading for a given scale (v2+ Get; scale 0..3).
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: scale,      type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
   - name: GetBatteryCommand
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
@@ -1178,6 +1211,14 @@ dbus:
         - { name: callbackId,       dbus: y, cpp: u8 }
       action:
         publish: GetNotificationCommand
+
+    - name: GetMeter
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: scale,      dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetMeterCommand
 
     - name: GetManufacturerSpecific
       params:
@@ -1658,6 +1699,20 @@ dbus:
       triggered_by:
         event: NotificationReport
 
+    - name: MeterReport
+      params:
+        - { name: sourceNodeId,  dbus: y }
+        - { name: meterType,     dbus: y, doc: "1 electric, 2 gas, 3 water" }
+        - { name: rateType,      dbus: y, doc: "1 import, 2 export (v2+)" }
+        - { name: scale,         dbus: y, doc: "unit selector, meterType-specific" }
+        - { name: precision,     dbus: y, doc: "reading = value / 10^precision" }
+        - { name: value,         dbus: i, doc: "raw signed current reading" }
+        - { name: deltaTime,     dbus: q, doc: "seconds since previousValue sample; 0 = none" }
+        - { name: previousValue, dbus: i, doc: "raw signed previous reading; valid iff hasPrevious" }
+        - { name: hasPrevious,   dbus: b, doc: "true when deltaTime != 0 and a previousValue was present" }
+      triggered_by:
+        event: MeterReport
+
     - name: ManufacturerSpecificReport
       params:
         - { name: sourceNodeId,   dbus: y }
@@ -1969,6 +2024,52 @@ modules:
           - { name: event,            type: u8 }
           - { name: status,           type: u8,    doc: "notificationStatus: 0x00 or 0xFF" }
           - { name: parameters,       type: bytes, doc: "event-specific, often empty" }
+
+  - name: Meter
+    wire:
+      class_byte: 0x32
+      prefix: METER
+    description: |
+      Accumulated-consumption metering — electric (kWh/W/V/A), gas, water.
+      Common on smart plugs. A v3+ Report carries a meterType + rateType in
+      the first properties byte, then a packed precision/scale/size flag
+      byte, a signed big-endian current value of 1/2/4 bytes, a 16-bit
+      deltaTime (seconds since the previous sample), and — only when
+      deltaTime != 0 — a previous value of the same width, so clients can
+      compute an instantaneous rate without keeping state. The real reading
+      is value / 10^precision in the unit selected by (meterType, scale).
+      The Get carries an optional scale selector (v2+), so it lives in the
+      hand-written Meter.cpp. v4 dual-scale, SUPPORTED_GET/REPORT, and RESET
+      are not implemented yet.
+    constants:
+      - { name: TYPE_ELECTRIC,         value: 0x01 }
+      - { name: TYPE_GAS,              value: 0x02 }
+      - { name: TYPE_WATER,            value: 0x03 }
+      - { name: PROP1_METER_TYPE_MASK, value: 0x1F }
+      - { name: PROP1_RATE_TYPE_MASK,  value: 0x60 }
+      - { name: PROP1_RATE_TYPE_SHIFT, value: 5 }
+      - { name: PROP1_SCALE_BIT2_MASK, value: 0x80 }
+      - { name: FLAG_SIZE_MASK,        value: 0x07 }
+      - { name: FLAG_SCALE_MASK,       value: 0x18 }
+      - { name: FLAG_SCALE_SHIFT,      value: 3 }
+      - { name: FLAG_PRECISION_MASK,   value: 0xE0 }
+      - { name: FLAG_PRECISION_SHIFT,  value: 5 }
+    commands:
+      - name: Get
+        wire:
+          byte: 0x01
+      - name: Report
+        wire:
+          byte: 0x02
+        decoded_struct:
+          - { name: meterType,     type: u8,   doc: "1 electric, 2 gas, 3 water" }
+          - { name: rateType,      type: u8,   doc: "1 import, 2 export (v2+)" }
+          - { name: scale,         type: u8,   doc: "unit selector, meterType-specific" }
+          - { name: precision,     type: u8,   doc: "reading = value / 10^precision" }
+          - { name: value,         type: i32,  doc: "raw signed current value (1/2/4-byte BE)" }
+          - { name: deltaTime,     type: u16,  doc: "seconds since previousValue sample; 0 = none" }
+          - { name: previousValue, type: i32,  doc: "raw signed previous value; valid iff hasPrevious" }
+          - { name: hasPrevious,   type: bool, doc: "true iff deltaTime != 0 and previousValue present" }
 
   - name: Configuration
     wire:
@@ -2286,6 +2387,23 @@ translations:
       event:            decoded.event
       status:           decoded.status
       parameters:       decoded.parameters
+
+  - publishes: MeterReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: Meter.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:  event.sourceNodeId
+      meterType:     decoded.meterType
+      rateType:      decoded.rateType
+      scale:         decoded.scale
+      precision:     decoded.precision
+      value:         decoded.value
+      deltaTime:     decoded.deltaTime
+      previousValue: decoded.previousValue
+      hasPrevious:   decoded.hasPrevious
 
   - publishes: ManufacturerSpecificReport
     triggered_by: ApplicationCommand

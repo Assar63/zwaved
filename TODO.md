@@ -149,7 +149,7 @@ Implementation order (each shippable independently):
 
 > [epic: bring zwave-terminal up to parity with the daemon](https://github.com/Assar63/zwaved/issues/73) — the terminal lags the daemon's grown surface (~11 CCs, error feed, pending queue, orchestrators). Children: #74–#77 below.
 
-- [ ] [Split main.cpp into modules (move-only refactor)](https://github.com/Assar63/zwaved/issues/111) — `main.cpp` is ~2.9k lines; split into `client` / `prompts` / `render` / `signal_handlers` / `handlers` / `policy_blob` / `main` TUs, no behaviour change. Keep the free-functions style (it's a `utils/` tool, not the daemon). Isolate the deliberately-duplicated policy BLOB codec. Do **before** the bulkier terminal items (#76 banner, #48 scenes, #44–#46 windows); the quartet CCs don't force it.
+- [x] **Split main.cpp into modules (move-only refactor)** — [#111](https://github.com/Assar63/zwaved/issues/111): `main.cpp` went 2979 → 241 lines. Carved into a `zwt` namespace across `constants` / `activity` / `format` / `prompts` / `render` / `policy_blob` / `signal_handlers` / `handlers` TUs (header + cpp each), `main.cpp` keeping only `run()` + the input loop. Pure code move — no behaviour change; both compilers + clang-tidy (incl. `misc-include-cleaner`, IWYU-clean per file) green, 257 tests unchanged. The deliberately-duplicated policy BLOB codec is isolated in `policy_blob.{hpp,cpp}`. (`handlers.cpp` is still ~950 lines; a further get/set/policy sub-split is a future option if it grows.)
 
 ### Display
 

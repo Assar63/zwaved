@@ -49,6 +49,7 @@ target_sources(zwaved PRIVATE
     SensorBinary.cpp
     Notification.cpp
     Meter.cpp
+    ColorSwitch.cpp
     ThermostatMode.cpp
     ThermostatSetpoint.cpp
     ThermostatOperatingState.cpp

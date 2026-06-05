@@ -105,6 +105,36 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+    proxy.uponSignal("ColorSwitchReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t componentId,
+               std::uint8_t value,
+               std::uint8_t targetValue,
+               std::uint8_t duration) -> void
+            {
+                std::ostringstream stream;
+                stream << "ColorSwitchReport node=" << static_cast<unsigned>(sourceNodeId) << " ";
+                if (const char* name = colorComponentName(componentId); name != nullptr)
+                {
+                    stream << name;
+                }
+                else
+                {
+                    stream << "component=" << static_cast<unsigned>(componentId);
+                }
+                stream << "=" << static_cast<unsigned>(value);
+                if (targetValue != value || duration != 0)
+                {
+                    stream << " (target " << static_cast<unsigned>(targetValue) << ", dur "
+                           << static_cast<unsigned>(duration) << ")";
+                }
+                logLine(stream.str());
+            });
+    // NOLINTEND(bugprone-easily-swappable-parameters)
+
     proxy.uponSignal("BatteryReport")
         .onInterface(IFACE_NAME)
         .call(

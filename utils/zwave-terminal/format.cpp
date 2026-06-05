@@ -252,6 +252,32 @@ auto thermostatFanModeName(std::uint8_t mode) -> const char*
         return nullptr;
     }
 }
+
+// Color Switch (CC 0x33) component name; nullptr when unknown.
+auto colorComponentName(std::uint8_t componentId) -> const char*
+{
+    switch (componentId)
+    {
+    case 0:
+        return "warm white";
+    case 1:
+        return "cold white";
+    case 2:
+        return "red";
+    case 3:
+        return "green";
+    case 4:
+        return "blue";
+    case 5:
+        return "amber";
+    case 6:
+        return "cyan";
+    case 7:
+        return "purple";
+    default:
+        return nullptr;
+    }
+}
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 
 /// Z-Wave Command Class human-readable names. Covers the most commonly

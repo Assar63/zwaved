@@ -24,6 +24,8 @@ auto handleSimpleGet(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, const c
 auto handleGetConfiguration(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleGetNotification(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleGetMeter(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
+auto handleGetColorSwitch(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
+auto handleSetColorSwitch(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleSetBasic(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleSetThermostatMode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleGetThermostatSetpoint(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;

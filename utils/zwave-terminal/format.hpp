@@ -28,6 +28,7 @@ namespace zwt
 [[nodiscard]] auto thermostatModeName(std::uint8_t mode) -> const char*;
 [[nodiscard]] auto thermostatOperatingStateName(std::uint8_t state) -> const char*;
 [[nodiscard]] auto thermostatFanModeName(std::uint8_t mode) -> const char*;
+[[nodiscard]] auto colorComponentName(std::uint8_t componentId) -> const char*;
 
 [[nodiscard]] auto commandClassName(std::uint8_t commandClass) -> const char*;
 [[nodiscard]] auto formatCcRange(std::vector<std::uint8_t>::const_iterator begin,

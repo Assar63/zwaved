@@ -113,9 +113,12 @@ zwaved_test_target(Battery_test)
 gtest_discover_tests(Battery_test)
 
 # ---- SensorMultilevel -----------------------------------------------
+# SensorMultilevel shares the precision/scale/size codec with Thermostat
+# Setpoint via EncodedValue, so the test links it too.
 add_executable(SensorMultilevel_test
     SensorMultilevel_test.cpp
     "${SRC_DIR}/application/SensorMultilevel.cpp"
+    "${SRC_DIR}/application/EncodedValue.cpp"
     "${GENERATED_APPLICATION_DIR}/SensorMultilevel.gen.cpp"
 )
 target_include_directories(SensorMultilevel_test PRIVATE
@@ -153,6 +156,33 @@ target_include_directories(ThermostatMode_test PRIVATE
 target_link_libraries(ThermostatMode_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(ThermostatMode_test)
 gtest_discover_tests(ThermostatMode_test)
+
+# ---- EncodedValue ---------------------------------------------------
+# Shared precision/scale/size value codec (SensorMultilevel + Setpoint).
+add_executable(EncodedValue_test
+    EncodedValue_test.cpp
+    "${SRC_DIR}/application/EncodedValue.cpp"
+)
+target_include_directories(EncodedValue_test PRIVATE "${SRC_DIR}/application")
+target_link_libraries(EncodedValue_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(EncodedValue_test)
+gtest_discover_tests(EncodedValue_test)
+
+# ---- ThermostatSetpoint ---------------------------------------------
+# No .gen.cpp (Set/Get carry args); links the hand-written codec plus the
+# shared EncodedValue helper.
+add_executable(ThermostatSetpoint_test
+    ThermostatSetpoint_test.cpp
+    "${SRC_DIR}/application/ThermostatSetpoint.cpp"
+    "${SRC_DIR}/application/EncodedValue.cpp"
+)
+target_include_directories(ThermostatSetpoint_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(ThermostatSetpoint_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(ThermostatSetpoint_test)
+gtest_discover_tests(ThermostatSetpoint_test)
 
 # ---- ManufacturerSpecific -------------------------------------------
 add_executable(ManufacturerSpecific_test

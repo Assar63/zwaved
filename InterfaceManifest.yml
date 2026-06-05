@@ -492,6 +492,23 @@ events:
       - { name: sourceNodeId, type: u8, default: 0 }
       - { name: mode,         type: u8, default: 0 }
 
+  - name: ThermostatSetpointReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Thermostat Setpoint (CC 0x43) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose ccData
+      parses as a Setpoint Report. The target temperature is
+      `value / 10^precision` in the unit selected by `scale` (0 = °C,
+      1 = °F). setpointType: 1 heating, 2 cooling, … Raw fields are carried
+      (shared precision/scale/size encoding with Sensor Multilevel).
+    fields:
+      - { name: sourceNodeId, type: u8,  default: 0 }
+      - { name: setpointType, type: u8,  default: 0 }
+      - { name: scale,        type: u8,  default: 0 }
+      - { name: precision,    type: u8,  default: 0 }
+      - { name: value,        type: i32, default: 0, doc: "raw; reading = value / 10^precision" }
+
   - name: WakeUpIntervalReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -880,6 +897,27 @@ events:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
 
+  - name: SetThermostatSetpointCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: "Set a node's thermostat setpoint (target temperature) for a setpoint type."
+    fields:
+      - { name: nodeId,       type: u8,  default: 0 }
+      - { name: setpointType, type: u8,  default: 0 }
+      - { name: precision,    type: u8,  default: 0 }
+      - { name: scale,        type: u8,  default: 0 }
+      - { name: value,        type: i32, default: 0, doc: "raw; target = value / 10^precision" }
+      - { name: callbackId,   type: u8,  default: 0 }
+
+  - name: GetThermostatSetpointCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's thermostat setpoint for a given setpoint type.
+    fields:
+      - { name: nodeId,       type: u8, default: 0 }
+      - { name: setpointType, type: u8, default: 0 }
+      - { name: callbackId,   type: u8, default: 0 }
+
   - name: GetBatteryCommand
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
@@ -1263,6 +1301,25 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetThermostatModeCommand
+
+    - name: SetThermostatSetpoint
+      params:
+        - { name: nodeId,       dbus: y, cpp: u8 }
+        - { name: setpointType, dbus: y, cpp: u8 }
+        - { name: precision,    dbus: y, cpp: u8 }
+        - { name: scale,        dbus: y, cpp: u8 }
+        - { name: value,        dbus: i, cpp: i32 }
+        - { name: callbackId,   dbus: y, cpp: u8 }
+      action:
+        publish: SetThermostatSetpointCommand
+
+    - name: GetThermostatSetpoint
+      params:
+        - { name: nodeId,       dbus: y, cpp: u8 }
+        - { name: setpointType, dbus: y, cpp: u8 }
+        - { name: callbackId,   dbus: y, cpp: u8 }
+      action:
+        publish: GetThermostatSetpointCommand
 
     - name: GetManufacturerSpecific
       params:
@@ -1764,6 +1821,16 @@ dbus:
       triggered_by:
         event: ThermostatModeReport
 
+    - name: ThermostatSetpointReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: setpointType, dbus: y, doc: "1 heating, 2 cooling, …" }
+        - { name: scale,        dbus: y, doc: "0 = °C, 1 = °F" }
+        - { name: precision,    dbus: y, doc: "reading = value / 10^precision" }
+        - { name: value,        dbus: i, doc: "raw signed target temperature" }
+      triggered_by:
+        event: ThermostatSetpointReport
+
     - name: ManufacturerSpecificReport
       params:
         - { name: sourceNodeId,   dbus: y }
@@ -2158,6 +2225,39 @@ modules:
         decoded_struct:
           - { name: mode, type: u8, doc: "0 off, 1 heat, 2 cool, 3 auto, 6 fan only, 8 dry, …" }
 
+  - name: ThermostatSetpoint
+    wire:
+      class_byte: 0x43
+      prefix: THERMOSTAT_SETPOINT
+    description: |
+      HVAC target temperature, one per setpoint type. SET and REPORT carry
+      a setpointType byte (low 4 bits) followed by the SDS13781
+      precision/scale/size encoded value — the exact encoding Sensor
+      Multilevel uses, shared via the EncodedValue helper. scale 0 = °C,
+      1 = °F. setpointType: 1 heating, 2 cooling, 7 furnace, 8 dry air,
+      9 moist air, 10 auto changeover. SET and GET both carry payload args,
+      so the encoders live in the hand-written ThermostatSetpoint.cpp.
+      Second of the split thermostat quartet (epic #23). SUPPORTED_GET/
+      REPORT and CAPABILITIES_GET are not implemented.
+    constants:
+      - { name: TYPE_HEATING, value: 0x01 }
+      - { name: TYPE_COOLING, value: 0x02 }
+    commands:
+      - name: Set
+        wire:
+          byte: 0x01
+      - name: Get
+        wire:
+          byte: 0x02
+      - name: Report
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: setpointType, type: u8,  doc: "1 heating, 2 cooling, …" }
+          - { name: scale,        type: u8,  doc: "0 = °C, 1 = °F" }
+          - { name: precision,    type: u8,  doc: "reading = value / 10^precision" }
+          - { name: value,        type: i32, doc: "raw signed target temperature" }
+
   - name: Configuration
     wire:
       class_byte: 0x70
@@ -2501,6 +2601,19 @@ translations:
     map:
       sourceNodeId: event.sourceNodeId
       mode:         decoded.mode
+
+  - publishes: ThermostatSetpointReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: ThermostatSetpoint.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      setpointType: decoded.setpointType
+      scale:        decoded.scale
+      precision:    decoded.precision
+      value:        decoded.value
 
   - publishes: ManufacturerSpecificReport
     triggered_by: ApplicationCommand

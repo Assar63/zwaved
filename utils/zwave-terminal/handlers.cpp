@@ -204,6 +204,64 @@ auto handleGetMeter(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
     }
 }
 
+auto handleGetColorSwitch(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("GetColorSwitch: cancelled or invalid node id");
+        return;
+    }
+    auto componentId = promptByte("Component (2=red, 3=green, 4=blue, …):", BYTE_MIN, BYTE_MAX);
+    if (!componentId.has_value())
+    {
+        logLine("GetColorSwitch: cancelled or invalid component");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("GetColorSwitch").onInterface(IFACE_NAME).withArguments(*nodeId, *componentId, sessionCounter);
+        logLine("GetColorSwitch node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " component=" + std::to_string(static_cast<unsigned>(*componentId)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetColorSwitch failed: "} + err.what());
+    }
+}
+
+auto handleSetColorSwitch(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    auto red    = promptByte("Red (0-255):", BYTE_MIN, BYTE_MAX);
+    auto green  = promptByte("Green (0-255):", BYTE_MIN, BYTE_MAX);
+    auto blue   = promptByte("Blue (0-255):", BYTE_MIN, BYTE_MAX);
+    if (!nodeId.has_value() || !red.has_value() || !green.has_value() || !blue.has_value())
+    {
+        logLine("SetColorSwitch: cancelled or invalid");
+        return;
+    }
+    // Flat (componentId, value) pairs for red/green/blue; duration = default.
+    const std::vector<std::uint8_t> components{2, *red, 3, *green, 4, *blue};
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetColorSwitch")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, components, DURATION_DEFAULT, sessionCounter);
+        logLine("SetColorSwitch node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " rgb=" + std::to_string(static_cast<unsigned>(*red)) + "," +
+                std::to_string(static_cast<unsigned>(*green)) + "," + std::to_string(static_cast<unsigned>(*blue)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetColorSwitch failed: "} + err.what());
+    }
+}
+
 // ---- Node control for non-binary CCs (#47) --------------------------
 // Drive the daemon's Set methods for CCs beyond binary switch. Each is a
 // fire-and-forget SendData; completion arrives as SendDataStatus and any

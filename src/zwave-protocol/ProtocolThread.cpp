@@ -14,6 +14,7 @@
 #include "application/Basic.hpp"
 #include "application/Battery.hpp"
 #include "application/BinarySwitch.hpp"
+#include "application/ColorSwitch.hpp"
 #include "application/Configuration.hpp"
 #include "application/ManufacturerSpecific.hpp"
 #include "application/Meter.hpp"
@@ -326,6 +327,16 @@ auto onGetNotification(const MessageBus::GetNotificationCommand& cmd) -> void
 auto onGetMeter(const MessageBus::GetMeterCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, Meter::encodeGet(cmd.scale));
+}
+
+auto onSetColorSwitch(const MessageBus::SetColorSwitchCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, ColorSwitch::encodeSet(cmd.components, cmd.duration));
+}
+
+auto onGetColorSwitch(const MessageBus::GetColorSwitchCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, ColorSwitch::encodeGet(cmd.componentId));
 }
 
 auto onSetThermostatMode(const MessageBus::SetThermostatModeCommand& cmd) -> void
@@ -1050,7 +1061,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 40;
+constexpr std::size_t SUBSCRIPTION_COUNT = 42;
 
 auto subscribeBus() -> void
 {
@@ -1072,6 +1083,8 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetSensorBinaryCommand>(onGetSensorBinary);
     subscribe<MessageBus::GetNotificationCommand>(onGetNotification);
     subscribe<MessageBus::GetMeterCommand>(onGetMeter);
+    subscribe<MessageBus::SetColorSwitchCommand>(onSetColorSwitch);
+    subscribe<MessageBus::GetColorSwitchCommand>(onGetColorSwitch);
     subscribe<MessageBus::SetThermostatModeCommand>(onSetThermostatMode);
     subscribe<MessageBus::GetThermostatModeCommand>(onGetThermostatMode);
     subscribe<MessageBus::SetThermostatSetpointCommand>(onSetThermostatSetpoint);

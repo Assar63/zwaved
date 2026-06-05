@@ -81,6 +81,9 @@ constexpr int GROUP_ID_MAX = 255;
 // Conventional Z-Wave lifeline association group.
 constexpr std::uint8_t LIFELINE_GROUP = 1;
 
+// Transition "factory default duration" sentinel (Multilevel/Color Switch).
+constexpr std::uint8_t DURATION_DEFAULT = 0xFF;
+
 // FUNC_ID values used to decode `GetNetworkStatus`'s sessionCommandId
 // field — kept identical to HostApi::CMD_*; we don't include HostApi
 // here, the terminal is purely a D-Bus client.

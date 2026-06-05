@@ -693,6 +693,42 @@ reads it; reports render as `ThermostatFanModeReport node=5 mode=auto high`.
 This completes the thermostat HVAC quartet (Mode 0x40, Setpoint 0x43,
 Operating State 0x42, Fan Mode 0x44).
 
+## 11l. Color switch (CC 0x33)
+
+The Color Switch Command Class drives multi-component RGB / RGBW / CCT
+lighting — each colour component (red, green, blue, white, …) has its own
+0–255 level. `SetColorSwitch(nodeId, components, duration, callbackId)`
+writes one or more components atomically; `GetColorSwitch(nodeId,
+componentId, callbackId)` reads one. The reply and any unsolicited Reports
+arrive as the typed `ColorSwitchReport(y y y y y)` signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the reporting node |
+| `componentId` | `y` | 0 warm white, 1 cold white, 2 red, 3 green, 4 blue, 5 amber, 6 cyan, 7 purple |
+| `value` | `y` | current level 0–255 |
+| `targetValue` | `y` | transition target (mirrors `value` on v1 reports) |
+| `duration` | `y` | 0 instant, 1–0x7F sec, 0x80–0xFE min, 0xFF default |
+
+`components` on Set is an array of bytes holding **alternating
+`(componentId, value)` pairs** — e.g. `{2,255, 3,0, 4,0}` sets red full,
+green and blue off in a single frame.
+
+```bash
+# set node 5 to full red, then read the red component back
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetColorSwitch yayyy 5 6 2 255 3 0 4 0 255 7
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetColorSwitch yyy 5 2 8
+# → ColorSwitchReport y y y y y  5 2 255 255 0   = node 5 red=255
+```
+
+Only Set / Get / Report are implemented; `SUPPORTED_GET`/`REPORT` and
+`START`/`STOP_LEVEL_CHANGE` (fade effects) are deferred. In the terminal,
+the `[c]` Control submenu → `[l]` prompts for an RGB triple and sets it, and
+the `[g]` Get submenu → `[k]` reads one component; reports render as
+`ColorSwitchReport node=5 red=255`.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

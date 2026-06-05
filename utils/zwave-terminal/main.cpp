@@ -145,6 +145,7 @@ auto run() -> int
                          "Thermostat fan mode",
                          [&] { handleSimpleGet(*proxy, sessionCounter, "GetThermostatFanMode"); }},
                         {'w', "Multilevel switch", [&] { handleGetMultilevelSwitch(*proxy, sessionCounter); }},
+                        {'k', "Color switch", [&] { handleGetColorSwitch(*proxy, sessionCounter); }},
                         {'a', "Association members", [&] { handleGetAssociation(*proxy, sessionCounter); }},
                         {'r', "Association groupings", [&] { handleGetAssociationGroupings(*proxy, sessionCounter); }},
                     });
@@ -162,6 +163,7 @@ auto run() -> int
                         {'t', "Thermostat mode set", [&] { handleSetThermostatMode(*proxy, sessionCounter); }},
                         {'p', "Thermostat setpoint set", [&] { handleSetThermostatSetpoint(*proxy, sessionCounter); }},
                         {'n', "Thermostat fan mode set", [&] { handleSetThermostatFanMode(*proxy, sessionCounter); }},
+                        {'l', "Color switch set (RGB)", [&] { handleSetColorSwitch(*proxy, sessionCounter); }},
                         {'k', "Wake-up interval", [&] { handleSetWakeUpInterval(*proxy, sessionCounter); }},
                         {'a',
                          "Association add",

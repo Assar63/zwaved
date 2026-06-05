@@ -286,6 +286,20 @@ target_link_libraries(Notification_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Notification_test)
 gtest_discover_tests(Notification_test)
 
+# ---- ColorSwitch ----------------------------------------------------
+# No .gen.cpp (Get/Set carry variable/argument payloads).
+add_executable(ColorSwitch_test
+    ColorSwitch_test.cpp
+    "${SRC_DIR}/application/ColorSwitch.cpp"
+)
+target_include_directories(ColorSwitch_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(ColorSwitch_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(ColorSwitch_test)
+gtest_discover_tests(ColorSwitch_test)
+
 # ---- Meter ----------------------------------------------------------
 # Note: Meter has no .gen.cpp (the Get carries a scale arg, so the encoder
 # is hand-written), so the test links only the hand-written Meter.cpp.

@@ -760,6 +760,24 @@ events:
       - { name: duration,     type: u8,   default: 0 }
       - { name: wireFormatV2, type: bool, default: false }
 
+  - name: ColorSwitchReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Color Switch (CC 0x33) Report — the level of one colour
+      component. Republished by the cc-translator from inbound
+      ApplicationCommand frames whose ccData parses as a Color Switch
+      Report. componentId: 0 warm white, 1 cold white, 2 red, 3 green,
+      4 blue, 5 amber, 6 cyan, 7 purple. v1 reports carry only `value`
+      (targetValue mirrors it, duration 0); v3+ adds the transition
+      target + duration.
+    fields:
+      - { name: sourceNodeId, type: u8, default: 0 }
+      - { name: componentId,  type: u8, default: 0 }
+      - { name: value,        type: u8, default: 0 }
+      - { name: targetValue,  type: u8, default: 0 }
+      - { name: duration,     type: u8, default: 0 }
+
   # ---- 2d. Command events (D-Bus → ProtocolThread) ----------------
   # External transports translate semantic D-Bus calls into one of
   # these and publish; ProtocolThread subscribes and dispatches.
@@ -872,6 +890,31 @@ events:
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
+
+  - name: SetColorSwitchCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Send a Color Switch (CC 0x33) Set. `components` is a flat byte blob of
+      alternating (componentId, value) pairs — e.g. {2,255, 3,0, 4,0} sets
+      red full, green/blue off. `duration` uses the standard transition
+      encoding (0 instant, 1..0x7F seconds, 0x80..0xFE minutes, 0xFF default).
+    constants:
+      - { name: DURATION_DEFAULT, value: 0xFF }
+    fields:
+      - { name: nodeId,     type: u8,    default: 0 }
+      - { name: components, type: bytes, doc: "alternating (componentId, value) pairs" }
+      - { name: duration,   type: u8,    default: DURATION_DEFAULT }
+      - { name: callbackId, type: u8,    default: 0 }
+
+  - name: GetColorSwitchCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query one colour component's level (componentId 0..7).
+    fields:
+      - { name: nodeId,      type: u8, default: 0 }
+      - { name: componentId, type: u8, default: 0 }
+      - { name: callbackId,  type: u8, default: 0 }
 
   - name: GetSensorMultilevelCommand
     category: command
@@ -1302,6 +1345,23 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetMultilevelSwitchCommand
+
+    - name: SetColorSwitch
+      params:
+        - { name: nodeId,     dbus: y,  cpp: u8 }
+        - { name: components, dbus: ay, cpp: bytes, doc: "alternating (componentId, value) pairs" }
+        - { name: duration,   dbus: y,  cpp: u8 }
+        - { name: callbackId, dbus: y,  cpp: u8 }
+      action:
+        publish: SetColorSwitchCommand
+
+    - name: GetColorSwitch
+      params:
+        - { name: nodeId,      dbus: y, cpp: u8 }
+        - { name: componentId, dbus: y, cpp: u8 }
+        - { name: callbackId,  dbus: y, cpp: u8 }
+      action:
+        publish: GetColorSwitchCommand
 
     - name: GetBattery
       params:
@@ -1840,6 +1900,16 @@ dbus:
       triggered_by:
         event: MultilevelSwitchReport
 
+    - name: ColorSwitchReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: componentId,  dbus: y, doc: "0 warm white, 1 cold white, 2 red, 3 green, 4 blue, 5 amber, 6 cyan, 7 purple" }
+        - { name: value,        dbus: y, doc: "current level 0..255" }
+        - { name: targetValue,  dbus: y, doc: "transition target (mirrors value on v1)" }
+        - { name: duration,     dbus: y, doc: "0=instant, 0x01..0x7F=sec, 0x80..0xFE=min, 0xFF=default" }
+      triggered_by:
+        event: ColorSwitchReport
+
     - name: BatteryReport
       params:
         - { name: sourceNodeId, dbus: y }
@@ -2114,6 +2184,42 @@ modules:
           - { name: targetValue,  type: u8 }
           - { name: duration,     type: u8 }
           - { name: wireFormatV2, type: bool, doc: "true if 5-byte v2+ wire form" }
+
+  - name: ColorSwitch
+    wire:
+      class_byte: 0x33
+      prefix: SWITCH_COLOR
+    description: |
+      Multi-component colour control — RGB / RGBW / CCT lighting. GET takes
+      a componentId; REPORT carries that component's value (v3+ adds the
+      transition target + duration). SET carries a variable-length list of
+      (componentId, value) pairs plus a trailing duration, so a single frame
+      can update a whole RGB triple atomically. componentId: 0 warm white,
+      1 cold white, 2 red, 3 green, 4 blue, 5 amber, 6 cyan, 7 purple. GET
+      and SET carry variable / argument payloads, so the encoders live in
+      the hand-written ColorSwitch.cpp. SUPPORTED_GET/REPORT and
+      START/STOP_LEVEL_CHANGE are not implemented.
+    constants:
+      - { name: COMPONENT_WARM_WHITE, value: 0x00 }
+      - { name: COMPONENT_COLD_WHITE, value: 0x01 }
+      - { name: COMPONENT_RED,        value: 0x02 }
+      - { name: COMPONENT_GREEN,      value: 0x03 }
+      - { name: COMPONENT_BLUE,       value: 0x04 }
+    commands:
+      - name: Get
+        wire:
+          byte: 0x03
+      - name: Report
+        wire:
+          byte: 0x04
+        decoded_struct:
+          - { name: componentId, type: u8 }
+          - { name: value,       type: u8 }
+          - { name: targetValue, type: u8 }
+          - { name: duration,    type: u8 }
+      - name: Set
+        wire:
+          byte: 0x05
 
   - name: Battery
     wire:
@@ -2684,6 +2790,19 @@ translations:
       targetValue:  decoded.targetValue
       duration:     decoded.duration
       wireFormatV2: decoded.wireFormatV2
+
+  - publishes: ColorSwitchReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: ColorSwitch.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      componentId:  decoded.componentId
+      value:        decoded.value
+      targetValue:  decoded.targetValue
+      duration:     decoded.duration
 
   - publishes: BatteryReport
     triggered_by: ApplicationCommand

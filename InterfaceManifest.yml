@@ -522,6 +522,20 @@ events:
       - { name: sourceNodeId, type: u8, default: 0 }
       - { name: state,        type: u8, default: 0 }
 
+  - name: ThermostatFanModeReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Thermostat Fan Mode (CC 0x44) Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose ccData
+      parses as a Fan Mode Report. `mode` (low 4 bits): 0 auto low, 1 low,
+      2 auto high, 3 high, 4 auto medium, 5 medium, … `off` is bit 7 — a
+      separate "fan off" flag carried alongside the mode.
+    fields:
+      - { name: sourceNodeId, type: u8,   default: 0 }
+      - { name: mode,         type: u8,   default: 0 }
+      - { name: "off",        type: bool, default: false }
+
   - name: WakeUpIntervalReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -939,6 +953,24 @@ events:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
 
+  - name: SetThermostatFanModeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: "Set a node's thermostat fan mode (0 auto low, 1 low, 2 auto high, …); off flag turns the fan off."
+    fields:
+      - { name: nodeId,     type: u8,   default: 0 }
+      - { name: mode,       type: u8,   default: 0 }
+      - { name: "off",      type: bool, default: false }
+      - { name: callbackId, type: u8,   default: 0 }
+
+  - name: GetThermostatFanModeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's current thermostat fan mode.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
   - name: GetBatteryCommand
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
@@ -1348,6 +1380,22 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetThermostatOperatingStateCommand
+
+    - name: SetThermostatFanMode
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: mode,       dbus: y, cpp: u8 }
+        - { name: "off",      dbus: b, cpp: bool }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: SetThermostatFanModeCommand
+
+    - name: GetThermostatFanMode
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetThermostatFanModeCommand
 
     - name: GetManufacturerSpecific
       params:
@@ -1866,6 +1914,14 @@ dbus:
       triggered_by:
         event: ThermostatOperatingStateReport
 
+    - name: ThermostatFanModeReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: mode,         dbus: y, doc: "0 auto low, 1 low, 2 auto high, 3 high, …" }
+        - { name: "off",        dbus: b, doc: "fan-off flag (bit 7 of the wire byte)" }
+      triggered_by:
+        event: ThermostatFanModeReport
+
     - name: ManufacturerSpecificReport
       params:
         - { name: sourceNodeId,   dbus: y }
@@ -2320,6 +2376,46 @@ modules:
         decoded_struct:
           - { name: state, type: u8, doc: "0 idle, 1 heating, 2 cooling, 3 fan only, …" }
 
+  - name: ThermostatFanMode
+    wire:
+      class_byte: 0x44
+      prefix: THERMOSTAT_FAN_MODE
+    description: |
+      HVAC fan behaviour. SET and REPORT carry one properties byte: the low
+      4 bits are the fan mode, bit 7 is a separate "fan off" flag. mode:
+      0 auto low, 1 low, 2 auto high, 3 high, 4 auto medium, 5 medium, …
+      The decoder splits the byte into (mode, off); the encoder packs them
+      back (like BinarySwitch, the SET payload is a manifest expression, so
+      both encoders are generated). Last of the split thermostat quartet
+      (epic #23). SUPPORTED_GET/REPORT are not implemented.
+    constants:
+      - { name: MODE_MASK,      value: 0x0F }
+      - { name: OFF_FLAG,       value: 0x80 }
+      - { name: MODE_AUTO_LOW,  value: 0x00 }
+      - { name: MODE_LOW,       value: 0x01 }
+      - { name: MODE_AUTO_HIGH, value: 0x02 }
+      - { name: MODE_HIGH,      value: 0x03 }
+    commands:
+      - name: Set
+        wire:
+          byte: 0x01
+          payload:
+            - "static_cast<std::uint8_t>((off ? OFF_FLAG : 0x00) | (mode & MODE_MASK))"
+        encode_args:
+          - { name: mode,  type: u8 }
+          - { name: "off", type: bool }
+      - name: Get
+        wire:
+          byte: 0x02
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: mode,  type: u8,   doc: "low 4 bits of the properties byte" }
+          - { name: "off", type: bool, doc: "bit 7 of the properties byte" }
+
   - name: Configuration
     wire:
       class_byte: 0x70
@@ -2686,6 +2782,17 @@ translations:
     map:
       sourceNodeId: event.sourceNodeId
       state:        decoded.state
+
+  - publishes: ThermostatFanModeReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: ThermostatFanMode.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      mode:         decoded.mode
+      "off":        decoded.off
 
   - publishes: ManufacturerSpecificReport
     triggered_by: ApplicationCommand

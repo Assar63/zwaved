@@ -302,6 +302,34 @@ auto centralSceneKeyName(std::uint8_t keyAttribute) -> const char*
         return nullptr;
     }
 }
+
+// Controller library type (FUNC_ID_GET_VERSION) name; mirrors
+// HostApi::LIBRARY_TYPE_*. Bridge Controller (7) is the one that can host
+// virtual slave nodes.
+auto libraryTypeName(std::uint8_t libraryType) -> const char*
+{
+    switch (libraryType)
+    {
+    case 1:
+        return "Static Controller";
+    case 2:
+        return "Controller";
+    case 3:
+        return "Enhanced Slave";
+    case 4:
+        return "Slave";
+    case 5:
+        return "Installer";
+    case 6:
+        return "Routing Slave";
+    case 7:
+        return "Bridge Controller";
+    case 8:
+        return "DUT";
+    default:
+        return "unknown";
+    }
+}
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 
 /// Z-Wave Command Class human-readable names. Covers the most commonly

@@ -1023,12 +1023,27 @@ two host-API requests synchronously and caches the answers:
 
 Both values are emitted on D-Bus as a `DongleInfo(s y ay y)` signal
 and cached so `GetDongleInfo()` can return the latest snapshot to
-clients that connect later.
+clients that connect later. The daemon also logs the library type by
+name on connect (e.g. `lib type 1 Static Controller`), and the
+`zwave-terminal` `[i]` view renders it as `libType=1 (Static
+Controller)`.
 
 ```bash
 busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
     com.tiunda.ZWaved1 GetDongleInfo
 ```
+
+To read the library type **without** the daemon running (e.g. to check
+whether a dongle is a Bridge Controller before planning virtual-node
+work), use the standalone probe:
+
+```bash
+scripts/zw-dongle-probe                 # defaults to /dev/ttyACM0
+scripts/zw-dongle-probe --port /dev/ttyACM1
+```
+
+Library type `7` (Bridge Controller) is the only one that can host
+virtual slave nodes; a Static Controller (`1`) cannot.
 
 If a dongle has not yet been introspected (none plugged in since the
 daemon started), `GetDongleInfo` returns an empty struct (empty

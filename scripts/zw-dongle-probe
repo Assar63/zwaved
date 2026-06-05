@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""Probe a Z-Wave serial dongle for its library type (and version).
+
+Sends a FUNC_ID_ZW_GET_VERSION (0x15) frame over the Serial API and decodes
+the trailing library-type byte. Library type 7 (Bridge Controller) is the one
+that can host virtual slave nodes; a Static Controller (1) cannot — see
+FUTURE.md.
+
+This is a standalone diagnostic: it talks to the raw TTY and does NOT need the
+zwaved daemon running. Stop the daemon first if it owns the port. Requires
+pyserial (`pip install pyserial`) and membership in the `dialout` group (or
+root) to open the device.
+
+Usage:
+    scripts/zw-dongle-probe [--port /dev/ttyACM0] [--timeout 2.5]
+"""
+import argparse
+import sys
+import time
+
+try:
+    import serial  # pyserial
+except ImportError:
+    sys.exit("error: pyserial not installed (try: pip install pyserial)")
+
+SOF = 0x01
+ACK = 0x06
+GET_VERSION = 0x15
+VERSION_STRING_LEN = 12
+
+LIBRARY_TYPES = {
+    1: "Static Controller",
+    2: "Controller",
+    3: "Enhanced Slave",
+    4: "Slave",
+    5: "Installer",
+    6: "Routing Slave",
+    7: "Bridge Controller",
+    8: "DUT",
+}
+
+
+def checksum(payload: bytes) -> int:
+    """Z-Wave Serial API checksum: 0xFF XOR every byte from LEN..last-data."""
+    chk = 0xFF
+    for byte in payload:
+        chk ^= byte
+    return chk
+
+
+def build_request(func: int) -> bytes:
+    body = bytes([0x00, func])  # type=REQUEST(0x00), funcID
+    payload = bytes([len(body) + 1]) + body  # LEN counts type+cmd+checksum
+    return bytes([SOF]) + payload + bytes([checksum(payload)])
+
+
+def find_response(buf: bytes, func: int):
+    """Return the first well-formed RESPONSE data frame for `func`, or None."""
+    i = 0
+    while i < len(buf):
+        if buf[i] == SOF and i + 1 < len(buf):
+            length = buf[i + 1]
+            end = i + 2 + length  # SOF + LEN + `length` bytes
+            if end <= len(buf) and i + 3 < len(buf) and buf[i + 3] == func:
+                return buf[i:end]
+        i += 1
+    return None
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Probe a Z-Wave dongle's library type.")
+    parser.add_argument("--port", default="/dev/ttyACM0", help="serial device (default: /dev/ttyACM0)")
+    parser.add_argument("--timeout", type=float, default=2.5, help="read timeout seconds (default: 2.5)")
+    args = parser.parse_args()
+
+    try:
+        port = serial.Serial(args.port, 115200, timeout=0.3)
+    except serial.SerialException as exc:
+        return f"error: cannot open {args.port}: {exc}"
+
+    with port:
+        time.sleep(0.2)
+        port.reset_input_buffer()
+        request = build_request(GET_VERSION)
+        port.write(request)
+        port.flush()
+
+        buf = bytearray()
+        deadline = time.time() + args.timeout
+        while time.time() < deadline:
+            chunk = port.read(64)
+            if chunk:
+                buf += chunk
+                if find_response(buf, GET_VERSION) is not None:
+                    break
+
+        frame = find_response(buf, GET_VERSION)
+        if frame is None:
+            return f"error: no GET_VERSION response from {args.port} (raw: {bytes(buf).hex(' ') or 'nothing'})"
+
+        port.write(bytes([ACK]))
+        port.flush()
+
+        data = frame[4:-1]  # strip SOF, LEN, TYPE, CMD and trailing checksum
+        version = bytes(data[:VERSION_STRING_LEN]).split(b"\x00")[0].decode("ascii", "replace")
+        lib = data[VERSION_STRING_LEN] if len(data) > VERSION_STRING_LEN else None
+        name = LIBRARY_TYPES.get(lib, "unknown")
+        print(f"port        : {args.port}")
+        print(f"version     : {version}")
+        print(f"libraryType : {lib} ({name})")
+        if lib == 7:
+            print("note        : Bridge Controller — can host virtual slave nodes.")
+        else:
+            print("note        : NOT a Bridge Controller — cannot host virtual slave nodes (see FUTURE.md).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

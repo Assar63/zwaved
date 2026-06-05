@@ -275,6 +275,10 @@ struct NodeStatusCallback
 /// Decode a FUNC_ID_GET_VERSION (0x15) RESPONSE.
 [[nodiscard]] auto decodeVersion(const ZwaveDataFrame& frame) -> std::optional<VersionResponse>;
 
+/// Human-readable name for a LIBRARY_TYPE_* value (e.g. "Static Controller",
+/// "Bridge Controller"); "unknown" for an unrecognised type.
+[[nodiscard]] auto libraryTypeName(uint8_t libraryType) -> const char*;
+
 /// Decode a FUNC_ID_MEMORY_GET_ID (0x20) RESPONSE.
 [[nodiscard]] auto decodeMemoryId(const ZwaveDataFrame& frame) -> std::optional<MemoryIdResponse>;
 

@@ -663,7 +663,8 @@ auto handleDongleInfo(sdbus::IProxy& proxy) -> void
         return;
     }
     std::ostringstream stream;
-    stream << "DongleInfo: \"" << libraryVersion << "\" libType=" << static_cast<unsigned>(libraryType) << " homeId=";
+    stream << "DongleInfo: \"" << libraryVersion << "\" libType=" << static_cast<unsigned>(libraryType) << " ("
+           << libraryTypeName(libraryType) << ") homeId=";
     for (const auto byte : homeId)
     {
         stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(byte);

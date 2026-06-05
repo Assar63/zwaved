@@ -4,6 +4,7 @@
 #include "../node-registry/NodeRegistry.hpp"
 #include "../pending-queue/PendingQueue.hpp"
 #include "../policy-register/PolicyRegister.hpp"
+#include "../scene-store/SceneStore.hpp"
 #include "../zwaved.h"  // NOLINT(misc-include-cleaner): used via __attribute__ constructor priority
 #include "FrameTransport.hpp"
 #include "HostApi.hpp"
@@ -1207,6 +1208,7 @@ auto zwaveCommunicationThread() -> void
             PendingQueue::instance().setHomeId(info.homeId);
             PolicyRegister::instance().setHomeId(info.homeId);
             NodeMetadata::instance().setHomeId(info.homeId);
+            SceneStore::instance().setHomeId(info.homeId);
             MessageBus::publish(info);
 
             if (introspection.initData.has_value())

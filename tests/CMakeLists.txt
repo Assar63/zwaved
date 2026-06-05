@@ -424,6 +424,28 @@ target_link_libraries(PendingQueue_test PRIVATE
 zwaved_test_target(PendingQueue_test)
 gtest_discover_tests(PendingQueue_test)
 
+# ---- SceneStore -----------------------------------------------------
+add_executable(SceneStore_test
+    SceneStore_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/scene-store/SceneStore.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
+    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
+)
+target_include_directories(SceneStore_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/scene-store"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(SceneStore_test zwaved_codegen)
+target_link_libraries(SceneStore_test PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    PkgConfig::SQLITE3
+)
+zwaved_test_target(SceneStore_test)
+gtest_discover_tests(SceneStore_test)
+
 # ---- MessageBus -----------------------------------------------------
 # Reentrancy regression test — links the real bus + its generated
 # event instantiations. eventpp is header-only; its include path comes

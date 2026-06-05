@@ -1,7 +1,16 @@
 # utils/zwave-terminal/CMakeLists.txt
 # ncurses TUI client for the zwaved D-Bus interface.
 
-add_executable(zwave-terminal main.cpp)
+add_executable(zwave-terminal
+    main.cpp
+    activity.cpp
+    format.cpp
+    prompts.cpp
+    render.cpp
+    signal_handlers.cpp
+    policy_blob.cpp
+    handlers.cpp
+)
 
 target_link_libraries(zwave-terminal PRIVATE
     PkgConfig::NCURSES

@@ -32,6 +32,7 @@ set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/SensorBinary.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ThermostatMode.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ThermostatOperatingState.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/ThermostatFanMode.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
@@ -198,6 +199,20 @@ target_include_directories(ThermostatOperatingState_test PRIVATE
 target_link_libraries(ThermostatOperatingState_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(ThermostatOperatingState_test)
 gtest_discover_tests(ThermostatOperatingState_test)
+
+# ---- ThermostatFanMode ----------------------------------------------
+add_executable(ThermostatFanMode_test
+    ThermostatFanMode_test.cpp
+    "${SRC_DIR}/application/ThermostatFanMode.cpp"
+    "${GENERATED_APPLICATION_DIR}/ThermostatFanMode.gen.cpp"
+)
+target_include_directories(ThermostatFanMode_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(ThermostatFanMode_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(ThermostatFanMode_test)
+gtest_discover_tests(ThermostatFanMode_test)
 
 # ---- ManufacturerSpecific -------------------------------------------
 add_executable(ManufacturerSpecific_test

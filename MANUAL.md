@@ -659,6 +659,40 @@ masks the low 4 bits and returns the raw state; naming is left to clients.
 submenu → `[o]` reads it; reports render as
 `ThermostatOperatingStateReport node=5 state=heating`.
 
+## 11k. Thermostat fan mode (CC 0x44)
+
+The Thermostat Fan Mode Command Class sets/reads the HVAC fan behaviour.
+`SetThermostatFanMode(nodeId, mode, off, callbackId)` sets it;
+`GetThermostatFanMode(nodeId, callbackId)` reads it. The reply and any
+unsolicited Reports arrive as the typed `ThermostatFanModeReport(y y b)`
+signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the reporting node |
+| `mode` | `y` | 0 auto low, 1 low, 2 auto high, 3 high, 4 auto medium, 5 medium |
+| `off` | `b` | fan-off flag (bit 7 of the wire byte), carried separately from the mode |
+
+The wire packs `mode` (low 4 bits) and the `off` flag (bit 7) into one
+byte; the daemon splits them on decode and re-packs them on Set, so callers
+pass the two fields independently.
+
+```bash
+# set node 5's fan to "auto high" (not off), then read it back
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetThermostatFanMode yyby 5 2 false 7
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetThermostatFanMode yy 5 8
+# → ThermostatFanModeReport y y b  5 2 false   = node 5 auto high
+```
+
+`SUPPORTED_GET`/`REPORT` are not implemented. In the terminal, the `[c]`
+Control submenu → `[n]` sets the fan mode and the `[g]` Get submenu → `[f]`
+reads it; reports render as `ThermostatFanModeReport node=5 mode=auto high`.
+
+This completes the thermostat HVAC quartet (Mode 0x40, Setpoint 0x43,
+Operating State 0x42, Fan Mode 0x44).
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

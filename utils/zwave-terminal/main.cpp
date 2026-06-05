@@ -773,6 +773,28 @@ auto thermostatOperatingStateName(std::uint8_t state) -> const char*
         return nullptr;
     }
 }
+
+// Thermostat Fan Mode (CC 0x44) name; nullptr when unknown.
+auto thermostatFanModeName(std::uint8_t mode) -> const char*
+{
+    switch (mode)
+    {
+    case 0:
+        return "auto low";
+    case 1:
+        return "low";
+    case 2:
+        return "auto high";
+    case 3:
+        return "high";
+    case 4:
+        return "auto medium";
+    case 5:
+        return "medium";
+    default:
+        return nullptr;
+    }
+}
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 
 // NOLINTBEGIN(readability-function-cognitive-complexity): flat list of signal subscriptions
@@ -1058,6 +1080,30 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 {
                     stream << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(state)
                            << std::dec;
+                }
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("ThermostatFanModeReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId, std::uint8_t mode, bool off) -> void
+            {
+                std::ostringstream stream;
+                stream << "ThermostatFanModeReport node=" << static_cast<unsigned>(sourceNodeId) << " mode=";
+                if (const char* name = thermostatFanModeName(mode); name != nullptr)
+                {
+                    stream << name;
+                }
+                else
+                {
+                    stream << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(mode)
+                           << std::dec;
+                }
+                if (off)
+                {
+                    stream << " (fan off)";
                 }
                 logLine(stream.str());
             });
@@ -1665,6 +1711,33 @@ auto handleSetThermostatSetpoint(sdbus::IProxy& proxy, std::uint8_t& sessionCoun
     catch (const sdbus::Error& err)
     {
         logLine(std::string{"SetThermostatSetpoint failed: "} + err.what());
+    }
+}
+
+auto handleSetThermostatFanMode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    auto mode   = promptByte("Fan mode (0=auto low, 1=low, 2=auto high, 3=high):", BYTE_MIN, BYTE_MAX);
+    auto offVal = promptByte("Fan off? (0=no, 1=yes):", BYTE_MIN, BYTE_MAX);
+    if (!nodeId.has_value() || !mode.has_value() || !offVal.has_value())
+    {
+        logLine("SetThermostatFanMode: cancelled or invalid");
+        return;
+    }
+    const bool off = *offVal != 0;
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetThermostatFanMode")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, *mode, off, sessionCounter);
+        logLine("SetThermostatFanMode node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " mode=" + std::to_string(static_cast<unsigned>(*mode)) + (off ? " off" : "") +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetThermostatFanMode failed: "} + err.what());
     }
 }
 
@@ -2813,6 +2886,9 @@ auto main() -> int
                         {'o',
                          "Thermostat operating state",
                          [&] { handleSimpleGet(*proxy, sessionCounter, "GetThermostatOperatingState"); }},
+                        {'f',
+                         "Thermostat fan mode",
+                         [&] { handleSimpleGet(*proxy, sessionCounter, "GetThermostatFanMode"); }},
                         {'w', "Multilevel switch", [&] { handleGetMultilevelSwitch(*proxy, sessionCounter); }},
                         {'a', "Association members", [&] { handleGetAssociation(*proxy, sessionCounter); }},
                         {'r', "Association groupings", [&] { handleGetAssociationGroupings(*proxy, sessionCounter); }},
@@ -2830,6 +2906,7 @@ auto main() -> int
                         {'c', "Configuration set", [&] { handleSetConfiguration(*proxy, sessionCounter); }},
                         {'t', "Thermostat mode set", [&] { handleSetThermostatMode(*proxy, sessionCounter); }},
                         {'p', "Thermostat setpoint set", [&] { handleSetThermostatSetpoint(*proxy, sessionCounter); }},
+                        {'n', "Thermostat fan mode set", [&] { handleSetThermostatFanMode(*proxy, sessionCounter); }},
                         {'k', "Wake-up interval", [&] { handleSetWakeUpInterval(*proxy, sessionCounter); }},
                         {'a',
                          "Association add",

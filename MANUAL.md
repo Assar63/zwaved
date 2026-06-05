@@ -472,7 +472,7 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 
 Only the v1 Get (primary sensor, no type filter) is implemented;
 `SUPPORTED_GET`/`REPORT` and the v5+ type-filtered Get are not. In the
-terminal, `[t]` issues the Get and reports render as
+terminal, the `[g]` Get submenu → `[s]` issues the Get and reports render as
 `Air temperature=21.5 C`.
 
 ## 11e. Reading notifications (CC 0x71)
@@ -502,7 +502,7 @@ Only the v3 type-scoped Get and the v3+ Report are decoded; the v1 alarm
 Get/Report, `Set`, and `SUPPORTED_GET`/`REPORT` are not. The
 `(notificationType, event)` matrix is large, so the daemon forwards the
 raw triple and leaves interpretation to the client. In the terminal,
-`[k]` issues the Get and reports render as
+the `[g]` Get submenu → `[n]` issues the Get and reports render as
 `NotificationReport node=5 type=0x07 event=0x08 status=0xff`.
 
 ## 11f. Reading a binary sensor (CC 0x30)
@@ -530,7 +530,7 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 Only the v1 Get (primary sensor, no type filter) is implemented; the v2
 type-filtered Get and `SUPPORTED_GET`/`REPORT` are not. The decoder accepts
 both v1 (single value byte) and v2 (value + sensorType) Reports. In the
-terminal, `[h]` issues the Get and reports render as
+terminal, the `[g]` Get submenu → `[i]` issues the Get and reports render as
 `SensorBinaryReport node=5 active`.
 
 ## 11g. Reading a meter (CC 0x32)
@@ -565,8 +565,9 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 
 Only the v3+ Report shape and a v2+ scale-selecting Get are implemented;
 the v4 dual-scale extension, `SUPPORTED_GET`/`REPORT`, and `RESET` are not.
-In the terminal, `[j]` prompts for node + scale, issues the Get, and reports
-render as `MeterReport node=5 electric 12.345 kWh (Δ3600s, prev 12.000)`.
+In the terminal, the `[g]` Get submenu → `[e]` prompts for node + scale,
+issues the Get, and reports render as
+`MeterReport node=5 electric 12.345 kWh (Δ3600s, prev 12.000)`.
 
 ## 11h. Thermostat mode (CC 0x40)
 
@@ -594,8 +595,8 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 The decoder masks the mode byte's low 5 bits (the high 3 bits are a v3
 manufacturer-data-field count) and returns the raw mode; naming is left to
 clients. `SUPPORTED_GET`/`REPORT` are not implemented. In the terminal,
-`[0]` sets the mode and `[y]` gets it; reports render as
-`ThermostatModeReport node=5 mode=heat`.
+the `[c]` Control submenu → `[t]` sets the mode and the `[g]` Get submenu →
+`[t]` gets it; reports render as `ThermostatModeReport node=5 mode=heat`.
 
 ## 11i. Thermostat setpoint (CC 0x43)
 
@@ -629,10 +630,10 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 # → ThermostatSetpointReport y y y y i  5 1 0 1 215   = 21.5 °C heating
 ```
 
-`SUPPORTED_GET`/`REPORT` and `CAPABILITIES_GET` are not implemented. The
-terminal renders inbound reports (`ThermostatSetpointReport node=5 type=1
-21.5 C`); the Set/Get key bindings are deferred until the terminal's
-single-key menu is reworked (it is out of free keys — terminal epic #73).
+`SUPPORTED_GET`/`REPORT` and `CAPABILITIES_GET` are not implemented. In the
+terminal, the `[c]` Control submenu → `[p]` sets a setpoint (prompts node,
+type, precision, scale, value) and the `[g]` Get submenu → `[p]` reads one;
+reports render as `ThermostatSetpointReport node=5 type=1 21.5 C`.
 
 ## 12. Unsolicited node events
 
@@ -922,12 +923,12 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 
 ### In the terminal
 
-`zwave-terminal` drives this interactively: `[p]` view a node's effective
-policy, `[o]` view its override, `[c]` add/update an override entry —
-Configuration, Association, or Wake-Up — (preserves other entries), `[x]`
-delete the override, `[d]` list device policies, and `[e]` author device
-policies (set an entry or delete a whole policy, by manufacturer/type/
-product id).
+`zwave-terminal` drives this interactively under the `[p]` **Policy**
+submenu: `[e]` view a node's effective policy, `[o]` view its override,
+`[s]` add/update an override entry — Configuration, Association, or Wake-Up
+— (preserves other entries), `[d]` delete the override, `[l]` list device
+policies, and `[a]` author device policies (set an entry or delete a whole
+policy, by manufacturer/type/product id).
 
 ## 16c. Node metadata (human labels)
 

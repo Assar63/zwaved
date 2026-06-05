@@ -509,6 +509,19 @@ events:
       - { name: precision,    type: u8,  default: 0 }
       - { name: value,        type: i32, default: 0, doc: "raw; reading = value / 10^precision" }
 
+  - name: ThermostatOperatingStateReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Thermostat Operating State (CC 0x42) Report — what the HVAC is
+      currently doing. Republished by the cc-translator from inbound
+      ApplicationCommand frames whose ccData parses as an Operating State
+      Report. `state`: 0 idle, 1 heating, 2 cooling, 3 fan only, 4 pending
+      heat, 5 pending cool, 6 vent/economizer. Read-only CC (no Set).
+    fields:
+      - { name: sourceNodeId, type: u8, default: 0 }
+      - { name: state,        type: u8, default: 0 }
+
   - name: WakeUpIntervalReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -918,6 +931,14 @@ events:
       - { name: setpointType, type: u8, default: 0 }
       - { name: callbackId,   type: u8, default: 0 }
 
+  - name: GetThermostatOperatingStateCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's current thermostat operating state (read-only CC).
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
   - name: GetBatteryCommand
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
@@ -1320,6 +1341,13 @@ dbus:
         - { name: callbackId,   dbus: y, cpp: u8 }
       action:
         publish: GetThermostatSetpointCommand
+
+    - name: GetThermostatOperatingState
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetThermostatOperatingStateCommand
 
     - name: GetManufacturerSpecific
       params:
@@ -1831,6 +1859,13 @@ dbus:
       triggered_by:
         event: ThermostatSetpointReport
 
+    - name: ThermostatOperatingStateReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: state,        dbus: y, doc: "0 idle, 1 heating, 2 cooling, 3 fan only, …" }
+      triggered_by:
+        event: ThermostatOperatingStateReport
+
     - name: ManufacturerSpecificReport
       params:
         - { name: sourceNodeId,   dbus: y }
@@ -2258,6 +2293,33 @@ modules:
           - { name: precision,    type: u8,  doc: "reading = value / 10^precision" }
           - { name: value,        type: i32, doc: "raw signed target temperature" }
 
+  - name: ThermostatOperatingState
+    wire:
+      class_byte: 0x42
+      prefix: THERMOSTAT_OPERATING_STATE
+    description: |
+      Read-only report of what the HVAC is currently doing. GET takes no
+      payload; REPORT carries a state byte (low 4 bits). state: 0 idle,
+      1 heating, 2 cooling, 3 fan only, 4 pending heat, 5 pending cool,
+      6 vent/economizer. The decoder returns the raw value and leaves
+      naming to clients. Third of the split thermostat quartet (epic #23);
+      no Set (read-only). SUPPORTED_GET/REPORT not implemented.
+    constants:
+      - { name: STATE_IDLE,    value: 0x00 }
+      - { name: STATE_HEATING, value: 0x01 }
+      - { name: STATE_COOLING, value: 0x02 }
+    commands:
+      - name: Get
+        wire:
+          byte: 0x02
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: state, type: u8, doc: "0 idle, 1 heating, 2 cooling, 3 fan only, …" }
+
   - name: Configuration
     wire:
       class_byte: 0x70
@@ -2614,6 +2676,16 @@ translations:
       scale:        decoded.scale
       precision:    decoded.precision
       value:        decoded.value
+
+  - publishes: ThermostatOperatingStateReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: ThermostatOperatingState.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      state:        decoded.state
 
   - publishes: ManufacturerSpecificReport
     triggered_by: ApplicationCommand

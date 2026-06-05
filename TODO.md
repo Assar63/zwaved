@@ -76,7 +76,7 @@ Implementation order (each shippable independently):
 - [ ] [epic: Thermostat HVAC quartet](https://github.com/Assar63/zwaved/issues/23) — split into per-CC subtasks (each an independent slice):
   - [x] **Thermostat Mode (CC `0x40`)** — [#103](https://github.com/Assar63/zwaved/issues/103): `SetThermostatMode(nodeId, mode, callbackId)` + `GetThermostatMode(nodeId, callbackId)` over D-Bus; generated `encodeSet`/`encodeGet`, hand-written `decodeReport` (masks the mode byte's low 5 bits — high 3 are a v3 manufacturer-data count). Republished by the cc-translator as the typed `ThermostatModeReport(y y)` signal. Terminal `[0]` sets / `[y]` gets, rendered with mode names. 5 codec unit tests. **Note:** terminal is now out of single-key bindings (only `[y]`/`[0]` were left) — the remaining quartet CCs need a submenu/rebinding scheme (follow-up under terminal epic #73). SUPPORTED_GET/REPORT deferred.
   - [x] **Thermostat Setpoint (CC `0x43`)** — [#104](https://github.com/Assar63/zwaved/issues/104): `SetThermostatSetpoint(nodeId, setpointType, precision, scale, value, callbackId)` + `GetThermostatSetpoint(nodeId, setpointType, callbackId)` over D-Bus; typed `ThermostatSetpointReport(y y y y i)` signal. **Factored the SDS13781 precision/scale/size value codec into a shared `EncodedValue.{hpp,cpp}` helper** (decode + size-picking encode) and refactored SensorMultilevel (#17) onto it — no more duplicated sign-extension logic. 9 `EncodedValue` + 8 setpoint unit tests. Terminal renders inbound reports; Set/Get key bindings deferred (terminal out of single keys — #73). SUPPORTED_GET/REPORT + CAPABILITIES_GET deferred.
-  - [ ] [Thermostat Operating State (CC 0x42)](https://github.com/Assar63/zwaved/issues/105) — read-only
+  - [x] **Thermostat Operating State (CC `0x42`)** — [#105](https://github.com/Assar63/zwaved/issues/105): read-only; `GetThermostatOperatingState(nodeId, callbackId)` over D-Bus + typed `ThermostatOperatingStateReport(y y)` signal (`state` masked to low 4 bits: 0 idle, 1 heating, 2 cooling, 3 fan only, …). Generated `encodeGet`, hand-written `decodeReport`. Terminal `[g]→[o]` gets it, rendered with state names. 4 codec unit tests. SUPPORTED_GET/REPORT deferred.
   - [ ] [Thermostat Fan Mode (CC 0x44)](https://github.com/Assar63/zwaved/issues/106)
 - [ ] [Door Lock (CC 0x62) + User Code (CC 0x63)](https://github.com/Assar63/zwaved/issues/24)
 - [ ] [Transport Service (CC 0x55)](https://github.com/Assar63/zwaved/issues/25)
@@ -148,6 +148,8 @@ Implementation order (each shippable independently):
 ## zwave-terminal client
 
 > [epic: bring zwave-terminal up to parity with the daemon](https://github.com/Assar63/zwaved/issues/73) — the terminal lags the daemon's grown surface (~11 CCs, error feed, pending queue, orchestrators). Children: #74–#77 below.
+
+- [ ] [Split main.cpp into modules (move-only refactor)](https://github.com/Assar63/zwaved/issues/111) — `main.cpp` is ~2.9k lines; split into `client` / `prompts` / `render` / `signal_handlers` / `handlers` / `policy_blob` / `main` TUs, no behaviour change. Keep the free-functions style (it's a `utils/` tool, not the daemon). Isolate the deliberately-duplicated policy BLOB codec. Do **before** the bulkier terminal items (#76 banner, #48 scenes, #44–#46 windows); the quartet CCs don't force it.
 
 ### Display
 

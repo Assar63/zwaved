@@ -31,6 +31,7 @@ set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/SensorMultilevel.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/SensorBinary.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ThermostatMode.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/ThermostatOperatingState.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
@@ -183,6 +184,20 @@ target_include_directories(ThermostatSetpoint_test PRIVATE
 target_link_libraries(ThermostatSetpoint_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(ThermostatSetpoint_test)
 gtest_discover_tests(ThermostatSetpoint_test)
+
+# ---- ThermostatOperatingState ---------------------------------------
+add_executable(ThermostatOperatingState_test
+    ThermostatOperatingState_test.cpp
+    "${SRC_DIR}/application/ThermostatOperatingState.cpp"
+    "${GENERATED_APPLICATION_DIR}/ThermostatOperatingState.gen.cpp"
+)
+target_include_directories(ThermostatOperatingState_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(ThermostatOperatingState_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(ThermostatOperatingState_test)
+gtest_discover_tests(ThermostatOperatingState_test)
 
 # ---- ManufacturerSpecific -------------------------------------------
 add_executable(ManufacturerSpecific_test

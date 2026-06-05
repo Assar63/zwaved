@@ -278,6 +278,30 @@ auto colorComponentName(std::uint8_t componentId) -> const char*
         return nullptr;
     }
 }
+
+// Central Scene (CC 0x5B) key-attribute name; nullptr when unknown.
+auto centralSceneKeyName(std::uint8_t keyAttribute) -> const char*
+{
+    switch (keyAttribute)
+    {
+    case 0:
+        return "press 1x";
+    case 1:
+        return "release";
+    case 2:
+        return "hold";
+    case 3:
+        return "press 2x";
+    case 4:
+        return "press 3x";
+    case 5:
+        return "press 4x";
+    case 6:
+        return "press 5x";
+    default:
+        return nullptr;
+    }
+}
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 
 /// Z-Wave Command Class human-readable names. Covers the most commonly

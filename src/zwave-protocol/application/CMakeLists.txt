@@ -50,6 +50,7 @@ target_sources(zwaved PRIVATE
     Notification.cpp
     Meter.cpp
     ColorSwitch.cpp
+    CentralScene.cpp
     ThermostatMode.cpp
     ThermostatSetpoint.cpp
     ThermostatOperatingState.cpp

@@ -300,6 +300,20 @@ target_link_libraries(ColorSwitch_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(ColorSwitch_test)
 gtest_discover_tests(ColorSwitch_test)
 
+# ---- CentralScene ---------------------------------------------------
+# No .gen.cpp (push-only; decode-only, no encoders).
+add_executable(CentralScene_test
+    CentralScene_test.cpp
+    "${SRC_DIR}/application/CentralScene.cpp"
+)
+target_include_directories(CentralScene_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(CentralScene_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(CentralScene_test)
+gtest_discover_tests(CentralScene_test)
+
 # ---- Meter ----------------------------------------------------------
 # Note: Meter has no .gen.cpp (the Get carries a scale arg, so the encoder
 # is hand-written), so the test links only the hand-written Meter.cpp.

@@ -545,6 +545,30 @@ target_link_libraries(WakeUpOrchestrator_test PRIVATE
 zwaved_test_target(WakeUpOrchestrator_test)
 gtest_discover_tests(WakeUpOrchestrator_test)
 
+# ---- SceneOrchestrator ----------------------------------------------
+add_executable(SceneOrchestrator_test
+    SceneOrchestrator_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/orchestrator/SceneOrchestrator.cpp"
+    "${CMAKE_SOURCE_DIR}/src/scene-store/SceneStore.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
+    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
+)
+target_include_directories(SceneOrchestrator_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/scene-store"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(SceneOrchestrator_test zwaved_codegen)
+target_link_libraries(SceneOrchestrator_test PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    PkgConfig::SQLITE3
+    eventpp::eventpp
+)
+zwaved_test_target(SceneOrchestrator_test)
+gtest_discover_tests(SceneOrchestrator_test)
+
 # ---- InclusionOrchestrator ------------------------------------------
 # Bus-driven: publishes NodeIncluded, asserts on the lifeline + policy
 # command sequence. Links the orchestrator (armed by its constructor),

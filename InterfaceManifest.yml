@@ -646,6 +646,23 @@ events:
     fields:
       - { name: nodeId, type: u8, default: 0 }
 
+  - name: SceneActivated
+    category: transient
+    direction: { publishers: [orchestrator], subscribers: [external-api] }
+    doc: |
+      SceneOrchestrator (#121) ran a scene in response to a physical press.
+      A CentralSceneNotification `(sourceNodeId, sceneNumber, keyAttribute)`
+      resolved to scene `sceneId` in the scene store (#120); the
+      orchestrator replayed its `actionCount` actions as SendData commands.
+      Observability only (and the hook the terminal renders). Not published
+      when a press resolves to no scene.
+    fields:
+      - { name: sourceNodeId, type: u8,     default: 0 }
+      - { name: sceneNumber,  type: u8,     default: 0 }
+      - { name: keyAttribute, type: u8,     default: 0 }
+      - { name: sceneId,      type: string }
+      - { name: actionCount,  type: u32,    default: 0 }
+
   - name: ConfigurationReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api, orchestrator] }

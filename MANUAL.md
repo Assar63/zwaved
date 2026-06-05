@@ -635,6 +635,30 @@ terminal, the `[c]` Control submenu → `[p]` sets a setpoint (prompts node,
 type, precision, scale, value) and the `[g]` Get submenu → `[p]` reads one;
 reports render as `ThermostatSetpointReport node=5 type=1 21.5 C`.
 
+## 11j. Thermostat operating state (CC 0x42)
+
+The Thermostat Operating State Command Class is a **read-only** report of
+what the HVAC is currently doing. `GetThermostatOperatingState(nodeId,
+callbackId)` polls it; the reply and any unsolicited Reports arrive as the
+typed `ThermostatOperatingStateReport(y y)` signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the reporting node |
+| `state` | `y` | 0 idle, 1 heating, 2 cooling, 3 fan only, 4 pending heat, 5 pending cool, 6 vent/economizer |
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetThermostatOperatingState yy 5 7
+# → ThermostatOperatingStateReport y y  5 1   = node 5 heating
+```
+
+There is no Set (the state reflects the device, not a command). The decoder
+masks the low 4 bits and returns the raw state; naming is left to clients.
+`SUPPORTED_GET`/`REPORT` are not implemented. In the terminal, the `[g]` Get
+submenu → `[o]` reads it; reports render as
+`ThermostatOperatingStateReport node=5 state=heating`.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

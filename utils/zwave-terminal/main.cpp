@@ -749,6 +749,30 @@ auto thermostatModeName(std::uint8_t mode) -> const char*
         return nullptr;
     }
 }
+
+// Thermostat Operating State (CC 0x42) name; nullptr when unknown.
+auto thermostatOperatingStateName(std::uint8_t state) -> const char*
+{
+    switch (state)
+    {
+    case 0:
+        return "idle";
+    case 1:
+        return "heating";
+    case 2:
+        return "cooling";
+    case 3:
+        return "fan only";
+    case 4:
+        return "pending heat";
+    case 5:
+        return "pending cool";
+    case 6:
+        return "vent/economizer";
+    default:
+        return nullptr;
+    }
+}
 // NOLINTEND(cppcoreguidelines-avoid-magic-numbers)
 
 // NOLINTBEGIN(readability-function-cognitive-complexity): flat list of signal subscriptions
@@ -1018,8 +1042,26 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
-    // Display only — Set/Get key bindings are deferred until the terminal's
-    // single-key menu is reworked (out of free keys; terminal epic #73).
+    proxy.uponSignal("ThermostatOperatingStateReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId, std::uint8_t state) -> void
+            {
+                std::ostringstream stream;
+                stream << "ThermostatOperatingStateReport node=" << static_cast<unsigned>(sourceNodeId) << " state=";
+                if (const char* name = thermostatOperatingStateName(state); name != nullptr)
+                {
+                    stream << name;
+                }
+                else
+                {
+                    stream << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(state)
+                           << std::dec;
+                }
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("ThermostatSetpointReport")
         .onInterface(IFACE_NAME)
         .call(
@@ -2768,6 +2810,9 @@ auto main() -> int
                         {'n', "Notification", [&] { handleGetNotification(*proxy, sessionCounter); }},
                         {'t', "Thermostat mode", [&] { handleSimpleGet(*proxy, sessionCounter, "GetThermostatMode"); }},
                         {'p', "Thermostat setpoint", [&] { handleGetThermostatSetpoint(*proxy, sessionCounter); }},
+                        {'o',
+                         "Thermostat operating state",
+                         [&] { handleSimpleGet(*proxy, sessionCounter, "GetThermostatOperatingState"); }},
                         {'w', "Multilevel switch", [&] { handleGetMultilevelSwitch(*proxy, sessionCounter); }},
                         {'a', "Association members", [&] { handleGetAssociation(*proxy, sessionCounter); }},
                         {'r', "Association groupings", [&] { handleGetAssociationGroupings(*proxy, sessionCounter); }},

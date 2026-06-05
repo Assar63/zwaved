@@ -33,6 +33,8 @@ set_source_files_properties(
     "${GENERATED_APPLICATION_DIR}/ThermostatMode.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ThermostatOperatingState.gen.cpp"
     "${GENERATED_APPLICATION_DIR}/ThermostatFanMode.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/DoorLock.gen.cpp"
+    "${GENERATED_APPLICATION_DIR}/UserCode.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
@@ -313,6 +315,34 @@ target_include_directories(CentralScene_test PRIVATE
 target_link_libraries(CentralScene_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(CentralScene_test)
 gtest_discover_tests(CentralScene_test)
+
+# ---- DoorLock -------------------------------------------------------
+add_executable(DoorLock_test
+    DoorLock_test.cpp
+    "${SRC_DIR}/application/DoorLock.cpp"
+    "${GENERATED_APPLICATION_DIR}/DoorLock.gen.cpp"
+)
+target_include_directories(DoorLock_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(DoorLock_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(DoorLock_test)
+gtest_discover_tests(DoorLock_test)
+
+# ---- UserCode -------------------------------------------------------
+add_executable(UserCode_test
+    UserCode_test.cpp
+    "${SRC_DIR}/application/UserCode.cpp"
+    "${GENERATED_APPLICATION_DIR}/UserCode.gen.cpp"
+)
+target_include_directories(UserCode_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(UserCode_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(UserCode_test)
+gtest_discover_tests(UserCode_test)
 
 # ---- Meter ----------------------------------------------------------
 # Note: Meter has no .gen.cpp (the Get carries a scale arg, so the encoder

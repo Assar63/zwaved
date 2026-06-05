@@ -16,6 +16,7 @@
 #include "application/BinarySwitch.hpp"
 #include "application/ColorSwitch.hpp"
 #include "application/Configuration.hpp"
+#include "application/DoorLock.hpp"
 #include "application/ManufacturerSpecific.hpp"
 #include "application/Meter.hpp"
 #include "application/MultichannelAssociation.hpp"
@@ -28,6 +29,7 @@
 #include "application/ThermostatMode.hpp"
 #include "application/ThermostatOperatingState.hpp"
 #include "application/ThermostatSetpoint.hpp"
+#include "application/UserCode.hpp"
 #include "application/WakeUp.hpp"
 #include "application/ZWavePlusInfo.hpp"
 
@@ -337,6 +339,31 @@ auto onSetColorSwitch(const MessageBus::SetColorSwitchCommand& cmd) -> void
 auto onGetColorSwitch(const MessageBus::GetColorSwitchCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, ColorSwitch::encodeGet(cmd.componentId));
+}
+
+auto onSetDoorLock(const MessageBus::SetDoorLockCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, DoorLock::encodeSet(cmd.mode));
+}
+
+auto onGetDoorLock(const MessageBus::GetDoorLockCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, DoorLock::encodeGet());
+}
+
+auto onSetUserCode(const MessageBus::SetUserCodeCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, UserCode::encodeSet(cmd.userIdentifier, cmd.userIdStatus, cmd.userCode));
+}
+
+auto onGetUserCode(const MessageBus::GetUserCodeCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, UserCode::encodeGet(cmd.userIdentifier));
+}
+
+auto onGetUserCodeCount(const MessageBus::GetUserCodeCountCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, UserCode::encodeUsersNumberGet());
 }
 
 auto onSetThermostatMode(const MessageBus::SetThermostatModeCommand& cmd) -> void
@@ -1061,7 +1088,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 42;
+constexpr std::size_t SUBSCRIPTION_COUNT = 47;
 
 auto subscribeBus() -> void
 {
@@ -1085,6 +1112,11 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetMeterCommand>(onGetMeter);
     subscribe<MessageBus::SetColorSwitchCommand>(onSetColorSwitch);
     subscribe<MessageBus::GetColorSwitchCommand>(onGetColorSwitch);
+    subscribe<MessageBus::SetDoorLockCommand>(onSetDoorLock);
+    subscribe<MessageBus::GetDoorLockCommand>(onGetDoorLock);
+    subscribe<MessageBus::SetUserCodeCommand>(onSetUserCode);
+    subscribe<MessageBus::GetUserCodeCommand>(onGetUserCode);
+    subscribe<MessageBus::GetUserCodeCountCommand>(onGetUserCodeCount);
     subscribe<MessageBus::SetThermostatModeCommand>(onSetThermostatMode);
     subscribe<MessageBus::GetThermostatModeCommand>(onGetThermostatMode);
     subscribe<MessageBus::SetThermostatSetpointCommand>(onSetThermostatSetpoint);

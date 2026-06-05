@@ -756,6 +756,53 @@ Configuration triplet are deferred. The terminal renders these in the
 activity pane (`CentralSceneNotification node=5 scene=1 press 1x seq=10`);
 there is no key binding because the daemon can't initiate them.
 
+## 11n. Door lock + user code (CC 0x62 / 0x63)
+
+Locks pair two CCs: **Door Lock** (lock/unlock + state) and **User Code**
+(per-slot PINs).
+
+> ⚠️ Almost every real lock requires **Security S0 or S2** transport
+> (CC 0x98 / 0x9F, not yet implemented). These methods exercise the
+> *unencrypted* wire shape — useful for tests and S2-capable test rigs, but
+> a production lock will ignore unencrypted Door Lock / User Code frames
+> until the security epics land.
+
+### Door Lock (0x62)
+
+`SetDoorLock(nodeId, mode, callbackId)` sets the lock; `GetDoorLock(nodeId,
+callbackId)` reads it. Reports arrive as `DoorLockOperationReport(y y y y y y
+y y)` = sourceNodeId, currentMode, handlesMode, condition,
+lockTimeoutMinutes, lockTimeoutSeconds, targetMode (v4+), duration (v4+).
+`mode`/`currentMode`: 0x00 unsecured, 0x01 unsecured w/ timeout, 0x10
+inside-handles, 0x11 inside-handles w/ timeout, 0xFF secured.
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetDoorLock yyy 5 255 7   # 0xFF = secured
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetDoorLock yy 5 8
+```
+
+### User Code (0x63)
+
+`SetUserCode(nodeId, userIdentifier, userIdStatus, userCode, callbackId)`
+writes a slot (`userCode` is the raw 4–10 ASCII digits as `ay`; status 0x00
+available/clear, 0x01 enabled). `GetUserCode(nodeId, userIdentifier,
+callbackId)` reads one slot → `UserCodeReport(y y y ay)`.
+`GetUserCodeCount(nodeId, callbackId)` → `UserCodeUsersNumberReport(y y)`
+(how many slots the lock has).
+
+```bash
+# set slot 2 to PIN "1234" (0x31 0x32 0x33 0x34), enabled
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetUserCode yyyayy 5 2 1 4 0x31 0x32 0x33 0x34 7
+```
+
+Door Lock CONFIGURATION (auto-relock) and User Code v2 extended fields are
+deferred. In the terminal, the `[c]` Control submenu has `[d]` Door lock set
+and `[u]` User code set; the `[g]` Get submenu has `[d]` Door lock, `[u]`
+User code, and `[x]` User code slot count.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

@@ -795,6 +795,46 @@ events:
       - { name: sceneNumber,    type: u8,   default: 0 }
       - { name: slowRefresh,    type: bool, default: false }
 
+  - name: DoorLockOperationReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Door Lock (CC 0x62) Operation Report. Republished by the
+      cc-translator from inbound ApplicationCommand frames whose ccData
+      parses as a Door Lock Operation Report. currentMode: 0x00 unsecured,
+      0x01 unsecured w/ timeout, 0x10 inside-handles, 0x11 inside-handles w/
+      timeout, 0xFF secured. v4+ adds targetMode + duration (0 otherwise).
+    fields:
+      - { name: sourceNodeId,       type: u8, default: 0 }
+      - { name: currentMode,        type: u8, default: 0 }
+      - { name: handlesMode,        type: u8, default: 0 }
+      - { name: condition,          type: u8, default: 0 }
+      - { name: lockTimeoutMinutes, type: u8, default: 0 }
+      - { name: lockTimeoutSeconds, type: u8, default: 0 }
+      - { name: targetMode,         type: u8, default: 0 }
+      - { name: duration,           type: u8, default: 0 }
+
+  - name: UserCodeReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed User Code (CC 0x63) Report for one slot. userIdStatus: 0x00
+      available (no code), 0x01 enabled/occupied, 0xFE not-available. The
+      userCode is the raw 4–10 ASCII digits (empty when the slot is free).
+    fields:
+      - { name: sourceNodeId,   type: u8,    default: 0 }
+      - { name: userIdentifier, type: u8,    default: 0 }
+      - { name: userIdStatus,   type: u8,    default: 0 }
+      - { name: userCode,       type: bytes }
+
+  - name: UserCodeUsersNumberReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: Typed User Code (CC 0x63) Users-Number Report — how many code slots the lock has.
+    fields:
+      - { name: sourceNodeId,   type: u8, default: 0 }
+      - { name: supportedUsers, type: u8, default: 0 }
+
   # ---- 2d. Command events (D-Bus → ProtocolThread) ----------------
   # External transports translate semantic D-Bus calls into one of
   # these and publish; ProtocolThread subscribes and dispatches.
@@ -904,6 +944,54 @@ events:
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
     doc: Query a node's Multilevel Switch value.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: SetDoorLockCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: "Send a Door Lock (CC 0x62) Operation Set. mode: 0x00 unsecured, 0xFF secured, …"
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: mode,       type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetDoorLockCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's Door Lock operation state.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: SetUserCodeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Send a User Code (CC 0x63) Set for one slot. `userCode` is the raw
+      4–10 ASCII digits; `userIdStatus` 0x00 available (clears the slot),
+      0x01 enabled/occupied.
+    fields:
+      - { name: nodeId,         type: u8,    default: 0 }
+      - { name: userIdentifier, type: u8,    default: 0 }
+      - { name: userIdStatus,   type: u8,    default: 0 }
+      - { name: userCode,       type: bytes }
+      - { name: callbackId,     type: u8,    default: 0 }
+
+  - name: GetUserCodeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query one User Code slot.
+    fields:
+      - { name: nodeId,         type: u8, default: 0 }
+      - { name: userIdentifier, type: u8, default: 0 }
+      - { name: callbackId,     type: u8, default: 0 }
+
+  - name: GetUserCodeCountCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query how many User Code slots a lock supports (USERS_NUMBER_GET).
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
@@ -1379,6 +1467,46 @@ dbus:
         - { name: callbackId,  dbus: y, cpp: u8 }
       action:
         publish: GetColorSwitchCommand
+
+    - name: SetDoorLock
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: mode,       dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: SetDoorLockCommand
+
+    - name: GetDoorLock
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetDoorLockCommand
+
+    - name: SetUserCode
+      params:
+        - { name: nodeId,         dbus: y,  cpp: u8 }
+        - { name: userIdentifier, dbus: y,  cpp: u8 }
+        - { name: userIdStatus,   dbus: y,  cpp: u8 }
+        - { name: userCode,       dbus: ay, cpp: bytes, doc: "raw 4-10 ASCII digits" }
+        - { name: callbackId,     dbus: y,  cpp: u8 }
+      action:
+        publish: SetUserCodeCommand
+
+    - name: GetUserCode
+      params:
+        - { name: nodeId,         dbus: y, cpp: u8 }
+        - { name: userIdentifier, dbus: y, cpp: u8 }
+        - { name: callbackId,     dbus: y, cpp: u8 }
+      action:
+        publish: GetUserCodeCommand
+
+    - name: GetUserCodeCount
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetUserCodeCountCommand
 
     - name: GetBattery
       params:
@@ -1937,6 +2065,35 @@ dbus:
       triggered_by:
         event: CentralSceneNotification
 
+    - name: DoorLockOperationReport
+      params:
+        - { name: sourceNodeId,       dbus: y }
+        - { name: currentMode,        dbus: y, doc: "0x00 unsecured, 0xFF secured, 0x01/0x10/0x11 timeout/handles" }
+        - { name: handlesMode,        dbus: y, doc: "inside/outside door-handle mode bitfield" }
+        - { name: condition,          dbus: y, doc: "door/bolt/latch condition flags" }
+        - { name: lockTimeoutMinutes, dbus: y, doc: "0xFE = not supported" }
+        - { name: lockTimeoutSeconds, dbus: y, doc: "0xFE = not supported" }
+        - { name: targetMode,         dbus: y, doc: "v4+ transition target (0 otherwise)" }
+        - { name: duration,           dbus: y, doc: "v4+ transition duration (0 otherwise)" }
+      triggered_by:
+        event: DoorLockOperationReport
+
+    - name: UserCodeReport
+      params:
+        - { name: sourceNodeId,   dbus: y }
+        - { name: userIdentifier, dbus: y, doc: "slot number" }
+        - { name: userIdStatus,   dbus: y, doc: "0x00 available, 0x01 enabled, 0xFE not-available" }
+        - { name: userCode,       dbus: ay, doc: "raw 4-10 ASCII digits; empty when slot free" }
+      triggered_by:
+        event: UserCodeReport
+
+    - name: UserCodeUsersNumberReport
+      params:
+        - { name: sourceNodeId,   dbus: y }
+        - { name: supportedUsers, dbus: y, doc: "number of code slots the lock has" }
+      triggered_by:
+        event: UserCodeUsersNumberReport
+
     - name: BatteryReport
       params:
         - { name: sourceNodeId, dbus: y }
@@ -2274,6 +2431,91 @@ modules:
           - { name: keyAttribute,   type: u8,   doc: "0 press1x, 1 release, 2 hold, 3 press2x, …" }
           - { name: sceneNumber,    type: u8 }
           - { name: slowRefresh,    type: bool, doc: "v2+ slow-refresh flag (bit 7 of properties)" }
+
+  - name: DoorLock
+    wire:
+      class_byte: 0x62
+      prefix: DOOR_LOCK
+    description: |
+      Door lock operation. OPERATION_SET takes a single mode byte;
+      OPERATION_REPORT carries the current mode + door-handle mode +
+      condition + lock-timeout, and (v4+) a target mode + duration. mode:
+      0x00 unsecured, 0x01 unsecured w/ timeout, 0x10 inside-handles, 0x11
+      inside-handles w/ timeout, 0xFF secured. The Configuration triplet
+      (auto-relock) is deferred. Almost every real lock requires Security
+      S0/S2 transport (#26/#27) — this codec exercises the unencrypted wire
+      shape; on-device proof is gated on the security epics.
+    constants:
+      - { name: MODE_UNSECURED, value: 0x00 }
+      - { name: MODE_SECURED,   value: 0xFF }
+    commands:
+      - name: Set
+        wire:
+          byte: 0x01
+          payload:
+            - "mode"
+        encode_args:
+          - { name: mode, type: u8 }
+      - name: Get
+        wire:
+          byte: 0x02
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: currentMode,        type: u8 }
+          - { name: handlesMode,        type: u8 }
+          - { name: condition,          type: u8 }
+          - { name: lockTimeoutMinutes, type: u8 }
+          - { name: lockTimeoutSeconds, type: u8 }
+          - { name: targetMode,         type: u8, doc: "v4+ (0 otherwise)" }
+          - { name: duration,           type: u8, doc: "v4+ (0 otherwise)" }
+
+  - name: UserCode
+    wire:
+      class_byte: 0x63
+      prefix: USER_CODE
+    description: |
+      Per-slot PIN management for locks. SET writes a slot's
+      (userIdStatus, userCode); GET reads one slot; REPORT carries the
+      slot's status + code. USERS_NUMBER_GET/REPORT report how many slots
+      the lock has. SET carries a variable-length ASCII code, so its encoder
+      is hand-written in UserCode.cpp; GET and USERS_NUMBER_GET are
+      generated. Like Door Lock, real devices require Security S0/S2.
+    constants:
+      - { name: STATUS_AVAILABLE,     value: 0x00 }
+      - { name: STATUS_OCCUPIED,      value: 0x01 }
+      - { name: STATUS_NOT_AVAILABLE, value: 0xFE }
+    commands:
+      - name: Set
+        wire:
+          byte: 0x01
+      - name: Get
+        wire:
+          byte: 0x02
+          payload:
+            - "userIdentifier"
+        encode_args:
+          - { name: userIdentifier, type: u8 }
+      - name: Report
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: userIdentifier, type: u8 }
+          - { name: userIdStatus,   type: u8 }
+          - { name: userCode,       type: bytes }
+      - name: UsersNumberGet
+        wire:
+          byte: 0x04
+          payload: []
+        encode_args: []
+      - name: UsersNumberReport
+        wire:
+          byte: 0x05
+        decoded_struct:
+          - { name: supportedUsers, type: u8 }
 
   - name: Battery
     wire:
@@ -2870,6 +3112,44 @@ translations:
       keyAttribute:   decoded.keyAttribute
       sceneNumber:    decoded.sceneNumber
       slowRefresh:    decoded.slowRefresh
+
+  - publishes: DoorLockOperationReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: DoorLock.decodeOperationReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:       event.sourceNodeId
+      currentMode:        decoded.currentMode
+      handlesMode:        decoded.handlesMode
+      condition:          decoded.condition
+      lockTimeoutMinutes: decoded.lockTimeoutMinutes
+      lockTimeoutSeconds: decoded.lockTimeoutSeconds
+      targetMode:         decoded.targetMode
+      duration:           decoded.duration
+
+  - publishes: UserCodeReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: UserCode.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:   event.sourceNodeId
+      userIdentifier: decoded.userIdentifier
+      userIdStatus:   decoded.userIdStatus
+      userCode:       decoded.userCode
+
+  - publishes: UserCodeUsersNumberReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: UserCode.decodeUsersNumberReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:   event.sourceNodeId
+      supportedUsers: decoded.supportedUsers
 
   - publishes: BatteryReport
     triggered_by: ApplicationCommand

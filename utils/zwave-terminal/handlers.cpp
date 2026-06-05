@@ -262,6 +262,85 @@ auto handleSetColorSwitch(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) ->
     }
 }
 
+auto handleSetDoorLock(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    auto mode   = promptByte("Lock mode (0x00 unsecured, 0xFF secured):", BYTE_MIN, BYTE_MAX);
+    if (!nodeId.has_value() || !mode.has_value())
+    {
+        logLine("SetDoorLock: cancelled or invalid");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetDoorLock").onInterface(IFACE_NAME).withArguments(*nodeId, *mode, sessionCounter);
+        logLine("SetDoorLock node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " mode=" + std::to_string(static_cast<unsigned>(*mode)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetDoorLock failed: "} + err.what());
+    }
+}
+
+auto handleGetUserCode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("GetUserCode: cancelled or invalid node id");
+        return;
+    }
+    auto slot = promptByte("User code slot (1-255):", BYTE_MIN, BYTE_MAX);
+    if (!slot.has_value())
+    {
+        logLine("GetUserCode: cancelled or invalid slot");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("GetUserCode").onInterface(IFACE_NAME).withArguments(*nodeId, *slot, sessionCounter);
+        logLine("GetUserCode node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " slot=" + std::to_string(static_cast<unsigned>(*slot)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetUserCode failed: "} + err.what());
+    }
+}
+
+auto handleSetUserCode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    auto slot   = promptByte("User code slot (1-255):", BYTE_MIN, BYTE_MAX);
+    auto status = promptByte("Status (0x00 available/clear, 0x01 enabled):", BYTE_MIN, BYTE_MAX);
+    auto code   = promptLine("Code (4-10 digits; blank to clear):");
+    if (!nodeId.has_value() || !slot.has_value() || !status.has_value() || !code.has_value())
+    {
+        logLine("SetUserCode: cancelled or invalid");
+        return;
+    }
+    const std::vector<std::uint8_t> codeBytes(code->begin(), code->end());
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetUserCode")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, *slot, *status, codeBytes, sessionCounter);
+        logLine("SetUserCode node=" + std::to_string(static_cast<unsigned>(*nodeId)) + " slot=" +
+                std::to_string(static_cast<unsigned>(*slot)) + " codeLen=" + std::to_string(codeBytes.size()) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetUserCode failed: "} + err.what());
+    }
+}
+
 // ---- Node control for non-binary CCs (#47) --------------------------
 // Drive the daemon's Set methods for CCs beyond binary switch. Each is a
 // fire-and-forget SendData; completion arrives as SendDataStatus and any

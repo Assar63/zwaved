@@ -1194,7 +1194,8 @@ auto zwaveCommunicationThread() -> void
             MessageBus::publish(MessageBus::DaemonError{});
             const auto& info = *introspection.dongleInfo;
             Logger::info("[ProtocolThread] dongle " + info.libraryVersion + " (lib type " +
-                         std::to_string(static_cast<int>(info.libraryType)) + ", controller node " +
+                         std::to_string(static_cast<int>(info.libraryType)) + " " +
+                         HostApi::libraryTypeName(info.libraryType) + ", controller node " +
                          std::to_string(static_cast<int>(info.controllerNodeId)) + ")");
             state().controllerNodeId = info.controllerNodeId;
             // Bind the registry to this network *before* seeding from

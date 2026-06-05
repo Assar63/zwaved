@@ -261,6 +261,31 @@ auto HostApi::decodeVersion(const ZwaveDataFrame& frame) -> std::optional<Versio
     return out;
 }
 
+auto HostApi::libraryTypeName(uint8_t libraryType) -> const char*
+{
+    switch (libraryType)
+    {
+    case LIBRARY_TYPE_STATIC_CONTROLLER:
+        return "Static Controller";
+    case LIBRARY_TYPE_CONTROLLER:
+        return "Controller";
+    case LIBRARY_TYPE_ENHANCED_SLAVE:
+        return "Enhanced Slave";
+    case LIBRARY_TYPE_SLAVE:
+        return "Slave";
+    case LIBRARY_TYPE_INSTALLER:
+        return "Installer";
+    case LIBRARY_TYPE_ROUTING_SLAVE:
+        return "Routing Slave";
+    case LIBRARY_TYPE_BRIDGE_CONTROLLER:
+        return "Bridge Controller";
+    case LIBRARY_TYPE_DUT:
+        return "DUT";
+    default:
+        return "unknown";
+    }
+}
+
 auto HostApi::decodeInitData(const ZwaveDataFrame& frame) -> std::optional<InitDataResponse>
 {
     if (!frame.isValid() || frame.getCommand() != CMD_SERIAL_API_GET_INIT_DATA ||

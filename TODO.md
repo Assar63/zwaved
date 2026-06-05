@@ -4,6 +4,11 @@ Working notes on what's coming next for the zwaved daemon, the
 companion `zwave-terminal` client, and packaging.
 
 > Legend: `[ ]` open · `[x]` done
+>
+> Active / near-term work only. Exploratory and longer-horizon ideas — the
+> active-component epics (virtual nodes / scene controller / thermostat
+> management) and the "unlikely" backlog (OTA, metrics, fuzzing, …) — live in
+> `FUTURE.md`.
 
 ---
 
@@ -47,7 +52,7 @@ Implementation order (each shippable independently):
 
 ### Closed-loop automation (epic)
 
-> [epic: daemon-side closed-loop automation](https://github.com/Assar63/zwaved/issues/101) — behaviour where the daemon *reacts* to node events by *driving* other nodes/CCs, beyond today's open-loop "client Sets, node Reports" model. Raised by the HVAC quartet (#23): grouping CCs does **not** justify an orchestrator, but genuine closed-loop logic does. CC vertical slices stay open-loop and independent; aggregated read-models are a **client** concern; cross-CC validity is **device**-enforced. Candidate children (each ships independently): **PolicyRegister desired-state entries** (setpoint/mode entries the existing Inclusion/WakeUp orchestrators re-assert — do-first, open-loop), **verify-after-set** (Set→Get→compare→retry), **event-triggered cross-node reactions** (e.g. window-contact open → thermostat off — the textbook orchestrator case), **set/level coalescing**, and **schedules/setback** (likely its own epic when reached). Orchestrators stay in `src/orchestrator/` (prio 204, no thread, bus-only).
+> [epic: daemon-side closed-loop automation](https://github.com/Assar63/zwaved/issues/101) — daemon *reacts* to node events by *driving* other nodes/CCs (PolicyRegister desired-state re-assertion, verify-after-set, event-triggered cross-node reactions, set/level coalescing, schedules). Orchestrators stay in `src/orchestrator/` (prio 204, bus-only). Full rationale in the issue; broader design context in `FUTURE.md`.
 
 ### Command classes
 
@@ -86,9 +91,6 @@ Implementation order (each shippable independently):
 - [ ] [Security S0 (CC 0x98)](https://github.com/Assar63/zwaved/issues/26)
 - [ ] [Security S2 (CC 0x9F)](https://github.com/Assar63/zwaved/issues/27)
 - [ ] [CRC-16 Encapsulation (CC 0x56)](https://github.com/Assar63/zwaved/issues/28)
-
-- [ ] [Virtual nodes](https://github.com/Assar63/zwaved/issues/29)
-- [ ] [Scene controller thread](https://github.com/Assar63/zwaved/issues/30)
 
 ### Persistence & configuration
 
@@ -175,21 +177,6 @@ Implementation order (each shippable independently):
 - [x] **Policy CRUD UI (read + node config override)** — [#77](https://github.com/Assar63/zwaved/issues/77): `[p]` view effective policy, `[o]` view node override, `[c]` add/update a Configuration entry in a node override (edit-in-place — preserves other entries), `[x]` delete node override, `[d]` list device policies. Policy BLOB codec reimplemented locally (terminal stays a standalone D-Bus client). 
 - [x] **Device-policy authoring + assoc/wake-up override builders** — [#80](https://github.com/Assar63/zwaved/issues/80): `[c]` now sets any node-override entry kind (Configuration / Association / Wake-Up) via an entry-kind prompt, edit-in-place; new `[e]` authors device policies (set an entry or delete a whole policy, prompting the manufacturer/type/product triple — hex or decimal). Shared `promptPolicyEntry` / `applyEntryToBlob` helpers across both flows.
 - [x] **Modal submenu rework (key exhaustion)** — [#109](https://github.com/Assar63/zwaved/issues/109): the flat single-key menu was out of keys (Thermostat Mode #107 took the last two). Collapsed the per-CC and policy actions into three modal submenus via a generic `runActionMenu(title, items)` helper — `[g]` Get from node, `[c]` Control/set on node, `[p]` Policy — leaving only lifecycle/status/lifeline/stop at top level. Adding a CC is now "append one item to a submenu vector". Also landed the **Thermostat Setpoint Set/Get terminal controls** deferred from #104/#108 (`[c]→[p]` set, `[g]→[p]` get).
-
----
-
-## Future / unlikely
-
-Tracked for completeness; each item below is either niche, very large,
-or both, and has no concrete bench device or use case demanding it
-today. Move an item up into the main sections if a real need shows up.
-
-- [ ] [OTA firmware update of nodes (Firmware Update Meta Data CC 0x7A)](https://github.com/Assar63/zwaved/issues/49)
-- [ ] [OTW firmware update of the dongle itself](https://github.com/Assar63/zwaved/issues/50)
-- [ ] [800-series silicon + Z-Wave Long Range](https://github.com/Assar63/zwaved/issues/51)
-- [ ] [Audit log of administrative D-Bus calls](https://github.com/Assar63/zwaved/issues/52)
-- [ ] [Metrics / Prometheus exporter](https://github.com/Assar63/zwaved/issues/53)
-- [ ] [Fuzzing the frame parser and ApplicationCommand decoder](https://github.com/Assar63/zwaved/issues/54)
 
 ---
 

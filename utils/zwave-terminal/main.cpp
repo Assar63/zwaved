@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <ctime>
 #include <deque>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -510,6 +511,45 @@ auto promptNodeList(const char* label) -> std::optional<std::vector<std::uint8_t
     return members;
 }
 
+// One entry in a modal submenu: a trigger key, a label, and the action to
+// run when chosen.
+struct MenuItem
+{
+    char key;
+    std::string label;
+    std::function<void()> action;
+};
+
+// Render a modal submenu overlay, block for a key, and run the matching
+// action. Any unmatched key (including Esc) cancels. Keeps each submenu's
+// key namespace independent of the top-level menu, so adding a CC is just
+// appending an item — no more single-key exhaustion (#109).
+auto runActionMenu(const char* title, const std::vector<MenuItem>& items) -> void
+{
+    erase();
+    int row = 0;
+    mvprintw(row++, 0, " %s  —  press a key (any other to cancel)", title);
+    mvhline(row++, 0, '-', getmaxx(stdscr));
+    for (const auto& item : items)
+    {
+        mvprintw(row++, 0, "  [%c] %s", item.key, item.label.c_str());
+    }
+    refresh();
+
+    timeout(-1);  // blocking
+    const int key = getch();
+    timeout(UI_REFRESH_MS);
+
+    for (const auto& item : items)
+    {
+        if (item.key == key)
+        {
+            item.action();
+            return;
+        }
+    }
+}
+
 auto draw(std::uint8_t lastSession) -> void
 {
     erase();
@@ -565,31 +605,11 @@ auto draw(std::uint8_t lastSession) -> void
     }
     mvhline(row++, 0, '-', getmaxx(stdscr));
 
-    mvprintw(row++, 0, "  [1] Add zwave node");
-    mvprintw(row++, 0, "  [2] Remove zwave node");
-    mvprintw(row++, 0, "  [3] Switch binary ON  (prompts for node id)");
-    mvprintw(row++, 0, "  [4] Switch binary OFF (prompts for node id)");
-    mvprintw(row++, 0, "  [5] Switch multilevel set (prompts for node, level, duration)");
-    mvprintw(row++, 0, "  [6] Switch multilevel get (prompts for node id)");
-    mvprintw(
-        row++,
-        0,
-        "  [b] Battery  [v] Version  [m] Mfr-specific  [z] Z-Wave+  [7] Configuration  [t] Sensor  [h] Bin-sensor  "
-        "[k] Notification  [j] Meter  [y] Thermostat mode  (GET, prompt node)");
-    mvprintw(row++,
-             0,
-             "  [8] Basic set  [9] Config set  [0] Thermostat mode  [w] Wake-up interval  [u] Assoc add  "
-             "[r] Assoc remove");
-    mvprintw(row++, 0, "  [a] Get association group members");
-    mvprintw(row++, 0, "  [g] Get association group count");
-    mvprintw(row++, 0, "  [L] Set lifeline (controller -> group 1)");
-    mvprintw(row++, 0, "  [l] List included nodes");
-    mvprintw(row++, 0, "  [n] Network status");
-    mvprintw(row++, 0, "  [f] Remove failed node (prompts for node id)");
-    mvprintw(row++, 0, "  [i] Dongle info");
-    mvprintw(row++, 0, "  [p] View effective policy   [o] View node override");
-    mvprintw(row++, 0, "  [c] Set node override entry [x] Delete node override");
-    mvprintw(row++, 0, "  [d] List device policies    [e] Device policy authoring (set/delete)");
+    mvprintw(row++, 0, "  [1] Add zwave node          [2] Remove zwave node");
+    mvprintw(row++, 0, "  [g] Get from node…          [c] Control / set on node…");
+    mvprintw(row++, 0, "  [p] Policy…");
+    mvprintw(row++, 0, "  [l] List included nodes     [n] Network status     [i] Dongle info");
+    mvprintw(row++, 0, "  [f] Remove failed node      [L] Set lifeline (controller -> group 1)");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));
     mvprintw(row++, 0, "  [q] Quit");
     mvhline(row++, 0, '-', getmaxx(stdscr));
@@ -1544,6 +1564,65 @@ auto handleSetThermostatMode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter)
     catch (const sdbus::Error& err)
     {
         logLine(std::string{"SetThermostatMode failed: "} + err.what());
+    }
+}
+
+auto handleGetThermostatSetpoint(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    if (!nodeId.has_value())
+    {
+        logLine("GetThermostatSetpoint: cancelled or invalid node id");
+        return;
+    }
+    auto setpointType = promptByte("Setpoint type (1=heating, 2=cooling):", BYTE_MIN, BYTE_MAX);
+    if (!setpointType.has_value())
+    {
+        logLine("GetThermostatSetpoint: cancelled or invalid setpoint type");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("GetThermostatSetpoint")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, *setpointType, sessionCounter);
+        logLine("GetThermostatSetpoint node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " type=" + std::to_string(static_cast<unsigned>(*setpointType)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetThermostatSetpoint failed: "} + err.what());
+    }
+}
+
+auto handleSetThermostatSetpoint(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId       = promptNodeId("Node ID (1-232):");
+    auto setpointType = promptByte("Setpoint type (1=heating, 2=cooling):", BYTE_MIN, BYTE_MAX);
+    auto precision    = promptByte("Precision (decimals, e.g. 1):", BYTE_MIN, BYTE_MAX);
+    auto scale        = promptByte("Scale (0=C, 1=F):", BYTE_MIN, BYTE_MAX);
+    auto value        = promptInt32("Raw value (e.g. 215 for 21.5 at precision 1):");
+    if (!nodeId.has_value() || !setpointType.has_value() || !precision.has_value() || !scale.has_value() ||
+        !value.has_value())
+    {
+        logLine("SetThermostatSetpoint: cancelled or invalid");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetThermostatSetpoint")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, *setpointType, *precision, *scale, *value, sessionCounter);
+        logLine("SetThermostatSetpoint node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " type=" + std::to_string(static_cast<unsigned>(*setpointType)) + " value=" + std::to_string(*value) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetThermostatSetpoint failed: "} + err.what());
     }
 }
 
@@ -2669,81 +2748,63 @@ auto main() -> int
                 logLine("RemoveNode (classic, session " + std::to_string(static_cast<unsigned>(sessionCounter)) +
                         ") issued");
             }
-            else if (key == '3' || key == '4')
+            else if (key == 'g' || key == 'G')
             {
-                handleSwitchBinary(*proxy, sessionCounter, key == '3');
+                runActionMenu(
+                    "Get from node",
+                    {
+                        {'b', "Battery", [&] { handleSimpleGet(*proxy, sessionCounter, "GetBattery"); }},
+                        {'v', "Version", [&] { handleSimpleGet(*proxy, sessionCounter, "GetNodeVersion"); }},
+                        {'m',
+                         "Manufacturer-specific",
+                         [&] { handleSimpleGet(*proxy, sessionCounter, "GetManufacturerSpecific"); }},
+                        {'z', "Z-Wave Plus info", [&] { handleSimpleGet(*proxy, sessionCounter, "GetZWavePlusInfo"); }},
+                        {'c', "Configuration", [&] { handleGetConfiguration(*proxy, sessionCounter); }},
+                        {'s',
+                         "Sensor multilevel",
+                         [&] { handleSimpleGet(*proxy, sessionCounter, "GetSensorMultilevel"); }},
+                        {'i', "Binary sensor", [&] { handleSimpleGet(*proxy, sessionCounter, "GetSensorBinary"); }},
+                        {'e', "Meter", [&] { handleGetMeter(*proxy, sessionCounter); }},
+                        {'n', "Notification", [&] { handleGetNotification(*proxy, sessionCounter); }},
+                        {'t', "Thermostat mode", [&] { handleSimpleGet(*proxy, sessionCounter, "GetThermostatMode"); }},
+                        {'p', "Thermostat setpoint", [&] { handleGetThermostatSetpoint(*proxy, sessionCounter); }},
+                        {'w', "Multilevel switch", [&] { handleGetMultilevelSwitch(*proxy, sessionCounter); }},
+                        {'a', "Association members", [&] { handleGetAssociation(*proxy, sessionCounter); }},
+                        {'r', "Association groupings", [&] { handleGetAssociationGroupings(*proxy, sessionCounter); }},
+                    });
             }
-            else if (key == '5')
+            else if (key == 'c' || key == 'C')
             {
-                handleSetMultilevelSwitch(*proxy, sessionCounter);
+                runActionMenu(
+                    "Control / set on node",
+                    {
+                        {'o', "Switch binary ON", [&] { handleSwitchBinary(*proxy, sessionCounter, true); }},
+                        {'f', "Switch binary OFF", [&] { handleSwitchBinary(*proxy, sessionCounter, false); }},
+                        {'w', "Multilevel switch set", [&] { handleSetMultilevelSwitch(*proxy, sessionCounter); }},
+                        {'b', "Basic set", [&] { handleSetBasic(*proxy, sessionCounter); }},
+                        {'c', "Configuration set", [&] { handleSetConfiguration(*proxy, sessionCounter); }},
+                        {'t', "Thermostat mode set", [&] { handleSetThermostatMode(*proxy, sessionCounter); }},
+                        {'p', "Thermostat setpoint set", [&] { handleSetThermostatSetpoint(*proxy, sessionCounter); }},
+                        {'k', "Wake-up interval", [&] { handleSetWakeUpInterval(*proxy, sessionCounter); }},
+                        {'a',
+                         "Association add",
+                         [&] { handleAssociationEdit(*proxy, sessionCounter, "SetAssociation"); }},
+                        {'r',
+                         "Association remove",
+                         [&] { handleAssociationEdit(*proxy, sessionCounter, "RemoveAssociation"); }},
+                    });
             }
-            else if (key == '6')
+            else if (key == 'p' || key == 'P')
             {
-                handleGetMultilevelSwitch(*proxy, sessionCounter);
-            }
-            else if (key == 'b' || key == 'B')
-            {
-                handleSimpleGet(*proxy, sessionCounter, "GetBattery");
-            }
-            else if (key == 'v' || key == 'V')
-            {
-                handleSimpleGet(*proxy, sessionCounter, "GetNodeVersion");
-            }
-            else if (key == 'm' || key == 'M')
-            {
-                handleSimpleGet(*proxy, sessionCounter, "GetManufacturerSpecific");
-            }
-            else if (key == 'z' || key == 'Z')
-            {
-                handleSimpleGet(*proxy, sessionCounter, "GetZWavePlusInfo");
-            }
-            else if (key == 't' || key == 'T')
-            {
-                handleSimpleGet(*proxy, sessionCounter, "GetSensorMultilevel");
-            }
-            else if (key == 'h' || key == 'H')
-            {
-                handleSimpleGet(*proxy, sessionCounter, "GetSensorBinary");
-            }
-            else if (key == 'j' || key == 'J')
-            {
-                handleGetMeter(*proxy, sessionCounter);
-            }
-            else if (key == '7')
-            {
-                handleGetConfiguration(*proxy, sessionCounter);
-            }
-            else if (key == 'k' || key == 'K')
-            {
-                handleGetNotification(*proxy, sessionCounter);
-            }
-            else if (key == 'y' || key == 'Y')
-            {
-                handleSimpleGet(*proxy, sessionCounter, "GetThermostatMode");
-            }
-            else if (key == '8')
-            {
-                handleSetBasic(*proxy, sessionCounter);
-            }
-            else if (key == '0')
-            {
-                handleSetThermostatMode(*proxy, sessionCounter);
-            }
-            else if (key == '9')
-            {
-                handleSetConfiguration(*proxy, sessionCounter);
-            }
-            else if (key == 'w' || key == 'W')
-            {
-                handleSetWakeUpInterval(*proxy, sessionCounter);
-            }
-            else if (key == 'u' || key == 'U')
-            {
-                handleAssociationEdit(*proxy, sessionCounter, "SetAssociation");
-            }
-            else if (key == 'r' || key == 'R')
-            {
-                handleAssociationEdit(*proxy, sessionCounter, "RemoveAssociation");
+                runActionMenu("Policy",
+                              {
+                                  {'e', "View effective policy", [&] { handleViewEffectivePolicy(*proxy); }},
+                                  {'o', "View node override", [&] { handleViewNodeOverride(*proxy); }},
+                                  {'s', "Set node override entry", [&] { handleSetNodeOverrideEntry(*proxy); }},
+                                  {'d', "Delete node override", [&] { handleDeleteNodeOverride(*proxy); }},
+                                  {'l', "List device policies", [&] { handleListDevicePolicies(*proxy); }},
+                                  {'a', "Device policy authoring", [&] { handleDevicePolicyEdit(*proxy); }},
+                              });
             }
             else if (key == 'l')
             {
@@ -2760,38 +2821,6 @@ auto main() -> int
             else if (key == 'i' || key == 'I')
             {
                 handleDongleInfo(*proxy);
-            }
-            else if (key == 'a')
-            {
-                handleGetAssociation(*proxy, sessionCounter);
-            }
-            else if (key == 'g' || key == 'G')
-            {
-                handleGetAssociationGroupings(*proxy, sessionCounter);
-            }
-            else if (key == 'p' || key == 'P')
-            {
-                handleViewEffectivePolicy(*proxy);
-            }
-            else if (key == 'o' || key == 'O')
-            {
-                handleViewNodeOverride(*proxy);
-            }
-            else if (key == 'c' || key == 'C')
-            {
-                handleSetNodeOverrideEntry(*proxy);
-            }
-            else if (key == 'x' || key == 'X')
-            {
-                handleDeleteNodeOverride(*proxy);
-            }
-            else if (key == 'd' || key == 'D')
-            {
-                handleListDevicePolicies(*proxy);
-            }
-            else if (key == 'e' || key == 'E')
-            {
-                handleDevicePolicyEdit(*proxy);
             }
             else if (key == 'L')
             {

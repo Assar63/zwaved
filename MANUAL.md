@@ -729,6 +729,33 @@ the `[c]` Control submenu → `[l]` prompts for an RGB triple and sets it, and
 the `[g]` Get submenu → `[k]` reads one component; reports render as
 `ColorSwitchReport node=5 red=255`.
 
+## 11m. Central scene (CC 0x5B)
+
+The Central Scene Command Class is **push-only**: a remote or wall switch
+tells the controller "button N was pressed" (single / double / triple tap,
+hold, release). The daemon never sends Central Scene frames — there is no
+Get or Set — it only decodes inbound NOTIFICATION frames and re-emits them
+as the typed `CentralSceneNotification(y y y y b)` signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the node whose button was pressed |
+| `sequenceNumber` | `y` | rolling counter — de-dup repeats with the same value |
+| `keyAttribute` | `y` | 0 press 1×, 1 release, 2 hold, 3 press 2×, 4 press 3×, 5 press 4×, 6 press 5× |
+| `sceneNumber` | `y` | which button / scene |
+| `slowRefresh` | `b` | v2+ slow-refresh flag for held keys |
+
+```bash
+# watch for button presses (no method call — the node pushes these)
+busctl --system monitor com.tiunda.ZWaved
+# → CentralSceneNotification y y y y b  5 10 0 1 false   = node 5, scene 1, single press
+```
+
+Only the v1+ NOTIFICATION is decoded; `SUPPORTED_GET`/`REPORT` and the v3+
+Configuration triplet are deferred. The terminal renders these in the
+activity pane (`CentralSceneNotification node=5 scene=1 press 1x seq=10`);
+there is no key binding because the daemon can't initiate them.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

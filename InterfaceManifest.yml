@@ -778,6 +778,23 @@ events:
       - { name: targetValue,  type: u8, default: 0 }
       - { name: duration,     type: u8, default: 0 }
 
+  - name: CentralSceneNotification
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Central Scene (CC 0x5B) Notification — a physical button press
+      on a remote or wall switch. Push-only: the daemon never sends these,
+      it only republishes inbound ApplicationCommand frames whose ccData
+      parses as a Central Scene Notification. `keyAttribute`: 0 press 1×,
+      1 release, 2 hold, 3 press 2×, 4 press 3×, 5 press 4×, 6 press 5×.
+      `sequenceNumber` is a rolling counter for de-duplication.
+    fields:
+      - { name: sourceNodeId,   type: u8,   default: 0 }
+      - { name: sequenceNumber, type: u8,   default: 0 }
+      - { name: keyAttribute,   type: u8,   default: 0 }
+      - { name: sceneNumber,    type: u8,   default: 0 }
+      - { name: slowRefresh,    type: bool, default: false }
+
   # ---- 2d. Command events (D-Bus → ProtocolThread) ----------------
   # External transports translate semantic D-Bus calls into one of
   # these and publish; ProtocolThread subscribes and dispatches.
@@ -1910,6 +1927,16 @@ dbus:
       triggered_by:
         event: ColorSwitchReport
 
+    - name: CentralSceneNotification
+      params:
+        - { name: sourceNodeId,   dbus: y }
+        - { name: sequenceNumber, dbus: y, doc: "rolling counter for de-dup" }
+        - { name: keyAttribute,   dbus: y, doc: "0 press 1x, 1 release, 2 hold, 3 press 2x, 4 press 3x, …" }
+        - { name: sceneNumber,    dbus: y, doc: "which button/scene" }
+        - { name: slowRefresh,    dbus: b, doc: "v2+ slow-refresh flag for held keys" }
+      triggered_by:
+        event: CentralSceneNotification
+
     - name: BatteryReport
       params:
         - { name: sourceNodeId, dbus: y }
@@ -2220,6 +2247,33 @@ modules:
       - name: Set
         wire:
           byte: 0x05
+
+  - name: CentralScene
+    wire:
+      class_byte: 0x5B
+      prefix: CENTRAL_SCENE
+    description: |
+      Push-only scene events from physical button presses on remotes and
+      wall switches. The daemon never sends Central Scene frames — it only
+      decodes inbound NOTIFICATION (0x03) frames into a typed signal.
+      keyAttribute: 0 press 1×, 1 release, 2 hold, 3 press 2×, 4 press 3×,
+      5 press 4×, 6 press 5×. The v1+ NOTIFICATION decode lives in the
+      hand-written CentralScene.cpp; SUPPORTED_GET/REPORT and the v3+
+      Configuration triplet are not implemented.
+    constants:
+      - { name: KEY_PRESS_1X, value: 0x00 }
+      - { name: KEY_RELEASE,  value: 0x01 }
+      - { name: KEY_HELD,     value: 0x02 }
+      - { name: KEY_PRESS_2X, value: 0x03 }
+    commands:
+      - name: Notification
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: sequenceNumber, type: u8 }
+          - { name: keyAttribute,   type: u8,   doc: "0 press1x, 1 release, 2 hold, 3 press2x, …" }
+          - { name: sceneNumber,    type: u8 }
+          - { name: slowRefresh,    type: bool, doc: "v2+ slow-refresh flag (bit 7 of properties)" }
 
   - name: Battery
     wire:
@@ -2803,6 +2857,19 @@ translations:
       value:        decoded.value
       targetValue:  decoded.targetValue
       duration:     decoded.duration
+
+  - publishes: CentralSceneNotification
+    triggered_by: ApplicationCommand
+    decode:
+      codec: CentralScene.decodeNotification
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:   event.sourceNodeId
+      sequenceNumber: decoded.sequenceNumber
+      keyAttribute:   decoded.keyAttribute
+      sceneNumber:    decoded.sceneNumber
+      slowRefresh:    decoded.slowRefresh
 
   - publishes: BatteryReport
     triggered_by: ApplicationCommand

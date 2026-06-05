@@ -133,6 +133,34 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 }
                 logLine(stream.str());
             });
+
+    proxy.uponSignal("CentralSceneNotification")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t sequenceNumber,
+               std::uint8_t keyAttribute,
+               std::uint8_t sceneNumber,
+               bool slowRefresh) -> void
+            {
+                std::ostringstream stream;
+                stream << "CentralSceneNotification node=" << static_cast<unsigned>(sourceNodeId)
+                       << " scene=" << static_cast<unsigned>(sceneNumber) << " ";
+                if (const char* name = centralSceneKeyName(keyAttribute); name != nullptr)
+                {
+                    stream << name;
+                }
+                else
+                {
+                    stream << "key=" << static_cast<unsigned>(keyAttribute);
+                }
+                stream << " seq=" << static_cast<unsigned>(sequenceNumber);
+                if (slowRefresh)
+                {
+                    stream << " (slow-refresh)";
+                }
+                logLine(stream.str());
+            });
     // NOLINTEND(bugprone-easily-swappable-parameters)
 
     proxy.uponSignal("BatteryReport")

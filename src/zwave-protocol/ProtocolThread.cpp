@@ -24,6 +24,7 @@
 #include "application/SensorBinary.hpp"
 #include "application/SensorMultilevel.hpp"
 #include "application/ThermostatMode.hpp"
+#include "application/ThermostatSetpoint.hpp"
 #include "application/WakeUp.hpp"
 #include "application/ZWavePlusInfo.hpp"
 
@@ -333,6 +334,18 @@ auto onSetThermostatMode(const MessageBus::SetThermostatModeCommand& cmd) -> voi
 auto onGetThermostatMode(const MessageBus::GetThermostatModeCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, ThermostatMode::encodeGet());
+}
+
+auto onSetThermostatSetpoint(const MessageBus::SetThermostatSetpointCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId,
+                 cmd.callbackId,
+                 ThermostatSetpoint::encodeSet(cmd.setpointType, cmd.precision, cmd.scale, cmd.value));
+}
+
+auto onGetThermostatSetpoint(const MessageBus::GetThermostatSetpointCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, ThermostatSetpoint::encodeGet(cmd.setpointType));
 }
 
 auto onGetManufacturerSpecific(const MessageBus::GetManufacturerSpecificCommand& cmd) -> void
@@ -1020,7 +1033,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 35;
+constexpr std::size_t SUBSCRIPTION_COUNT = 37;
 
 auto subscribeBus() -> void
 {
@@ -1044,6 +1057,8 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetMeterCommand>(onGetMeter);
     subscribe<MessageBus::SetThermostatModeCommand>(onSetThermostatMode);
     subscribe<MessageBus::GetThermostatModeCommand>(onGetThermostatMode);
+    subscribe<MessageBus::SetThermostatSetpointCommand>(onSetThermostatSetpoint);
+    subscribe<MessageBus::GetThermostatSetpointCommand>(onGetThermostatSetpoint);
     subscribe<MessageBus::GetManufacturerSpecificCommand>(onGetManufacturerSpecific);
     subscribe<MessageBus::GetZWavePlusInfoCommand>(onGetZWavePlusInfo);
     subscribe<MessageBus::GetNodeVersionCommand>(onGetNodeVersion);

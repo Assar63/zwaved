@@ -31,6 +31,7 @@ set_source_files_properties(
 # only generates a header with constants).
 
 target_sources(zwaved PRIVATE
+    EncodedValue.cpp
     Basic.cpp
     Battery.cpp
     BinarySwitch.cpp
@@ -47,6 +48,7 @@ target_sources(zwaved PRIVATE
     Notification.cpp
     Meter.cpp
     ThermostatMode.cpp
+    ThermostatSetpoint.cpp
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/MultilevelSwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"

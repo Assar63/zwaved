@@ -597,6 +597,43 @@ clients. `SUPPORTED_GET`/`REPORT` are not implemented. In the terminal,
 `[0]` sets the mode and `[y]` gets it; reports render as
 `ThermostatModeReport node=5 mode=heat`.
 
+## 11i. Thermostat setpoint (CC 0x43)
+
+The Thermostat Setpoint Command Class sets/reads a target temperature, one
+per setpoint type (heating, cooling, …). The temperature uses the same
+precision/scale/size encoding as Sensor Multilevel (§11d).
+`SetThermostatSetpoint(nodeId, setpointType, precision, scale, value,
+callbackId)` writes a target; `GetThermostatSetpoint(nodeId, setpointType,
+callbackId)` reads one. The reply and any unsolicited Reports arrive as the
+typed `ThermostatSetpointReport(y y y y i)` signal:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `sourceNodeId` | `y` | the reporting node |
+| `setpointType` | `y` | 1 heating, 2 cooling, 7 furnace, 8 dry air, 9 moist air, 10 auto changeover |
+| `scale` | `y` | 0 = °C, 1 = °F |
+| `precision` | `y` | decimal-point shift — the target is `value / 10^precision` |
+| `value` | `i` | raw signed value (1/2/4-byte field, sign-extended) |
+
+The Set's `value` + `precision` + `scale` are encoded into the wire's
+size/precision/scale flag byte for you — pick the precision you want (e.g.
+`precision=1, value=215` for 21.5°) and the smallest byte width that fits
+the value is chosen automatically.
+
+```bash
+# set node 5's heating setpoint to 21.5 °C (type 1, precision 1, scale 0, value 215)
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetThermostatSetpoint yyyyiy 5 1 1 0 215 7
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetThermostatSetpoint yyy 5 1 8
+# → ThermostatSetpointReport y y y y i  5 1 0 1 215   = 21.5 °C heating
+```
+
+`SUPPORTED_GET`/`REPORT` and `CAPABILITIES_GET` are not implemented. The
+terminal renders inbound reports (`ThermostatSetpointReport node=5 type=1
+21.5 C`); the Set/Get key bindings are deferred until the terminal's
+single-key menu is reworked (it is out of free keys — terminal epic #73).
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

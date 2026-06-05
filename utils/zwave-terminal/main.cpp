@@ -998,6 +998,31 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
+    // Display only — Set/Get key bindings are deferred until the terminal's
+    // single-key menu is reworked (out of free keys; terminal epic #73).
+    proxy.uponSignal("ThermostatSetpointReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t setpointType,
+               std::uint8_t scale,
+               std::uint8_t precision,
+               std::int32_t value) -> void
+            {
+                int divisor = 1;
+                for (std::uint8_t i = 0; i < precision; ++i)
+                {
+                    divisor *= DECIMAL_BASE;
+                }
+                std::ostringstream stream;
+                stream << "ThermostatSetpointReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " type=" << static_cast<unsigned>(setpointType) << " " << std::fixed
+                       << std::setprecision(precision) << static_cast<double>(value) / divisor
+                       << (scale == 0 ? " C" : " F");
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("ConfigurationReport")
         .onInterface(IFACE_NAME)
         .call(

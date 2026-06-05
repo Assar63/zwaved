@@ -26,6 +26,8 @@ set_source_files_properties(
     "${ZWAVED_GENERATED_DIR}/application/ThermostatMode.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ThermostatOperatingState.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ThermostatFanMode.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/DoorLock.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/UserCode.gen.cpp"
     PROPERTIES GENERATED TRUE
 )
 
@@ -55,6 +57,8 @@ target_sources(zwaved PRIVATE
     ThermostatSetpoint.cpp
     ThermostatOperatingState.cpp
     ThermostatFanMode.cpp
+    DoorLock.cpp
+    UserCode.cpp
     "${ZWAVED_GENERATED_DIR}/application/BinarySwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/MultilevelSwitch.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/Basic.gen.cpp"
@@ -68,6 +72,8 @@ target_sources(zwaved PRIVATE
     "${ZWAVED_GENERATED_DIR}/application/ThermostatMode.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ThermostatOperatingState.gen.cpp"
     "${ZWAVED_GENERATED_DIR}/application/ThermostatFanMode.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/DoorLock.gen.cpp"
+    "${ZWAVED_GENERATED_DIR}/application/UserCode.gen.cpp"
 )
 
 # Hand-written .{hpp,cpp} pairs `#include "<Name>.gen.hpp"`; expose

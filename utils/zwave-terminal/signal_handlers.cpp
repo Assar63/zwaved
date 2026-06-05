@@ -161,6 +161,52 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 }
                 logLine(stream.str());
             });
+
+    proxy.uponSignal("DoorLockOperationReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t currentMode,
+               std::uint8_t /*handlesMode*/,
+               std::uint8_t condition,
+               std::uint8_t lockTimeoutMinutes,
+               std::uint8_t lockTimeoutSeconds,
+               std::uint8_t /*targetMode*/,
+               std::uint8_t /*duration*/) -> void
+            {
+                std::ostringstream stream;
+                stream << "DoorLockOperationReport node=" << static_cast<unsigned>(sourceNodeId) << " mode=0x"
+                       << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(currentMode)
+                       << " condition=0x" << std::setw(2) << static_cast<unsigned>(condition) << std::dec
+                       << " timeout=" << static_cast<unsigned>(lockTimeoutMinutes) << "m"
+                       << static_cast<unsigned>(lockTimeoutSeconds) << "s";
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("UserCodeReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t userIdentifier,
+               std::uint8_t userIdStatus,
+               const std::vector<std::uint8_t>& userCode) -> void
+            {
+                std::ostringstream stream;
+                stream << "UserCodeReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " slot=" << static_cast<unsigned>(userIdentifier) << " status=0x" << std::hex << std::setw(2)
+                       << std::setfill('0') << static_cast<unsigned>(userIdStatus) << std::dec
+                       << " codeLen=" << userCode.size();
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("UserCodeUsersNumberReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId, std::uint8_t supportedUsers) -> void
+            {
+                logLine("UserCodeUsersNumberReport node=" + std::to_string(static_cast<unsigned>(sourceNodeId)) +
+                        " slots=" + std::to_string(static_cast<unsigned>(supportedUsers)));
+            });
     // NOLINTEND(bugprone-easily-swappable-parameters)
 
     proxy.uponSignal("BatteryReport")

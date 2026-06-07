@@ -21,6 +21,7 @@ namespace zwt
 [[nodiscard]] auto promptU32(const char* label) -> std::optional<std::uint32_t>;
 [[nodiscard]] auto promptChar(const char* label, const std::string& valid) -> std::optional<char>;
 [[nodiscard]] auto promptNodeList(const char* label) -> std::optional<std::vector<std::uint8_t>>;
+[[nodiscard]] auto promptByteList(const char* label) -> std::optional<std::vector<std::uint8_t>>;
 }  // namespace zwt
 
 #endif  // ZWAVE_TERMINAL_PROMPTS_HPP

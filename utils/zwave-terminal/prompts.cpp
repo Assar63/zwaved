@@ -232,4 +232,42 @@ auto promptNodeList(const char* label) -> std::optional<std::vector<std::uint8_t
     }
     return members;
 }
+
+/// Parse a space/comma-separated list of bytes (each 0..255, decimal or
+/// `0x`-prefixed hex) — e.g. a raw Command Class payload like
+/// `0x25 0x01 0xFF`. Requires at least one byte. nullopt on any malformed
+/// or out-of-range token. Reuses parseUint for per-token parsing so the
+/// 0x-prefix handling stays in one place.
+auto promptByteList(const char* label) -> std::optional<std::vector<std::uint8_t>>
+{
+    auto text = promptLine(label);
+    if (!text.has_value())
+    {
+        return std::nullopt;
+    }
+    for (auto& character : *text)
+    {
+        if (character == ',')
+        {
+            character = ' ';
+        }
+    }
+    std::istringstream stream(*text);
+    std::vector<std::uint8_t> bytes;
+    std::string token;
+    while (stream >> token)
+    {
+        const auto value = parseUint(token, static_cast<std::uint32_t>(BYTE_MAX));
+        if (!value.has_value())
+        {
+            return std::nullopt;
+        }
+        bytes.push_back(static_cast<std::uint8_t>(*value));
+    }
+    if (bytes.empty())
+    {
+        return std::nullopt;
+    }
+    return bytes;
+}
 }  // namespace zwt

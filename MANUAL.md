@@ -1189,6 +1189,13 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 a length followed by its bytes — `5 3 0x25 0x01 0xFF` is "node 5, 3-byte
 payload `25 01 FF`".)
 
+`zwave-terminal` drives all of this from the `[e]` **Scenes** submenu: `[l]`
+list scenes (with their actions), `[t]` list triggers, `[s]` set/edit a scene
+(prompts a scene id, then repeatedly asks for a target node + CC payload bytes
+until you leave the node blank), `[d]` delete a scene, `[b]` bind a trigger,
+`[u]` unbind one. When a scene runs, the `SceneActivated` signal lands in the
+activity pane — e.g. `SceneActivated node=7 scene=1 1x -> "tv" (2 actions)`.
+
 ## 17. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's

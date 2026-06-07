@@ -162,6 +162,31 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
+    proxy.uponSignal("SceneActivated")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t sceneNumber,
+               std::uint8_t keyAttribute,
+               const std::string& sceneId,
+               std::uint32_t actionCount) -> void
+            {
+                std::ostringstream stream;
+                stream << "SceneActivated node=" << static_cast<unsigned>(sourceNodeId)
+                       << " scene=" << static_cast<unsigned>(sceneNumber) << " ";
+                if (const char* name = centralSceneKeyName(keyAttribute); name != nullptr)
+                {
+                    stream << name;
+                }
+                else
+                {
+                    stream << "key=" << static_cast<unsigned>(keyAttribute);
+                }
+                stream << " -> \"" << sceneId << "\" (" << actionCount << " action" << (actionCount == 1 ? "" : "s")
+                       << ")";
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("DoorLockOperationReport")
         .onInterface(IFACE_NAME)
         .call(

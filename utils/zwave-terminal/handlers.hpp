@@ -53,6 +53,12 @@ auto handleDeleteNodeOverride(sdbus::IProxy& proxy) -> void;
 auto handleSetNodeOverrideEntry(sdbus::IProxy& proxy) -> void;
 auto handleDevicePolicyEdit(sdbus::IProxy& proxy) -> void;
 auto handleListDevicePolicies(sdbus::IProxy& proxy) -> void;
+auto handleListScenes(sdbus::IProxy& proxy) -> void;
+auto handleListSceneTriggers(sdbus::IProxy& proxy) -> void;
+auto handleSetScene(sdbus::IProxy& proxy) -> void;
+auto handleDeleteScene(sdbus::IProxy& proxy) -> void;
+auto handleBindSceneTrigger(sdbus::IProxy& proxy) -> void;
+auto handleUnbindSceneTrigger(sdbus::IProxy& proxy) -> void;
 }  // namespace zwt
 
 #endif  // ZWAVE_TERMINAL_HANDLERS_HPP

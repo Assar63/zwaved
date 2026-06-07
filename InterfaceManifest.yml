@@ -1938,6 +1938,72 @@ dbus:
       action:
         custom: emitDeleteNodeMetadata
 
+    # ---- Scene + trigger CRUD (#122) ------------------------------
+    # Read/write the durable scene store (#120) over D-Bus. A *scene*
+    # crosses the wire as a(yay) — an ordered list of
+    # (targetNodeId, ccPayload) actions; a *trigger* as a(yyys) —
+    # (sourceNodeId, sceneNumber, keyAttribute, sceneId). The
+    # SceneOrchestrator (#121) consumes both at runtime; these methods
+    # only persist them, so the custom: handlers call
+    # SceneStore::instance() directly (state read/write, no bus command).
+
+    - name: SetScene
+      params:
+        - { name: sceneId, dbus: s,       cpp: string }
+        - { name: actions, dbus: "a(yay)", cpp: "list<SceneActionEntry>" }
+      # Custom: the actions a(yay) inbound array converts element-wise
+      # from sdbus::Struct<u8, ay> to SceneStore::Action.
+      action:
+        custom: emitSetScene
+
+    - name: GetScene
+      params:
+        - { name: sceneId, dbus: s, cpp: string }
+      returns:
+        type: list<SceneActionEntry>
+        dbus: a(yay)
+      action:
+        custom: emitGetScene
+
+    - name: DeleteScene
+      params:
+        - { name: sceneId, dbus: s, cpp: string }
+      action:
+        custom: emitDeleteScene
+
+    - name: ListScenes
+      params: []
+      returns:
+        type: list<string>
+        dbus: as
+      action:
+        custom: emitListScenes
+
+    - name: BindSceneTrigger
+      params:
+        - { name: sourceNodeId, dbus: y, cpp: u8 }
+        - { name: sceneNumber,  dbus: y, cpp: u8 }
+        - { name: keyAttribute, dbus: y, cpp: u8 }
+        - { name: sceneId,      dbus: s, cpp: string }
+      action:
+        custom: emitBindSceneTrigger
+
+    - name: UnbindSceneTrigger
+      params:
+        - { name: sourceNodeId, dbus: y, cpp: u8 }
+        - { name: sceneNumber,  dbus: y, cpp: u8 }
+        - { name: keyAttribute, dbus: y, cpp: u8 }
+      action:
+        custom: emitUnbindSceneTrigger
+
+    - name: ListSceneTriggers
+      params: []
+      returns:
+        type: list<SceneTriggerEntry>
+        dbus: a(yyys)
+      action:
+        custom: emitListSceneTriggers
+
   # ---- 3b. Signals ------------------------------------------------
   # Each signal is triggered by one or more MessageBus events. The
   # default mapping copies named fields straight through; CC-decoder
@@ -2293,6 +2359,16 @@ dbus:
         - { name: nodeId, dbus: y }
       triggered_by:
         event: NodeMetadataChanged
+
+    - name: SceneActivated
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: sceneNumber,  dbus: y }
+        - { name: keyAttribute, dbus: y }
+        - { name: sceneId,      dbus: s }
+        - { name: actionCount,  dbus: u }
+      triggered_by:
+        event: SceneActivated
 
 # =====================================================================
 # 4. Protocol modules

@@ -1138,6 +1138,57 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 # → a(ss)  1  "name" "Kitchen light"
 ```
 
+## 16d. Scene control (daemon-side scenes)
+
+The daemon runs **scenes** in response to physical button presses. A *scene*
+is an ordered list of **actions** — each a raw Command Class frame (the same
+bytes a `SendData` carries) addressed to a target node. A *trigger* binds a
+Central Scene press `(sourceNodeId, sceneNumber, keyAttribute)` to a scene id,
+so the same scene number from different controllers can run different scenes
+("scene 1" from the living room vs. the hallway). When a bound press arrives,
+the SceneOrchestrator replays the scene's actions and emits a `SceneActivated`
+signal. Stored in `nodes.db`, scoped per network.
+
+A scene crosses the wire as `a(yay)` — a list of `(targetNodeId, ccPayload)`
+structs; a trigger list as `a(yyys)`.
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `SetScene` | `(s a(yay)) → ()` | upsert scene `sceneId` with ordered actions |
+| `GetScene` | `(s) → (a(yay))` | the scene's actions; empty if no such scene |
+| `DeleteScene` | `(s) → ()` | remove a scene (dangling triggers become no-ops) |
+| `ListScenes` | `() → (as)` | all scene ids for the network, ascending |
+| `BindSceneTrigger` | `(y y y s) → ()` | sourceNodeId, sceneNumber, keyAttribute → sceneId |
+| `UnbindSceneTrigger` | `(y y y) → ()` | remove a press binding |
+| `ListSceneTriggers` | `() → (a(yyys))` | rows of (sourceNodeId, sceneNumber, keyAttribute, sceneId) |
+
+When a scene runs, the daemon emits `SceneActivated(y y y s u)` —
+`(sourceNodeId, sceneNumber, keyAttribute, sceneId, actionCount)`. A press that
+resolves to a deleted scene still fires `SceneActivated` with `actionCount = 0`;
+an unbound press fires nothing.
+
+Example — make a scene "tv" that turns node 5 on (`0x25 0x01 0xFF`) and node 6
+off (`0x25 0x01 0x00`), then run it from press 1× of scene 1 on controller 7:
+
+```bash
+# Define the scene: a(yay) = 2 actions
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetScene "sa(yay)" tv 2 \
+    5 3 0x25 0x01 0xFF \
+    6 3 0x25 0x01 0x00
+# Bind controller 7 / scene 1 / press 1x (keyAttribute 0) to it
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 BindSceneTrigger yyys 7 1 0 tv
+# Inspect
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 ListSceneTriggers
+# → a(yyys)  1  7 1 0 "tv"
+```
+
+(In the `SetScene` call each action is `targetNodeId`, then the `ay` payload as
+a length followed by its bytes — `5 3 0x25 0x01 0xFF` is "node 5, 3-byte
+payload `25 01 FF`".)
+
 ## 17. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's

@@ -60,6 +60,15 @@ using DevicePolicyTuple = sdbus::Struct<std::uint16_t, std::uint16_t, std::uint1
 // One GetNodeMetadata row: (key, value). Matches the a(ss) return shape.
 using NodeMetadataTuple = sdbus::Struct<std::string, std::string>;
 
+// One scene action: (targetNodeId, ccPayload). The wire element of the
+// a(yay) scene shape — used both inbound (SetScene param) and outbound
+// (GetScene return). Custom handlers convert to/from SceneStore::Action.
+using SceneActionEntry = sdbus::Struct<std::uint8_t, std::vector<std::uint8_t>>;
+
+// One scene trigger: (sourceNodeId, sceneNumber, keyAttribute, sceneId).
+// Matches the a(yyys) ListSceneTriggers return shape.
+using SceneTriggerEntry = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::string>;
+
 using DaemonErrorTuple = sdbus::Struct<std::uint8_t, std::string, std::uint8_t, std::string>;
 
 using NetworkStatusTuple = sdbus::Struct<bool,

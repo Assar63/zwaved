@@ -4,6 +4,7 @@
 #include "../message-bus/MessageBus.hpp"
 #include "../node-metadata/NodeMetadata.hpp"
 #include "../policy-register/PolicyRegister.hpp"
+#include "../scene-store/SceneStore.hpp"
 #include "DBusBackendInternal.hpp"
 #include "Version.hpp"
 
@@ -463,5 +464,86 @@ auto emitGetNodeMetadata(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) -> st
 auto emitDeleteNodeMetadata(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId, const std::string& key) -> void
 {
     NodeMetadata::instance().remove(nodeId, key);
+}
+
+// ---- Scene + trigger CRUD (#122) -------------------------------------
+// Thin adapters over SceneStore::instance(). A scene crosses the wire as
+// a(yay) — a list of (targetNodeId, ccPayload) actions; a trigger as
+// a(yyys). The store owns persistence only; the SceneOrchestrator (#121)
+// drives the runtime side off CentralSceneNotification, so nothing here
+// touches the bus.
+
+namespace
+{
+auto convertSceneActions(const std::vector<SceneActionEntry>& wire) -> std::vector<SceneStore::Action>
+{
+    std::vector<SceneStore::Action> out;
+    out.reserve(wire.size());
+    for (const auto& entry : wire)
+    {
+        out.push_back(SceneStore::Action{.targetNodeId = entry.get<0>(), .ccPayload = entry.get<1>()});
+    }
+    return out;
+}
+}  // namespace
+
+auto emitSetScene(DBusBackend::Impl& /*impl*/,
+                  const std::string& sceneId,
+                  const std::vector<SceneActionEntry>& actions) -> void
+{
+    SceneStore::instance().setScene(sceneId, convertSceneActions(actions));
+}
+
+auto emitGetScene(DBusBackend::Impl& /*impl*/, const std::string& sceneId) -> std::vector<SceneActionEntry>
+{
+    std::vector<SceneActionEntry> out;
+    const auto actions = SceneStore::instance().getScene(sceneId);
+    if (actions.has_value())
+    {
+        for (const auto& action : *actions)
+        {
+            out.emplace_back(action.targetNodeId, action.ccPayload);
+        }
+    }
+    return out;
+}
+
+auto emitDeleteScene(DBusBackend::Impl& /*impl*/, const std::string& sceneId) -> void
+{
+    SceneStore::instance().deleteScene(sceneId);
+}
+
+auto emitListScenes(DBusBackend::Impl& /*impl*/) -> std::vector<std::string>
+{
+    return SceneStore::instance().listScenes();
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitBindSceneTrigger(DBusBackend::Impl& /*impl*/,
+                          std::uint8_t sourceNodeId,
+                          std::uint8_t sceneNumber,
+                          std::uint8_t keyAttribute,
+                          const std::string& sceneId) -> void
+{
+    SceneStore::instance().bindTrigger(sourceNodeId, sceneNumber, keyAttribute, sceneId);
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitUnbindSceneTrigger(DBusBackend::Impl& /*impl*/,
+                            std::uint8_t sourceNodeId,
+                            std::uint8_t sceneNumber,
+                            std::uint8_t keyAttribute) -> void
+{
+    SceneStore::instance().unbindTrigger(sourceNodeId, sceneNumber, keyAttribute);
+}
+
+auto emitListSceneTriggers(DBusBackend::Impl& /*impl*/) -> std::vector<SceneTriggerEntry>
+{
+    std::vector<SceneTriggerEntry> out;
+    for (const auto& trigger : SceneStore::instance().listTriggers())
+    {
+        out.emplace_back(trigger.sourceNodeId, trigger.sceneNumber, trigger.keyAttribute, trigger.sceneId);
+    }
+    return out;
 }
 }  // namespace ExternalApi

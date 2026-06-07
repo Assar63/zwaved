@@ -192,6 +192,18 @@ auto run() -> int
                                   {'a', "Device policy authoring", [&] { handleDevicePolicyEdit(*proxy); }},
                               });
             }
+            else if (key == 'e' || key == 'E')
+            {
+                runActionMenu("Scenes",
+                              {
+                                  {'l', "List scenes", [&] { handleListScenes(*proxy); }},
+                                  {'t', "List triggers", [&] { handleListSceneTriggers(*proxy); }},
+                                  {'s', "Set / edit scene", [&] { handleSetScene(*proxy); }},
+                                  {'d', "Delete scene", [&] { handleDeleteScene(*proxy); }},
+                                  {'b', "Bind trigger (press -> scene)", [&] { handleBindSceneTrigger(*proxy); }},
+                                  {'u', "Unbind trigger", [&] { handleUnbindSceneTrigger(*proxy); }},
+                              });
+            }
             else if (key == 'l')
             {
                 handleListNodes(*proxy);

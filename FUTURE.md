@@ -264,9 +264,10 @@ governs.
 
 - **E2 (scene controller) is filed** as epic **#119** with children **#120**
   (scene store) ✅, **#121** (SceneOrchestrator) ✅, **#122** (D-Bus CRUD) ✅,
-  **#123** (terminal), **#124** (extra trigger sources). The store, orchestrator,
-  and D-Bus surface are merged; scenes run end-to-end over D-Bus today (see
-  MANUAL §16d). Remaining: terminal UI (#123) + extra trigger sources (#124).
+  **#123** (terminal UI) ✅, **#124** (extra trigger sources). The store,
+  orchestrator, D-Bus surface, and terminal authoring/observation UI are merged;
+  scenes run end-to-end today (see MANUAL §16d). Remaining: extra trigger
+  sources (#124 — Basic Set / Scene Activation 0x2B beyond Central Scene).
   E1/E3 remain exploratory here.
 - Old TODO.md stubs are superseded by this doc:
   - "Virtual nodes" (#29) → **E1** (addressable presence).

@@ -6,6 +6,7 @@
 #include "policy_blob.hpp"
 #include "prompts.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <iomanip>
 #include <ios>
@@ -1087,6 +1088,224 @@ auto handleListDevicePolicies(sdbus::IProxy& proxy) -> void
                << static_cast<unsigned>(std::get<1>(row)) << " id=0x" << std::setw(4)
                << static_cast<unsigned>(std::get<2>(row)) << std::dec << ":";
         logPolicy(header.str(), std::get<3>(row));
+    }
+}
+
+// ---- Scene + trigger management (#123) -------------------------------
+// Author scenes (ordered SendData actions) and bind physical presses to
+// them over the #122 D-Bus surface. The SceneOrchestrator runs the scene
+// when a bound Central Scene press arrives; SceneActivated lands in the
+// activity pane (see signal_handlers).
+
+namespace
+{
+using SceneActionEntry  = sdbus::Struct<std::uint8_t, std::vector<std::uint8_t>>;
+using SceneTriggerEntry = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::string>;
+
+// Render a raw CC payload as space-separated hex for the activity log.
+auto formatPayloadHex(const std::vector<std::uint8_t>& payload) -> std::string
+{
+    std::ostringstream stream;
+    for (std::size_t idx = 0; idx < payload.size(); ++idx)
+    {
+        if (idx != 0)
+        {
+            stream << ' ';
+        }
+        stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(payload.at(idx));
+    }
+    return stream.str();
+}
+}  // namespace
+
+auto handleListScenes(sdbus::IProxy& proxy) -> void
+{
+    std::vector<std::string> scenes;
+    try
+    {
+        proxy.callMethod("ListScenes").onInterface(IFACE_NAME).storeResultsTo(scenes);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"ListScenes failed: "} + err.what());
+        return;
+    }
+    if (scenes.empty())
+    {
+        logLine("Scenes: (none)");
+        return;
+    }
+    logLine("Scenes (" + std::to_string(scenes.size()) + "):");
+    for (const auto& sceneId : scenes)
+    {
+        std::vector<SceneActionEntry> actions;
+        try
+        {
+            proxy.callMethod("GetScene").onInterface(IFACE_NAME).withArguments(sceneId).storeResultsTo(actions);
+        }
+        catch (const sdbus::Error& err)
+        {
+            logLine("  \"" + sceneId + "\": GetScene failed: " + err.what());
+            continue;
+        }
+        logLine("  \"" + sceneId + "\" (" + std::to_string(actions.size()) + " action" +
+                (actions.size() == 1 ? "" : "s") + "):");
+        for (const auto& action : actions)
+        {
+            logLine("    -> node " + std::to_string(static_cast<unsigned>(std::get<0>(action))) + ": " +
+                    formatPayloadHex(std::get<1>(action)));
+        }
+    }
+}
+
+auto handleListSceneTriggers(sdbus::IProxy& proxy) -> void
+{
+    std::vector<SceneTriggerEntry> triggers;
+    try
+    {
+        proxy.callMethod("ListSceneTriggers").onInterface(IFACE_NAME).storeResultsTo(triggers);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"ListSceneTriggers failed: "} + err.what());
+        return;
+    }
+    if (triggers.empty())
+    {
+        logLine("Scene triggers: (none)");
+        return;
+    }
+    logLine("Scene triggers (" + std::to_string(triggers.size()) + "):");
+    for (const auto& trigger : triggers)
+    {
+        const std::uint8_t keyAttribute = std::get<2>(trigger);
+        std::ostringstream stream;
+        stream << "  node " << static_cast<unsigned>(std::get<0>(trigger)) << " scene "
+               << static_cast<unsigned>(std::get<1>(trigger)) << " ";
+        if (const char* name = centralSceneKeyName(keyAttribute); name != nullptr)
+        {
+            stream << name;
+        }
+        else
+        {
+            stream << "key=" << static_cast<unsigned>(keyAttribute);
+        }
+        stream << " -> \"" << std::get<3>(trigger) << "\"";
+        logLine(stream.str());
+    }
+}
+
+auto handleSetScene(sdbus::IProxy& proxy) -> void
+{
+    auto sceneId = promptLine("Scene id:");
+    if (!sceneId.has_value())
+    {
+        logLine("SetScene: cancelled or empty scene id");
+        return;
+    }
+    std::vector<SceneActionEntry> actions;
+    while (true)
+    {
+        auto targetNode = promptNodeId("Action target node (blank to finish):");
+        if (!targetNode.has_value())
+        {
+            break;
+        }
+        auto payload = promptByteList("CC payload bytes (e.g. 0x25 0x01 0xFF):");
+        if (!payload.has_value())
+        {
+            logLine("SetScene: invalid payload — action skipped");
+            continue;
+        }
+        actions.emplace_back(*targetNode, *payload);
+    }
+    if (actions.empty())
+    {
+        logLine("SetScene: no actions entered — aborted");
+        return;
+    }
+    try
+    {
+        proxy.callMethod("SetScene").onInterface(IFACE_NAME).withArguments(*sceneId, actions);
+        logLine("SetScene \"" + *sceneId + "\" with " + std::to_string(actions.size()) + " action" +
+                (actions.size() == 1 ? "" : "s"));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetScene failed: "} + err.what());
+    }
+}
+
+auto handleDeleteScene(sdbus::IProxy& proxy) -> void
+{
+    auto sceneId = promptLine("Scene id to delete:");
+    if (!sceneId.has_value())
+    {
+        logLine("DeleteScene: cancelled or empty scene id");
+        return;
+    }
+    try
+    {
+        proxy.callMethod("DeleteScene").onInterface(IFACE_NAME).withArguments(*sceneId);
+        logLine("DeleteScene \"" + *sceneId + "\"");
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"DeleteScene failed: "} + err.what());
+    }
+}
+
+auto handleBindSceneTrigger(sdbus::IProxy& proxy) -> void
+{
+    auto sourceNode   = promptNodeId("Source node (controller pressing the button):");
+    auto sceneNumber  = promptByte("Scene number (1-255):", 1, BYTE_MAX);
+    auto keyAttribute = promptByte("Key attribute (0=1x,1=release,2=hold,3=2x,4=3x):", 0, BYTE_MAX);
+    if (!sourceNode.has_value() || !sceneNumber.has_value() || !keyAttribute.has_value())
+    {
+        logLine("BindSceneTrigger: cancelled or invalid input");
+        return;
+    }
+    auto sceneId = promptLine("Scene id to bind to:");
+    if (!sceneId.has_value())
+    {
+        logLine("BindSceneTrigger: cancelled or empty scene id");
+        return;
+    }
+    try
+    {
+        proxy.callMethod("BindSceneTrigger")
+            .onInterface(IFACE_NAME)
+            .withArguments(*sourceNode, *sceneNumber, *keyAttribute, *sceneId);
+        logLine("BindSceneTrigger node=" + std::to_string(static_cast<unsigned>(*sourceNode)) +
+                " scene=" + std::to_string(static_cast<unsigned>(*sceneNumber)) + " -> \"" + *sceneId + "\"");
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"BindSceneTrigger failed: "} + err.what());
+    }
+}
+
+auto handleUnbindSceneTrigger(sdbus::IProxy& proxy) -> void
+{
+    auto sourceNode   = promptNodeId("Source node:");
+    auto sceneNumber  = promptByte("Scene number (1-255):", 1, BYTE_MAX);
+    auto keyAttribute = promptByte("Key attribute (0-4):", 0, BYTE_MAX);
+    if (!sourceNode.has_value() || !sceneNumber.has_value() || !keyAttribute.has_value())
+    {
+        logLine("UnbindSceneTrigger: cancelled or invalid input");
+        return;
+    }
+    try
+    {
+        proxy.callMethod("UnbindSceneTrigger")
+            .onInterface(IFACE_NAME)
+            .withArguments(*sourceNode, *sceneNumber, *keyAttribute);
+        logLine("UnbindSceneTrigger node=" + std::to_string(static_cast<unsigned>(*sourceNode)) +
+                " scene=" + std::to_string(static_cast<unsigned>(*sceneNumber)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"UnbindSceneTrigger failed: "} + err.what());
     }
 }
 

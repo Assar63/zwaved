@@ -251,14 +251,20 @@ governs.
       Z-Stick Gen5 is a Static Controller (libtype 1). This only rules out
       E1 Tier 3; Tiers 1 (E2) and 2 are unaffected, so the foundation is not
       blocked.**
-- [ ] Confirm which CC real wall controllers emit to an association target (E2 /
-      Tier 1) — decides what the scene orchestrator keys on.
-- [ ] Decide whether `(sourceNode, command)` keying (Tier 1) is sufficient or
-      whether any target setup forces the Tier 2 endpoint spike.
-- [ ] Decide whether E3's control loop is in-scope or a separate epic.
-- [ ] Then split E2 / E3 (and, if pursued, E1 Tier 2/3) into per-PR child issues
-      (orchestrator, store, D-Bus, terminal — plus codecs for Tier 2/3) like the
-      thermostat quartet (#23).
+- [x] Confirm which CC real wall controllers emit to an association target (E2 /
+      Tier 1) — **resolved by implementing all three sources (#124): Central
+      Scene, Basic Set, and Scene Activation, behind a `source` discriminator,
+      so no single-CC bet was needed.**
+- [x] Decide whether `(sourceNode, command)` keying (Tier 1) is sufficient or
+      whether any target setup forces the Tier 2 endpoint spike — **Tier 1
+      keying shipped and sufficient for E2; Tier 2 remains an unscheduled E1
+      spike.**
+- [x] Decide whether E3's control loop is in-scope or a separate epic — **decided
+      2026-06-09: out of scope for epic #131 (aggregation/mirroring only); the
+      closed-loop control is deferred to its own future epic.**
+- [x] Then split E2 / E3 into per-PR child issues (orchestrator, store, D-Bus,
+      terminal) like the thermostat quartet (#23) — **E2 = #119 (#120–#124, all
+      merged); E3 = #131 (#132–#135). E1 Tier 2/3 not yet split.**
 
 ## Status / filed issues
 

@@ -267,11 +267,17 @@ governs.
   (D-Bus CRUD) ✅, **#123** (terminal UI) ✅, **#124** (extra trigger sources:
   Basic Set 0x20 + Scene Activation 0x2B, behind a `source` discriminator) ✅.
   Scenes run end-to-end from Central Scene, Basic Set, or Scene Activation
-  presses (see MANUAL §16d). E1/E3 remain exploratory here.
+  presses (see MANUAL §16d).
+- **E3 (thermostat management) is filed** as epic **#131**, scoped to
+  aggregation/mirroring (the closed-loop control deferred to its own epic) and
+  grouping via node metadata (#83) rather than a new store. Children: **#132**
+  (NodeMetadata reverse lookup / nodes-by-tag), **#133** (ThermostatOrchestrator
+  fan-out + mirror), **#134** (D-Bus logical-thermostat surface), **#135**
+  (terminal UI). E1 remains exploratory here.
 - Old TODO.md stubs are superseded by this doc:
   - "Virtual nodes" (#29) → **E1** (addressable presence).
-  - "Scene controller thread" (#30) → **E2 / epic #119** (the old #30 stub should
-    be closed or relabelled in favour of #119).
+  - "Scene controller thread" (#30) → **E2 / epic #119** (closed in favour of
+    #119, delivered).
   - "Thermostat management" → **E3**.
 
 ---

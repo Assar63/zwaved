@@ -40,6 +40,8 @@ constexpr const char* DELETE_SQL     = "DELETE FROM node_metadata WHERE home_id 
 constexpr const char* SELECT_ONE_SQL = "SELECT value FROM node_metadata WHERE home_id = ? AND node_id = ? AND key = ?";
 constexpr const char* SELECT_ALL_SQL =
     "SELECT key, value FROM node_metadata WHERE home_id = ? AND node_id = ? ORDER BY key";
+constexpr const char* SELECT_NODES_BY_TAG_SQL =
+    "SELECT node_id FROM node_metadata WHERE home_id = ? AND key = ? AND value = ? ORDER BY node_id ASC";
 
 auto formatHomeId(const std::vector<std::uint8_t>& bytes) -> std::string
 {
@@ -117,6 +119,10 @@ class Stmt
         }
         const int len = sqlite3_column_bytes(stmt_, col);
         return {text, text + len};
+    }
+    [[nodiscard]] auto columnInt(int col) const -> int
+    {
+        return sqlite3_column_int(stmt_, col);
     }
 
   private:
@@ -275,6 +281,29 @@ auto NodeMetadata::Store::getAll(std::uint8_t nodeId) const -> std::vector<Entry
     while (stmt.step() == SQLITE_ROW)
     {
         out.push_back(Entry{.key = stmt.columnText(0), .value = stmt.columnText(1)});
+    }
+    return out;
+}
+
+auto NodeMetadata::Store::nodesWith(const std::string& key, const std::string& value) const -> std::vector<std::uint8_t>
+{
+    std::vector<std::uint8_t> out;
+    const std::scoped_lock lock(state_->mutex);
+    if (state_->db == nullptr || !state_->currentHomeId.has_value())
+    {
+        return out;
+    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access): checked above; tidy can't track the short-circuit
+    const std::string& home = *state_->currentHomeId;
+    Stmt stmt(state_->db, SELECT_NODES_BY_TAG_SQL, "SELECT nodes by tag");
+    if (!stmt.valid())
+    {
+        return out;
+    }
+    stmt.bindText(1, home).bindText(2, key).bindText(3, value);
+    while (stmt.step() == SQLITE_ROW)
+    {
+        out.push_back(static_cast<std::uint8_t>(stmt.columnInt(0)));
     }
     return out;
 }

@@ -54,6 +54,8 @@ Implementation order (each shippable independently):
 
 > [epic: daemon-side closed-loop automation](https://github.com/Assar63/zwaved/issues/101) — daemon *reacts* to node events by *driving* other nodes/CCs (PolicyRegister desired-state re-assertion, verify-after-set, event-triggered cross-node reactions, set/level coalescing, schedules). Orchestrators stay in `src/orchestrator/` (prio 204, bus-only). Full rationale in the issue; broader design context in `FUTURE.md`.
 
+- [ ] [epic: Thermostat management](https://github.com/Assar63/zwaved/issues/131) (FUTURE.md E3) — a **logical thermostat** that fans a Mode/Setpoint Set out to the real climate nodes sharing a node-metadata tag (#83, e.g. `room=living-room`) and mirrors their Reports into an aggregated logical state. Pure orchestration (no virtual nodes). Scoped to **aggregation/mirroring**; closed-loop control (setpoint-vs-measured, schedules) deferred to its own epic. Children: [#132](https://github.com/Assar63/zwaved/issues/132) NodeMetadata reverse lookup, [#133](https://github.com/Assar63/zwaved/issues/133) ThermostatOrchestrator, [#134](https://github.com/Assar63/zwaved/issues/134) D-Bus surface, [#135](https://github.com/Assar63/zwaved/issues/135) terminal UI.
+
 ### Command classes
 
 **Simple — single fixed-shape payload, mirrors the existing BinarySwitch / Association pattern:**

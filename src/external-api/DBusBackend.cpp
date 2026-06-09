@@ -466,6 +466,14 @@ auto emitDeleteNodeMetadata(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId, co
     NodeMetadata::instance().remove(nodeId, key);
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitGetNodesByMetadata(DBusBackend::Impl& /*impl*/,
+                            const std::string& key,
+                            const std::string& value) -> std::vector<std::uint8_t>
+{
+    return NodeMetadata::instance().nodesWith(key, value);
+}
+
 // ---- Scene + trigger CRUD (#122) -------------------------------------
 // Thin adapters over SceneStore::instance(). A scene crosses the wire as
 // a(yay) — a list of (targetNodeId, ccPayload) actions; a trigger as

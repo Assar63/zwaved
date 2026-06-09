@@ -1126,9 +1126,13 @@ per network. Distinct from policies (§16b), which are *behavioural*.
 | `SetNodeMetadata` | `(y s s) → ()` | nodeId, key, value; an **empty value clears the key** |
 | `GetNodeMetadata` | `(y) → (a(ss))` | all key/value pairs for a node, ordered by key |
 | `DeleteNodeMetadata` | `(y s) → ()` | clear one key |
+| `GetNodesByMetadata` | `(s s) → (ay)` | **reverse lookup**: node ids carrying the exact tag `key=value`, ascending |
 
 Every Set/Delete emits a `NodeMetadataChanged(y)` signal (retained) so a UI
-can refresh without polling. Example — label node 5:
+can refresh without polling. The reverse lookup (`GetNodesByMetadata`) answers
+"which nodes are tagged `room=living-room`" — the membership resolver the
+logical thermostat (epic #131) builds on. Example — label node 5 and group by
+room:
 
 ```bash
 busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
@@ -1136,6 +1140,9 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
     com.tiunda.ZWaved1 GetNodeMetadata y 5
 # → a(ss)  1  "name" "Kitchen light"
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetNodesByMetadata ss room "Living room"
+# → ay  2  7 12     (nodes 7 and 12 are tagged room="Living room")
 ```
 
 ## 16d. Scene control (daemon-side scenes)

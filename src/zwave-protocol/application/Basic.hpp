@@ -47,6 +47,19 @@ struct Report
 /// Accepts both v1 (3 bytes) and v2+ (5 bytes) wire forms. Returns
 /// std::nullopt if the bytes are not a Basic Report.
 [[nodiscard]] auto decodeReport(std::span<const uint8_t> payload) -> std::optional<Report>;
+
+/// Decoded Basic Set payload — what a node sends *to us* when it drives
+/// its association target with a Basic Set (PIR sensors, simple wall
+/// switches). Single value byte, same semantics as a Report's value.
+struct Set
+{
+    uint8_t value = VALUE_OFF;
+};
+
+/// Decode a Basic Set payload (the bytes inside an
+/// APPLICATION_COMMAND_HANDLER frame, starting with COMMAND_CLASS).
+/// Returns std::nullopt if the bytes are not a Basic Set.
+[[nodiscard]] auto decodeSet(std::span<const uint8_t> payload) -> std::optional<Set>;
 }  // namespace Basic
 
 #endif  // ZWAVED_BASIC_HPP

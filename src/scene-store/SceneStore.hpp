@@ -25,6 +25,16 @@
 /// the D-Bus surface (#122) build on top.
 namespace SceneStore
 {
+/// Which Command Class a trigger fires from. Discriminates the trigger key
+/// so the same (node, selector) can't collide across sources (#124). The
+/// `sceneNumber`/`keyAttribute` fields are reinterpreted per source:
+///   SOURCE_CENTRAL_SCENE    — sceneNumber = scene, keyAttribute = key attr
+///   SOURCE_BASIC_SET        — sceneNumber = Basic value, keyAttribute = 0
+///   SOURCE_SCENE_ACTIVATION — sceneNumber = scene id,    keyAttribute = 0
+constexpr std::uint8_t SOURCE_CENTRAL_SCENE    = 0;
+constexpr std::uint8_t SOURCE_BASIC_SET        = 1;
+constexpr std::uint8_t SOURCE_SCENE_ACTIVATION = 2;
+
 /// One step of a scene: send `ccPayload` (a raw Command Class frame, the
 /// same bytes a `SendData` carries) to `targetNodeId`.
 struct Action
@@ -33,9 +43,12 @@ struct Action
     std::vector<std::uint8_t> ccPayload;
 };
 
-/// A press-to-scene binding.
+/// A press-to-scene binding. `source` selects which CC the press arrives on
+/// (see SOURCE_* above); `sceneNumber`/`keyAttribute` are the per-source
+/// selector fields.
 struct Trigger
 {
+    std::uint8_t source       = SOURCE_CENTRAL_SCENE;
     std::uint8_t sourceNodeId = 0;
     std::uint8_t sceneNumber  = 0;
     std::uint8_t keyAttribute = 0;
@@ -75,21 +88,27 @@ class Store
     [[nodiscard]] auto listScenes() const -> std::vector<std::string>;
 
     // ---- Triggers ----
-    /// Bind (or rebind) a press to a scene id.
+    /// Bind (or rebind) a press to a scene id. `source` is one of SOURCE_*;
+    /// `sceneNumber`/`keyAttribute` are the per-source selector fields.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire fields, named at call sites
-    auto bindTrigger(std::uint8_t sourceNodeId,
+    auto bindTrigger(std::uint8_t source,
+                     std::uint8_t sourceNodeId,
                      std::uint8_t sceneNumber,
                      std::uint8_t keyAttribute,
                      const std::string& sceneId) -> void;
     /// Remove a press binding (no-op if absent).
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire fields, named at call sites
-    auto unbindTrigger(std::uint8_t sourceNodeId, std::uint8_t sceneNumber, std::uint8_t keyAttribute) -> void;
+    auto unbindTrigger(std::uint8_t source,
+                       std::uint8_t sourceNodeId,
+                       std::uint8_t sceneNumber,
+                       std::uint8_t keyAttribute) -> void;
     /// Resolve a press to its scene id, or nullopt if no binding.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire fields, named at call sites
-    [[nodiscard]] auto resolveTrigger(std::uint8_t sourceNodeId,
+    [[nodiscard]] auto resolveTrigger(std::uint8_t source,
+                                      std::uint8_t sourceNodeId,
                                       std::uint8_t sceneNumber,
                                       std::uint8_t keyAttribute) const -> std::optional<std::string>;
-    /// All triggers for the current home, ordered by (source, scene, key).
+    /// All triggers for the current home, ordered by (source, node, scene, key).
     [[nodiscard]] auto listTriggers() const -> std::vector<Trigger>;
 
   private:

@@ -53,6 +53,7 @@ target_sources(zwaved PRIVATE
     Meter.cpp
     ColorSwitch.cpp
     CentralScene.cpp
+    SceneActivation.cpp
     ThermostatMode.cpp
     ThermostatSetpoint.cpp
     ThermostatOperatingState.cpp

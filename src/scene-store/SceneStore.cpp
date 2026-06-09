@@ -26,20 +26,32 @@ constexpr const char* DEFAULT_STATE_DIR = "/var/lib/zwaved";
 constexpr const char* STATE_DIR_ENV     = "ZWAVED_STATE_DIR";
 constexpr const char* DB_FILENAME       = "nodes.db";
 
-constexpr const char* SCHEMA_SQL = R"(
+// Schema version stamped into PRAGMA user_version. v1 added the `source`
+// discriminator column to scene_triggers (#124); a v0 DB (created by #120,
+// before #124) is migrated in the constructor.
+constexpr int SCHEMA_VERSION = 1;
+
+constexpr const char* SCHEMA_SCENES_SQL = R"(
 CREATE TABLE IF NOT EXISTS scenes (
     home_id  TEXT NOT NULL,
     scene_id TEXT NOT NULL,
     actions  BLOB NOT NULL,
     PRIMARY KEY (home_id, scene_id)
 );
+)";
+
+// v1 trigger table: `source` (SOURCE_* discriminator) is part of the key so
+// Central Scene / Basic Set / Scene Activation triggers can share the same
+// (node, selector) without colliding.
+constexpr const char* SCHEMA_TRIGGERS_SQL = R"(
 CREATE TABLE IF NOT EXISTS scene_triggers (
     home_id        TEXT    NOT NULL,
+    source         INTEGER NOT NULL,
     source_node_id INTEGER NOT NULL,
     scene_number   INTEGER NOT NULL,
     key_attribute  INTEGER NOT NULL,
     scene_id       TEXT    NOT NULL,
-    PRIMARY KEY (home_id, source_node_id, scene_number, key_attribute)
+    PRIMARY KEY (home_id, source, source_node_id, scene_number, key_attribute)
 );
 )";
 
@@ -49,24 +61,37 @@ constexpr const char* DELETE_SCENE_SQL = "DELETE FROM scenes WHERE home_id = ? A
 constexpr const char* LIST_SCENES_SQL  = "SELECT scene_id FROM scenes WHERE home_id = ? ORDER BY scene_id ASC";
 
 constexpr const char* UPSERT_TRIGGER_SQL  = "INSERT OR REPLACE INTO scene_triggers "
-                                            "(home_id, source_node_id, scene_number, key_attribute, scene_id) "
-                                            "VALUES (?, ?, ?, ?, ?)";
-constexpr const char* DELETE_TRIGGER_SQL  = "DELETE FROM scene_triggers WHERE home_id = ? AND source_node_id = ? "
-                                            "AND scene_number = ? AND key_attribute = ?";
-constexpr const char* RESOLVE_TRIGGER_SQL = "SELECT scene_id FROM scene_triggers WHERE home_id = ? "
+                                            "(home_id, source, source_node_id, scene_number, key_attribute, scene_id) "
+                                            "VALUES (?, ?, ?, ?, ?, ?)";
+constexpr const char* DELETE_TRIGGER_SQL  = "DELETE FROM scene_triggers WHERE home_id = ? AND source = ? "
                                             "AND source_node_id = ? AND scene_number = ? AND key_attribute = ?";
-constexpr const char* LIST_TRIGGERS_SQL   = "SELECT source_node_id, scene_number, key_attribute, scene_id "
+constexpr const char* RESOLVE_TRIGGER_SQL = "SELECT scene_id FROM scene_triggers WHERE home_id = ? AND source = ? "
+                                            "AND source_node_id = ? AND scene_number = ? AND key_attribute = ?";
+constexpr const char* LIST_TRIGGERS_SQL   = "SELECT source, source_node_id, scene_number, key_attribute, scene_id "
                                             "FROM scene_triggers WHERE home_id = ? "
-                                            "ORDER BY source_node_id ASC, scene_number ASC, key_attribute ASC";
+                                            "ORDER BY source ASC, source_node_id ASC, scene_number ASC, "
+                                            "key_attribute ASC";
 
-// 1-based bind positions for the 5-column trigger upsert (named so the 5th
-// stays out of the magic-number checker; positions 1-4 are small enough to
-// be left as literals in the other statements).
+// v0 -> v1 migration: copy legacy rows (Central Scene only) into the v1
+// table, stamping source = SOURCE_CENTRAL_SCENE (0).
+constexpr const char* MIGRATE_RENAME_SQL = "ALTER TABLE scene_triggers RENAME TO scene_triggers_legacy";
+constexpr const char* MIGRATE_COPY_SQL =
+    "INSERT OR IGNORE INTO scene_triggers (home_id, source, source_node_id, scene_number, key_attribute, scene_id) "
+    "SELECT home_id, 0, source_node_id, scene_number, key_attribute, scene_id FROM scene_triggers_legacy";
+constexpr const char* MIGRATE_DROP_SQL    = "DROP TABLE scene_triggers_legacy";
+constexpr const char* LEGACY_EXISTS_SQL   = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scene_triggers'";
+constexpr const char* READ_USER_VERSION   = "PRAGMA user_version";
+constexpr const char* SET_USER_VERSION_V1 = "PRAGMA user_version = 1";
+
+// 1-based bind positions for the 6-column trigger upsert (named so the 5th /
+// 6th stay out of the magic-number checker; positions 1-4 are small enough
+// to be left as literals in the other statements).
 constexpr int BIND_TRIGGER_HOME     = 1;
 constexpr int BIND_TRIGGER_SOURCE   = 2;
-constexpr int BIND_TRIGGER_SCENE_NO = 3;
-constexpr int BIND_TRIGGER_KEY      = 4;
-constexpr int BIND_TRIGGER_SCENE_ID = 5;
+constexpr int BIND_TRIGGER_NODE     = 3;
+constexpr int BIND_TRIGGER_SCENE_NO = 4;
+constexpr int BIND_TRIGGER_KEY      = 5;
+constexpr int BIND_TRIGGER_SCENE_ID = 6;
 
 // Versioned, length-prefixed serialization of a scene's action list (same
 // idiom as PolicyRegister's policy blob — the leading version byte makes a
@@ -198,6 +223,66 @@ class Stmt
     sqlite3* database_  = nullptr;
     const char* label_  = nullptr;
 };
+
+/// Run one bare SQL statement, logging on failure. Returns success.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): SQL and label are clearly distinct at call sites
+auto execSql(sqlite3* database, const char* sql, const char* label) -> bool
+{
+    char* err = nullptr;
+    if (sqlite3_exec(database, sql, nullptr, nullptr, &err) != SQLITE_OK)
+    {
+        Logger::error(std::string("[SceneStore] ") + label + " failed: " + (err != nullptr ? err : "?"));
+        sqlite3_free(err);
+        return false;
+    }
+    return true;
+}
+
+/// Create the schema and migrate a pre-#124 (v0) trigger table to v1 (adds
+/// the `source` discriminator). Idempotent: a fresh DB gets the v1 tables
+/// directly; an already-migrated DB (user_version == 1) is left untouched.
+auto runSchema(sqlite3* database) -> bool
+{
+    if (!execSql(database, SCHEMA_SCENES_SQL, "CREATE scenes"))
+    {
+        return false;
+    }
+    int userVersion = 0;
+    {
+        Stmt stmt(database, READ_USER_VERSION, "read user_version");
+        if (stmt.valid() && stmt.step() == SQLITE_ROW)
+        {
+            userVersion = sqlite3_column_int(stmt.raw(), 0);
+        }
+    }
+    if (userVersion >= SCHEMA_VERSION)
+    {
+        // Already migrated — the v1 scene_triggers table is present.
+        return true;
+    }
+    // Does a legacy (v0) scene_triggers table exist to migrate from?
+    bool legacy = false;
+    {
+        Stmt stmt(database, LEGACY_EXISTS_SQL, "check legacy triggers");
+        legacy = stmt.valid() && stmt.step() == SQLITE_ROW;
+    }
+    if (legacy)
+    {
+        if (!execSql(database, MIGRATE_RENAME_SQL, "rename legacy triggers") ||
+            !execSql(database, SCHEMA_TRIGGERS_SQL, "CREATE scene_triggers") ||
+            !execSql(database, MIGRATE_COPY_SQL, "copy legacy triggers") ||
+            !execSql(database, MIGRATE_DROP_SQL, "drop legacy triggers"))
+        {
+            return false;
+        }
+        Logger::info("[SceneStore] migrated scene_triggers to v1 (added source discriminator)");
+    }
+    else if (!execSql(database, SCHEMA_TRIGGERS_SQL, "CREATE scene_triggers"))
+    {
+        return false;
+    }
+    return execSql(database, SET_USER_VERSION_V1, "set user_version");
+}
 }  // namespace
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): pimpl, public members read like a struct
@@ -241,11 +326,8 @@ SceneStore::Store::Store(const std::filesystem::path& dbPath)
         state_->db = nullptr;
         return;
     }
-    char* err = nullptr;
-    if (sqlite3_exec(state_->db, SCHEMA_SQL, nullptr, nullptr, &err) != SQLITE_OK)
+    if (!runSchema(state_->db))
     {
-        Logger::error(std::string("[SceneStore] CREATE TABLE failed: ") + (err != nullptr ? err : "?"));
-        sqlite3_free(err);
         sqlite3_close(state_->db);
         state_->db = nullptr;
         return;
@@ -353,7 +435,8 @@ auto SceneStore::Store::listScenes() const -> std::vector<std::string>
     return out;
 }
 
-auto SceneStore::Store::bindTrigger(std::uint8_t sourceNodeId,
+auto SceneStore::Store::bindTrigger(std::uint8_t source,
+                                    std::uint8_t sourceNodeId,
                                     std::uint8_t sceneNumber,
                                     std::uint8_t keyAttribute,
                                     const std::string& sceneId) -> void
@@ -370,7 +453,8 @@ auto SceneStore::Store::bindTrigger(std::uint8_t sourceNodeId,
     if (stmt.valid())
     {
         stmt.bindText(BIND_TRIGGER_HOME, home)
-            .bindInt(BIND_TRIGGER_SOURCE, sourceNodeId)
+            .bindInt(BIND_TRIGGER_SOURCE, source)
+            .bindInt(BIND_TRIGGER_NODE, sourceNodeId)
             .bindInt(BIND_TRIGGER_SCENE_NO, sceneNumber)
             .bindInt(BIND_TRIGGER_KEY, keyAttribute)
             .bindText(BIND_TRIGGER_SCENE_ID, sceneId)
@@ -378,7 +462,8 @@ auto SceneStore::Store::bindTrigger(std::uint8_t sourceNodeId,
     }
 }
 
-auto SceneStore::Store::unbindTrigger(std::uint8_t sourceNodeId,
+auto SceneStore::Store::unbindTrigger(std::uint8_t source,
+                                      std::uint8_t sourceNodeId,
                                       std::uint8_t sceneNumber,
                                       std::uint8_t keyAttribute) -> void
 {
@@ -392,11 +477,17 @@ auto SceneStore::Store::unbindTrigger(std::uint8_t sourceNodeId,
     Stmt stmt(state_->db, DELETE_TRIGGER_SQL, "DELETE trigger");
     if (stmt.valid())
     {
-        stmt.bindText(1, home).bindInt(2, sourceNodeId).bindInt(3, sceneNumber).bindInt(4, keyAttribute).execDone();
+        stmt.bindText(BIND_TRIGGER_HOME, home)
+            .bindInt(BIND_TRIGGER_SOURCE, source)
+            .bindInt(BIND_TRIGGER_NODE, sourceNodeId)
+            .bindInt(BIND_TRIGGER_SCENE_NO, sceneNumber)
+            .bindInt(BIND_TRIGGER_KEY, keyAttribute)
+            .execDone();
     }
 }
 
-auto SceneStore::Store::resolveTrigger(std::uint8_t sourceNodeId,
+auto SceneStore::Store::resolveTrigger(std::uint8_t source,
+                                       std::uint8_t sourceNodeId,
                                        std::uint8_t sceneNumber,
                                        std::uint8_t keyAttribute) const -> std::optional<std::string>
 {
@@ -412,7 +503,11 @@ auto SceneStore::Store::resolveTrigger(std::uint8_t sourceNodeId,
     {
         return std::nullopt;
     }
-    stmt.bindText(1, home).bindInt(2, sourceNodeId).bindInt(3, sceneNumber).bindInt(4, keyAttribute);
+    stmt.bindText(BIND_TRIGGER_HOME, home)
+        .bindInt(BIND_TRIGGER_SOURCE, source)
+        .bindInt(BIND_TRIGGER_NODE, sourceNodeId)
+        .bindInt(BIND_TRIGGER_SCENE_NO, sceneNumber)
+        .bindInt(BIND_TRIGGER_KEY, keyAttribute);
     if (stmt.step() != SQLITE_ROW)
     {
         return std::nullopt;
@@ -444,10 +539,11 @@ auto SceneStore::Store::listTriggers() const -> std::vector<Trigger>
     while (stmt.step() == SQLITE_ROW)
     {
         Trigger trigger;
-        trigger.sourceNodeId = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), 0));
-        trigger.sceneNumber  = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), 1));
-        trigger.keyAttribute = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), 2));
-        const auto* text     = sqlite3_column_text(stmt.raw(), 3);
+        trigger.source       = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), 0));
+        trigger.sourceNodeId = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), 1));
+        trigger.sceneNumber  = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), 2));
+        trigger.keyAttribute = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), 3));
+        const auto* text     = sqlite3_column_text(stmt.raw(), 4);
         if (text != nullptr)
         {
             trigger.sceneId =

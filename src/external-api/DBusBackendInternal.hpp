@@ -65,9 +65,10 @@ using NodeMetadataTuple = sdbus::Struct<std::string, std::string>;
 // (GetScene return). Custom handlers convert to/from SceneStore::Action.
 using SceneActionEntry = sdbus::Struct<std::uint8_t, std::vector<std::uint8_t>>;
 
-// One scene trigger: (sourceNodeId, sceneNumber, keyAttribute, sceneId).
-// Matches the a(yyys) ListSceneTriggers return shape.
-using SceneTriggerEntry = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::string>;
+// One scene trigger: (source, sourceNodeId, sceneNumber, keyAttribute,
+// sceneId). Matches the a(yyyys) ListSceneTriggers return shape. `source`
+// is the SceneStore SOURCE_* discriminator (#124).
+using SceneTriggerEntry = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t, std::string>;
 
 using DaemonErrorTuple = sdbus::Struct<std::uint8_t, std::string, std::uint8_t, std::string>;
 

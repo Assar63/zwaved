@@ -812,6 +812,37 @@ events:
       - { name: sceneNumber,    type: u8,   default: 0 }
       - { name: slowRefresh,    type: bool, default: false }
 
+  - name: BasicSetReceived
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api, orchestrator] }
+    doc: |
+      A node sent us a Basic (CC 0x20) Set — the way many non-scene
+      controllers (PIR sensors, simple wall switches) address their
+      association target. Push-only: republished by the cc-translator from
+      inbound ApplicationCommand frames whose ccData parses as a Basic Set.
+      `value`: 0x00 off/inactive, 0xFF on/active, 0x01..0x63 a level. The
+      SceneOrchestrator (#124) keys scene triggers on (sourceNodeId, value).
+    fields:
+      - { name: sourceNodeId, type: u8, default: 0 }
+      - { name: value,        type: u8, default: 0 }
+
+  - name: SceneActivationSet
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api, orchestrator] }
+    doc: |
+      A node sent us a Scene Activation (CC 0x2B) Set — a scene controller
+      announcing "scene N is now active". Push-only: republished by the
+      cc-translator from inbound ApplicationCommand frames whose ccData
+      parses as a Scene Activation Set. `sceneId` is the activated scene
+      number (1..255); `dimmingDuration` is the requested transition time
+      (0x00 instant, 0x01..0x7F seconds, 0x80..0xFE minutes, 0xFF default).
+      The SceneOrchestrator (#124) keys scene triggers on (sourceNodeId,
+      sceneId).
+    fields:
+      - { name: sourceNodeId,    type: u8, default: 0 }
+      - { name: sceneId,         type: u8, default: 0 }
+      - { name: dimmingDuration, type: u8, default: 0 }
+
   - name: DoorLockOperationReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -1979,17 +2010,24 @@ dbus:
       action:
         custom: emitListScenes
 
+    # `source` discriminates the trigger source CC so the same
+    # (node, selector) can't collide across sources: 0 Central Scene
+    # (selector = sceneNumber, keyAttribute meaningful), 1 Basic Set
+    # (selector = value, keyAttribute 0), 2 Scene Activation
+    # (selector = sceneId, keyAttribute 0). See #124 / MANUAL §16d.
     - name: BindSceneTrigger
       params:
+        - { name: source,       dbus: y, cpp: u8, doc: "0 Central Scene, 1 Basic Set, 2 Scene Activation" }
         - { name: sourceNodeId, dbus: y, cpp: u8 }
-        - { name: sceneNumber,  dbus: y, cpp: u8 }
-        - { name: keyAttribute, dbus: y, cpp: u8 }
+        - { name: sceneNumber,  dbus: y, cpp: u8, doc: "selector: scene/value/sceneId per source" }
+        - { name: keyAttribute, dbus: y, cpp: u8, doc: "Central Scene key attribute; 0 for other sources" }
         - { name: sceneId,      dbus: s, cpp: string }
       action:
         custom: emitBindSceneTrigger
 
     - name: UnbindSceneTrigger
       params:
+        - { name: source,       dbus: y, cpp: u8 }
         - { name: sourceNodeId, dbus: y, cpp: u8 }
         - { name: sceneNumber,  dbus: y, cpp: u8 }
         - { name: keyAttribute, dbus: y, cpp: u8 }
@@ -2000,7 +2038,7 @@ dbus:
       params: []
       returns:
         type: list<SceneTriggerEntry>
-        dbus: a(yyys)
+        dbus: a(yyyys)
       action:
         custom: emitListSceneTriggers
 
@@ -2147,6 +2185,21 @@ dbus:
         - { name: slowRefresh,    dbus: b, doc: "v2+ slow-refresh flag for held keys" }
       triggered_by:
         event: CentralSceneNotification
+
+    - name: BasicSetReceived
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: value,        dbus: y, doc: "0x00 off, 0xFF on, 0x01..0x63 level" }
+      triggered_by:
+        event: BasicSetReceived
+
+    - name: SceneActivationSet
+      params:
+        - { name: sourceNodeId,    dbus: y }
+        - { name: sceneId,         dbus: y, doc: "activated scene number 1..255" }
+        - { name: dimmingDuration, dbus: y, doc: "0 instant, 1..0x7F sec, 0x80..0xFE min, 0xFF default" }
+      triggered_by:
+        event: SceneActivationSet
 
     - name: DoorLockOperationReport
       params:
@@ -2524,6 +2577,24 @@ modules:
           - { name: keyAttribute,   type: u8,   doc: "0 press1x, 1 release, 2 hold, 3 press2x, …" }
           - { name: sceneNumber,    type: u8 }
           - { name: slowRefresh,    type: bool, doc: "v2+ slow-refresh flag (bit 7 of properties)" }
+
+  - name: SceneActivation
+    wire:
+      class_byte: 0x2B
+      prefix: SCENE_ACTIVATION
+    description: |
+      Push-only scene events from controllers that announce "scene N is
+      now active" via SCENE_ACTIVATION_SET (0x01). The daemon never sends
+      Scene Activation frames — it only decodes the inbound SET into a
+      typed signal the SceneOrchestrator (#124) keys triggers on. The
+      decode lives in the hand-written SceneActivation.cpp.
+    commands:
+      - name: Set
+        wire:
+          byte: 0x01
+        decoded_struct:
+          - { name: sceneId,         type: u8, doc: "activated scene number 1..255" }
+          - { name: dimmingDuration, type: u8, doc: "0 instant, 1..0x7F sec, 0x80..0xFE min, 0xFF default" }
 
   - name: DoorLock
     wire:
@@ -3205,6 +3276,27 @@ translations:
       keyAttribute:   decoded.keyAttribute
       sceneNumber:    decoded.sceneNumber
       slowRefresh:    decoded.slowRefresh
+
+  - publishes: BasicSetReceived
+    triggered_by: ApplicationCommand
+    decode:
+      codec: Basic.decodeSet
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      value:        decoded.value
+
+  - publishes: SceneActivationSet
+    triggered_by: ApplicationCommand
+    decode:
+      codec: SceneActivation.decodeSet
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:    event.sourceNodeId
+      sceneId:         decoded.sceneId
+      dimmingDuration: decoded.dimmingDuration
 
   - publishes: DoorLockOperationReport
     triggered_by: ApplicationCommand

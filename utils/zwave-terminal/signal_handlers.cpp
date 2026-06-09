@@ -187,6 +187,29 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
+    proxy.uponSignal("BasicSetReceived")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId, std::uint8_t value) -> void
+            {
+                std::ostringstream stream;
+                stream << "BasicSetReceived node=" << static_cast<unsigned>(sourceNodeId)
+                       << " value=" << static_cast<unsigned>(value);
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("SceneActivationSet")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId, std::uint8_t sceneId, std::uint8_t dimmingDuration) -> void
+            {
+                std::ostringstream stream;
+                stream << "SceneActivationSet node=" << static_cast<unsigned>(sourceNodeId)
+                       << " scene=" << static_cast<unsigned>(sceneId)
+                       << " duration=" << static_cast<unsigned>(dimmingDuration);
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("DoorLockOperationReport")
         .onInterface(IFACE_NAME)
         .call(

@@ -129,3 +129,43 @@ TEST_F(NodeMetadataTest, PersistsAcrossRestart)
     EXPECT_EQ(*second.get(5, "name"), "Kitchen light");
     EXPECT_EQ(*second.get(5, "purpose"), "main light");
 }
+
+TEST_F(NodeMetadataTest, NodesWithTagReverseLookup)
+{
+    NodeMetadata::Store store(dbPath_);
+    store.setHomeId(kHomeId);
+    store.set(5, "room", "living-room");
+    store.set(8, "room", "living-room");
+    store.set(3, "room", "living-room");
+    store.set(9, "room", "kitchen");
+    store.set(8, "name", "TRV");  // a different key on a member shouldn't matter
+
+    // Ascending node id, only exact (key,value) matches.
+    EXPECT_EQ(store.nodesWith("room", "living-room"), (std::vector<std::uint8_t>{3, 5, 8}));
+    EXPECT_EQ(store.nodesWith("room", "kitchen"), (std::vector<std::uint8_t>{9}));
+    EXPECT_TRUE(store.nodesWith("room", "bathroom").empty());     // no such value
+    EXPECT_TRUE(store.nodesWith("zone", "living-room").empty());  // no such key
+}
+
+TEST_F(NodeMetadataTest, NodesWithIsHomeScoped)
+{
+    const std::vector<std::uint8_t> otherHome{0x11, 0x22, 0x33, 0x44};
+    NodeMetadata::Store store(dbPath_);
+    store.setHomeId(kHomeId);
+    store.set(5, "room", "den");
+
+    store.setHomeId(otherHome);
+    EXPECT_TRUE(store.nodesWith("room", "den").empty());  // other network
+    store.setHomeId(kHomeId);
+    EXPECT_EQ(store.nodesWith("room", "den"), (std::vector<std::uint8_t>{5}));
+}
+
+TEST_F(NodeMetadataTest, NodesWithClearedTagDrops)
+{
+    NodeMetadata::Store store(dbPath_);
+    store.setHomeId(kHomeId);
+    store.set(5, "room", "den");
+    store.set(6, "room", "den");
+    store.set(5, "room", "");  // empty value clears the key
+    EXPECT_EQ(store.nodesWith("room", "den"), (std::vector<std::uint8_t>{6}));
+}

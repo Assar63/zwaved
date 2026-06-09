@@ -1969,6 +1969,19 @@ dbus:
       action:
         custom: emitDeleteNodeMetadata
 
+    # Reverse lookup (#132): nodes carrying the exact tag key=value. The
+    # membership resolver for the logical thermostat (#131) — "which nodes
+    # are tagged room=living-room". Returns the node ids as a byte array.
+    - name: GetNodesByMetadata
+      params:
+        - { name: key,   dbus: s, cpp: string }
+        - { name: value, dbus: s, cpp: string }
+      returns:
+        type: bytes
+        dbus: ay
+      action:
+        custom: emitGetNodesByMetadata
+
     # ---- Scene + trigger CRUD (#122) ------------------------------
     # Read/write the durable scene store (#120) over D-Bus. A *scene*
     # crosses the wire as a(yay) — an ordered list of

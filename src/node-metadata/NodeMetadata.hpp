@@ -57,6 +57,13 @@ class Store
     /// All key/value pairs for `nodeId`, ordered by key.
     [[nodiscard]] auto getAll(std::uint8_t nodeId) const -> std::vector<Entry>;
 
+    /// Reverse lookup: every node in the current network carrying the exact
+    /// tag `key=value`, ascending node id. The membership resolver the
+    /// logical thermostat (#131) builds on — "which nodes are tagged
+    /// `room=living-room`". Empty if none / no DB / no home bound.
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): key and value are clearly named at call sites
+    [[nodiscard]] auto nodesWith(const std::string& key, const std::string& value) const -> std::vector<std::uint8_t>;
+
   private:
     struct State;
     std::unique_ptr<State> state_;

@@ -1143,14 +1143,27 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 The daemon runs **scenes** in response to physical button presses. A *scene*
 is an ordered list of **actions** — each a raw Command Class frame (the same
 bytes a `SendData` carries) addressed to a target node. A *trigger* binds a
-Central Scene press `(sourceNodeId, sceneNumber, keyAttribute)` to a scene id,
-so the same scene number from different controllers can run different scenes
-("scene 1" from the living room vs. the hallway). When a bound press arrives,
-the SceneOrchestrator replays the scene's actions and emits a `SceneActivated`
-signal. Stored in `nodes.db`, scoped per network.
+physical press to a scene id, so the same selector from different controllers
+can run different scenes ("scene 1" from the living room vs. the hallway). When
+a bound press arrives, the SceneOrchestrator replays the scene's actions and
+emits a `SceneActivated` signal. Stored in `nodes.db`, scoped per network.
 
 A scene crosses the wire as `a(yay)` — a list of `(targetNodeId, ccPayload)`
-structs; a trigger list as `a(yyys)`.
+structs; a trigger list as `a(yyyys)`.
+
+**Trigger sources.** A trigger's leading `source` byte selects which Command
+Class the press arrives on (#124). The `sceneNumber` field is reinterpreted as
+a per-source *selector*, and `keyAttribute` is only meaningful for Central
+Scene:
+
+| `source` | CC | selector (`sceneNumber`) | `keyAttribute` |
+|----------|----|--------------------------|----------------|
+| `0` | Central Scene (0x5B) | scene number | press 1×/2×/hold/… |
+| `1` | Basic Set (0x20) | Basic value (0/0xFF/level) | 0 (ignored) |
+| `2` | Scene Activation (0x2B) | activation scene id | 0 (ignored) |
+
+The `source` is part of the trigger key, so the same `(node, selector)` can be
+bound independently on each source without colliding.
 
 | Method | Signature | Notes |
 |--------|-----------|-------|
@@ -1158,17 +1171,22 @@ structs; a trigger list as `a(yyys)`.
 | `GetScene` | `(s) → (a(yay))` | the scene's actions; empty if no such scene |
 | `DeleteScene` | `(s) → ()` | remove a scene (dangling triggers become no-ops) |
 | `ListScenes` | `() → (as)` | all scene ids for the network, ascending |
-| `BindSceneTrigger` | `(y y y s) → ()` | sourceNodeId, sceneNumber, keyAttribute → sceneId |
-| `UnbindSceneTrigger` | `(y y y) → ()` | remove a press binding |
-| `ListSceneTriggers` | `() → (a(yyys))` | rows of (sourceNodeId, sceneNumber, keyAttribute, sceneId) |
+| `BindSceneTrigger` | `(y y y y s) → ()` | source, sourceNodeId, selector, keyAttribute → sceneId |
+| `UnbindSceneTrigger` | `(y y y y) → ()` | remove a press binding |
+| `ListSceneTriggers` | `() → (a(yyyys))` | rows of (source, sourceNodeId, selector, keyAttribute, sceneId) |
 
 When a scene runs, the daemon emits `SceneActivated(y y y s u)` —
-`(sourceNodeId, sceneNumber, keyAttribute, sceneId, actionCount)`. A press that
-resolves to a deleted scene still fires `SceneActivated` with `actionCount = 0`;
-an unbound press fires nothing.
+`(sourceNodeId, sceneNumber, keyAttribute, sceneId, actionCount)` (for Basic /
+Scene Activation triggers `sceneNumber` carries the selector and `keyAttribute`
+is 0). A press that resolves to a deleted scene still fires `SceneActivated`
+with `actionCount = 0`; an unbound press fires nothing. The two non-Central
+sources also surface as their own observability signals — `BasicSetReceived(y
+y)` and `SceneActivationSet(y y y)` — fired whenever such a frame arrives,
+whether or not it's bound to a scene.
 
 Example — make a scene "tv" that turns node 5 on (`0x25 0x01 0xFF`) and node 6
-off (`0x25 0x01 0x00`), then run it from press 1× of scene 1 on controller 7:
+off (`0x25 0x01 0x00`), then run it from press 1× of scene 1 on Central Scene
+controller 7:
 
 ```bash
 # Define the scene: a(yay) = 2 actions
@@ -1176,13 +1194,16 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
     com.tiunda.ZWaved1 SetScene "sa(yay)" tv 2 \
     5 3 0x25 0x01 0xFF \
     6 3 0x25 0x01 0x00
-# Bind controller 7 / scene 1 / press 1x (keyAttribute 0) to it
+# Bind source 0 (Central Scene), controller 7, scene 1, press 1x (key 0)
 busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
-    com.tiunda.ZWaved1 BindSceneTrigger yyys 7 1 0 tv
+    com.tiunda.ZWaved1 BindSceneTrigger yyyys 0 7 1 0 tv
+# Bind the same scene to a Basic Set "on" (0xFF=255) from node 8 (source 1)
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 BindSceneTrigger yyyys 1 8 255 0 tv
 # Inspect
 busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
     com.tiunda.ZWaved1 ListSceneTriggers
-# → a(yyys)  1  7 1 0 "tv"
+# → a(yyyys)  2  0 7 1 0 "tv"  1 8 255 0 "tv"
 ```
 
 (In the `SetScene` call each action is `targetNodeId`, then the `ay` payload as
@@ -1190,11 +1211,14 @@ a length followed by its bytes — `5 3 0x25 0x01 0xFF` is "node 5, 3-byte
 payload `25 01 FF`".)
 
 `zwave-terminal` drives all of this from the `[e]` **Scenes** submenu: `[l]`
-list scenes (with their actions), `[t]` list triggers, `[s]` set/edit a scene
-(prompts a scene id, then repeatedly asks for a target node + CC payload bytes
-until you leave the node blank), `[d]` delete a scene, `[b]` bind a trigger,
-`[u]` unbind one. When a scene runs, the `SceneActivated` signal lands in the
-activity pane — e.g. `SceneActivated node=7 scene=1 1x -> "tv" (2 actions)`.
+list scenes (with their actions), `[t]` list triggers (tagged by source), `[s]`
+set/edit a scene (prompts a scene id, then repeatedly asks for a target node +
+CC payload bytes until you leave the node blank), `[d]` delete a scene, `[b]`
+bind a trigger (prompts the source kind first, then the source-appropriate
+selector), `[u]` unbind one. When a scene runs, the `SceneActivated` signal
+lands in the activity pane — e.g. `SceneActivated node=7 scene=1 1x -> "tv" (2
+actions)`; inbound `BasicSetReceived` / `SceneActivationSet` frames are logged
+there too.
 
 ## 17. Future: ubus
 

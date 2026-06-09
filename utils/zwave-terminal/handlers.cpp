@@ -13,6 +13,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <sdbus-c++/Error.h>
@@ -1100,7 +1101,50 @@ auto handleListDevicePolicies(sdbus::IProxy& proxy) -> void
 namespace
 {
 using SceneActionEntry  = sdbus::Struct<std::uint8_t, std::vector<std::uint8_t>>;
-using SceneTriggerEntry = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::string>;
+using SceneTriggerEntry = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t, std::string>;
+
+// Trigger-source discriminator, mirroring SceneStore SOURCE_* (#124).
+constexpr std::uint8_t SCENE_SOURCE_CENTRAL    = 0;
+constexpr std::uint8_t SCENE_SOURCE_BASIC      = 1;
+constexpr std::uint8_t SCENE_SOURCE_ACTIVATION = 2;
+
+// Human label for a trigger source byte.
+auto sceneSourceName(std::uint8_t source) -> const char*
+{
+    switch (source)
+    {
+    case SCENE_SOURCE_CENTRAL:
+        return "central-scene";
+    case SCENE_SOURCE_BASIC:
+        return "basic-set";
+    case SCENE_SOURCE_ACTIVATION:
+        return "scene-activation";
+    default:
+        return "?";
+    }
+}
+
+// Prompt for a trigger source kind. Maps the chosen letter to a SOURCE_*
+// byte; nullopt on cancel.
+auto promptSceneSource() -> std::optional<std::uint8_t>
+{
+    auto chosen = promptChar("Source: [c]entral scene  [b]asic set  [a]ctivation:", "cba");
+    if (!chosen.has_value())
+    {
+        return std::nullopt;
+    }
+    switch (*chosen)
+    {
+    case 'c':
+        return SCENE_SOURCE_CENTRAL;
+    case 'b':
+        return SCENE_SOURCE_BASIC;
+    case 'a':
+        return SCENE_SOURCE_ACTIVATION;
+    default:
+        return std::nullopt;
+    }
+}
 
 // Render a raw CC payload as space-separated hex for the activity log.
 auto formatPayloadHex(const std::vector<std::uint8_t>& payload) -> std::string
@@ -1178,19 +1222,25 @@ auto handleListSceneTriggers(sdbus::IProxy& proxy) -> void
     logLine("Scene triggers (" + std::to_string(triggers.size()) + "):");
     for (const auto& trigger : triggers)
     {
-        const std::uint8_t keyAttribute = std::get<2>(trigger);
+        const std::uint8_t source       = std::get<0>(trigger);
+        const std::uint8_t keyAttribute = std::get<3>(trigger);
         std::ostringstream stream;
-        stream << "  node " << static_cast<unsigned>(std::get<0>(trigger)) << " scene "
-               << static_cast<unsigned>(std::get<1>(trigger)) << " ";
-        if (const char* name = centralSceneKeyName(keyAttribute); name != nullptr)
+        stream << "  [" << sceneSourceName(source) << "] node " << static_cast<unsigned>(std::get<1>(trigger))
+               << " sel " << static_cast<unsigned>(std::get<2>(trigger));
+        // The key attribute is only meaningful for Central Scene triggers.
+        if (source == SCENE_SOURCE_CENTRAL)
         {
-            stream << name;
+            stream << " ";
+            if (const char* name = centralSceneKeyName(keyAttribute); name != nullptr)
+            {
+                stream << name;
+            }
+            else
+            {
+                stream << "key=" << static_cast<unsigned>(keyAttribute);
+            }
         }
-        else
-        {
-            stream << "key=" << static_cast<unsigned>(keyAttribute);
-        }
-        stream << " -> \"" << std::get<3>(trigger) << "\"";
+        stream << " -> \"" << std::get<4>(trigger) << "\"";
         logLine(stream.str());
     }
 }
@@ -1255,14 +1305,62 @@ auto handleDeleteScene(sdbus::IProxy& proxy) -> void
     }
 }
 
+// Prompt the per-source selector + key attribute. The selector means scene
+// number / Basic value / activation scene id depending on `source`; only
+// Central Scene carries a meaningful key attribute (others are forced 0).
+auto promptTriggerSelector(std::uint8_t source) -> std::optional<std::pair<std::uint8_t, std::uint8_t>>
+{
+    const char* label = "Selector:";
+    switch (source)
+    {
+    case SCENE_SOURCE_CENTRAL:
+        label = "Scene number (1-255):";
+        break;
+    case SCENE_SOURCE_BASIC:
+        label = "Basic value (0=off, 255=on, 1-99=level):";
+        break;
+    case SCENE_SOURCE_ACTIVATION:
+        label = "Activation scene id (1-255):";
+        break;
+    default:
+        break;
+    }
+    auto selector = promptByte(label, 0, BYTE_MAX);
+    if (!selector.has_value())
+    {
+        return std::nullopt;
+    }
+    std::uint8_t keyAttribute = 0;
+    if (source == SCENE_SOURCE_CENTRAL)
+    {
+        auto key = promptByte("Key attribute (0=1x,1=release,2=hold,3=2x,4=3x):", 0, BYTE_MAX);
+        if (!key.has_value())
+        {
+            return std::nullopt;
+        }
+        keyAttribute = *key;
+    }
+    return std::make_pair(*selector, keyAttribute);
+}
+
 auto handleBindSceneTrigger(sdbus::IProxy& proxy) -> void
 {
-    auto sourceNode   = promptNodeId("Source node (controller pressing the button):");
-    auto sceneNumber  = promptByte("Scene number (1-255):", 1, BYTE_MAX);
-    auto keyAttribute = promptByte("Key attribute (0=1x,1=release,2=hold,3=2x,4=3x):", 0, BYTE_MAX);
-    if (!sourceNode.has_value() || !sceneNumber.has_value() || !keyAttribute.has_value())
+    auto source = promptSceneSource();
+    if (!source.has_value())
     {
-        logLine("BindSceneTrigger: cancelled or invalid input");
+        logLine("BindSceneTrigger: cancelled or invalid source");
+        return;
+    }
+    auto sourceNode = promptNodeId("Source node (controller that sends the command):");
+    if (!sourceNode.has_value())
+    {
+        logLine("BindSceneTrigger: cancelled or invalid node id");
+        return;
+    }
+    auto selector = promptTriggerSelector(*source);
+    if (!selector.has_value())
+    {
+        logLine("BindSceneTrigger: cancelled or invalid selector");
         return;
     }
     auto sceneId = promptLine("Scene id to bind to:");
@@ -1275,9 +1373,10 @@ auto handleBindSceneTrigger(sdbus::IProxy& proxy) -> void
     {
         proxy.callMethod("BindSceneTrigger")
             .onInterface(IFACE_NAME)
-            .withArguments(*sourceNode, *sceneNumber, *keyAttribute, *sceneId);
-        logLine("BindSceneTrigger node=" + std::to_string(static_cast<unsigned>(*sourceNode)) +
-                " scene=" + std::to_string(static_cast<unsigned>(*sceneNumber)) + " -> \"" + *sceneId + "\"");
+            .withArguments(*source, *sourceNode, selector->first, selector->second, *sceneId);
+        logLine(std::string{"BindSceneTrigger ["} + sceneSourceName(*source) +
+                "] node=" + std::to_string(static_cast<unsigned>(*sourceNode)) +
+                " sel=" + std::to_string(static_cast<unsigned>(selector->first)) + " -> \"" + *sceneId + "\"");
     }
     catch (const sdbus::Error& err)
     {
@@ -1287,21 +1386,32 @@ auto handleBindSceneTrigger(sdbus::IProxy& proxy) -> void
 
 auto handleUnbindSceneTrigger(sdbus::IProxy& proxy) -> void
 {
-    auto sourceNode   = promptNodeId("Source node:");
-    auto sceneNumber  = promptByte("Scene number (1-255):", 1, BYTE_MAX);
-    auto keyAttribute = promptByte("Key attribute (0-4):", 0, BYTE_MAX);
-    if (!sourceNode.has_value() || !sceneNumber.has_value() || !keyAttribute.has_value())
+    auto source = promptSceneSource();
+    if (!source.has_value())
     {
-        logLine("UnbindSceneTrigger: cancelled or invalid input");
+        logLine("UnbindSceneTrigger: cancelled or invalid source");
+        return;
+    }
+    auto sourceNode = promptNodeId("Source node:");
+    if (!sourceNode.has_value())
+    {
+        logLine("UnbindSceneTrigger: cancelled or invalid node id");
+        return;
+    }
+    auto selector = promptTriggerSelector(*source);
+    if (!selector.has_value())
+    {
+        logLine("UnbindSceneTrigger: cancelled or invalid selector");
         return;
     }
     try
     {
         proxy.callMethod("UnbindSceneTrigger")
             .onInterface(IFACE_NAME)
-            .withArguments(*sourceNode, *sceneNumber, *keyAttribute);
-        logLine("UnbindSceneTrigger node=" + std::to_string(static_cast<unsigned>(*sourceNode)) +
-                " scene=" + std::to_string(static_cast<unsigned>(*sceneNumber)));
+            .withArguments(*source, *sourceNode, selector->first, selector->second);
+        logLine(std::string{"UnbindSceneTrigger ["} + sceneSourceName(*source) +
+                "] node=" + std::to_string(static_cast<unsigned>(*sourceNode)) +
+                " sel=" + std::to_string(static_cast<unsigned>(selector->first)));
     }
     catch (const sdbus::Error& err)
     {

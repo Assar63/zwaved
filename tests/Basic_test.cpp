@@ -98,3 +98,29 @@ TEST(Basic, DecodeReportRejectsWrongCommand)
     const std::array<std::uint8_t, 3> bytes{CC_BASIC, CMD_SET, VALUE_ON};
     EXPECT_FALSE(Basic::decodeReport(std::span<const std::uint8_t>(bytes)).has_value());
 }
+
+TEST(Basic, DecodeSetOnAndOff)
+{
+    const std::array<std::uint8_t, 3> onBytes{CC_BASIC, CMD_SET, VALUE_ON};
+    const auto on = Basic::decodeSet(std::span<const std::uint8_t>(onBytes));
+    ASSERT_TRUE(on.has_value());
+    EXPECT_EQ(on->value, VALUE_ON);
+
+    const std::array<std::uint8_t, 3> offBytes{CC_BASIC, CMD_SET, VALUE_OFF};
+    const auto off = Basic::decodeSet(std::span<const std::uint8_t>(offBytes));
+    ASSERT_TRUE(off.has_value());
+    EXPECT_EQ(off->value, VALUE_OFF);
+}
+
+TEST(Basic, DecodeSetRejectsReportAndTooShort)
+{
+    // A Report is not a Set.
+    const std::array<std::uint8_t, 3> report{CC_BASIC, CMD_REPORT, VALUE_ON};
+    EXPECT_FALSE(Basic::decodeSet(std::span<const std::uint8_t>(report)).has_value());
+    // Too short (missing value byte).
+    const std::array<std::uint8_t, 2> tooShort{CC_BASIC, CMD_SET};
+    EXPECT_FALSE(Basic::decodeSet(std::span<const std::uint8_t>(tooShort)).has_value());
+    // Wrong command class.
+    const std::array<std::uint8_t, 3> wrongCc{0x25, CMD_SET, VALUE_ON};
+    EXPECT_FALSE(Basic::decodeSet(std::span<const std::uint8_t>(wrongCc)).has_value());
+}

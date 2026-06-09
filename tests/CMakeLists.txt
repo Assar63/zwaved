@@ -316,6 +316,20 @@ target_link_libraries(CentralScene_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(CentralScene_test)
 gtest_discover_tests(CentralScene_test)
 
+# ---- SceneActivation ------------------------------------------------
+# No .gen.cpp (push-only; decode-only, no encoders).
+add_executable(SceneActivation_test
+    SceneActivation_test.cpp
+    "${SRC_DIR}/application/SceneActivation.cpp"
+)
+target_include_directories(SceneActivation_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(SceneActivation_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(SceneActivation_test)
+gtest_discover_tests(SceneActivation_test)
+
 # ---- DoorLock -------------------------------------------------------
 add_executable(DoorLock_test
     DoorLock_test.cpp

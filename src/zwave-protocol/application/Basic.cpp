@@ -13,6 +13,8 @@ namespace
 constexpr std::size_t REPORT_V1_BYTES = 3;
 // v2 adds targetValue + duration after currentValue.
 constexpr std::size_t REPORT_V2_BYTES = 5;
+// CC byte + cmd byte + value.
+constexpr std::size_t SET_BYTES = 3;
 }  // namespace
 
 auto Basic::decodeReport(std::span<const uint8_t> payload) -> std::optional<Report>
@@ -37,5 +39,16 @@ auto Basic::decodeReport(std::span<const uint8_t> payload) -> std::optional<Repo
         // information is available.
         out.targetValue = out.currentValue;
     }
+    return out;
+}
+
+auto Basic::decodeSet(std::span<const uint8_t> payload) -> std::optional<Set>
+{
+    if (payload.size() < SET_BYTES || payload[0] != COMMAND_CLASS || payload[1] != BASIC_SET)
+    {
+        return std::nullopt;
+    }
+    Set out;
+    out.value = payload[2];
     return out;
 }

@@ -86,7 +86,7 @@ TEST_F(SceneOrchestratorTest, RunsBoundSceneActionsInOrder)
     SceneStore::instance().setScene("tv",
                                     {SceneStore::Action{.targetNodeId = 5, .ccPayload = payload({0x25, 0x01, 0xFF})},
                                      SceneStore::Action{.targetNodeId = 6, .ccPayload = payload({0x25, 0x01, 0x00})}});
-    SceneStore::instance().bindTrigger(7, 1, 0, "tv");
+    SceneStore::instance().bindTrigger(SceneStore::SOURCE_CENTRAL_SCENE, 7, 1, 0, "tv");
 
     Recorder rec;
     MessageBus::publish(MessageBus::CentralSceneNotification{
@@ -105,8 +105,8 @@ TEST_F(SceneOrchestratorTest, ContextDependentBySourceNode)
                                     {SceneStore::Action{.targetNodeId = 5, .ccPayload = payload({0x25, 0x01, 0xFF})}});
     SceneStore::instance().setScene("hall",
                                     {SceneStore::Action{.targetNodeId = 8, .ccPayload = payload({0x25, 0x01, 0x00})}});
-    SceneStore::instance().bindTrigger(20, 1, 0, "living");
-    SceneStore::instance().bindTrigger(21, 1, 0, "hall");
+    SceneStore::instance().bindTrigger(SceneStore::SOURCE_CENTRAL_SCENE, 20, 1, 0, "living");
+    SceneStore::instance().bindTrigger(SceneStore::SOURCE_CENTRAL_SCENE, 21, 1, 0, "hall");
 
     Recorder rec;
     MessageBus::publish(MessageBus::CentralSceneNotification{
@@ -127,10 +127,59 @@ TEST_F(SceneOrchestratorTest, UnboundPressIsInert)
 
 TEST_F(SceneOrchestratorTest, TriggerToMissingSceneActivatesWithZeroActions)
 {
-    SceneStore::instance().bindTrigger(30, 2, 3, "deleted-scene");  // never created
+    SceneStore::instance().bindTrigger(SceneStore::SOURCE_CENTRAL_SCENE, 30, 2, 3, "deleted-scene");  // never created
     Recorder rec;
     MessageBus::publish(MessageBus::CentralSceneNotification{
         .sourceNodeId = 30, .sequenceNumber = 1, .keyAttribute = 3, .sceneNumber = 2, .slowRefresh = false});
     ASSERT_EQ(rec.log.size(), 1U);
     EXPECT_EQ(rec.log[0], "scene:30:deleted-scene:0");  // activated, but no actions dispatched
+}
+
+TEST_F(SceneOrchestratorTest, RunsSceneFromBasicSet)
+{
+    // A Basic Set value 0xFF from node 40 runs scene "lights-on".
+    SceneStore::instance().setScene("lights-on",
+                                    {SceneStore::Action{.targetNodeId = 9, .ccPayload = payload({0x25, 0x01, 0xFF})}});
+    SceneStore::instance().bindTrigger(SceneStore::SOURCE_BASIC_SET, 40, 0xFF, 0, "lights-on");
+
+    Recorder rec;
+    MessageBus::publish(MessageBus::BasicSetReceived{.sourceNodeId = 40, .value = 0xFF});
+
+    ASSERT_EQ(rec.log.size(), 2U);
+    EXPECT_EQ(rec.log[0], "send:9:37,1,255,");
+    EXPECT_EQ(rec.log[1], "scene:40:lights-on:1");  // SceneActivated carries value as sceneNumber
+}
+
+TEST_F(SceneOrchestratorTest, BasicSetDistinctFromCentralScene)
+{
+    // Same (node, selector) on Basic Set vs Central Scene run different scenes.
+    SceneStore::instance().setScene("basic-scene",
+                                    {SceneStore::Action{.targetNodeId = 9, .ccPayload = payload({0x25, 0x01, 0x00})}});
+    SceneStore::instance().bindTrigger(SceneStore::SOURCE_BASIC_SET, 41, 1, 0, "basic-scene");
+
+    Recorder rec;
+    // A Central Scene press with the same (node, selector, key) is unbound.
+    MessageBus::publish(MessageBus::CentralSceneNotification{
+        .sourceNodeId = 41, .sequenceNumber = 1, .keyAttribute = 0, .sceneNumber = 1, .slowRefresh = false});
+    EXPECT_TRUE(rec.log.empty());  // Central Scene side has no binding
+
+    MessageBus::publish(MessageBus::BasicSetReceived{.sourceNodeId = 41, .value = 1});
+    ASSERT_EQ(rec.log.size(), 2U);
+    EXPECT_EQ(rec.log[0], "send:9:37,1,0,");
+    EXPECT_EQ(rec.log[1], "scene:41:basic-scene:1");
+}
+
+TEST_F(SceneOrchestratorTest, RunsSceneFromSceneActivation)
+{
+    // A Scene Activation Set for scene 3 from node 50 runs scene "movie".
+    SceneStore::instance().setScene("movie",
+                                    {SceneStore::Action{.targetNodeId = 9, .ccPayload = payload({0x25, 0x01, 0xFF})}});
+    SceneStore::instance().bindTrigger(SceneStore::SOURCE_SCENE_ACTIVATION, 50, 3, 0, "movie");
+
+    Recorder rec;
+    MessageBus::publish(MessageBus::SceneActivationSet{.sourceNodeId = 50, .sceneId = 3, .dimmingDuration = 0});
+
+    ASSERT_EQ(rec.log.size(), 2U);
+    EXPECT_EQ(rec.log[0], "send:9:37,1,255,");
+    EXPECT_EQ(rec.log[1], "scene:50:movie:1");  // SceneActivated carries sceneId as sceneNumber
 }

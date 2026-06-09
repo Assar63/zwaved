@@ -98,60 +98,89 @@ TEST_F(SceneStoreTest, ListAndDeleteScenes)
 
 TEST_F(SceneStoreTest, TriggerResolveHitAndMiss)
 {
+    using SceneStore::SOURCE_CENTRAL_SCENE;
     SceneStore::Store store(dbPath_);
     store.setHomeId(kHomeId);
-    store.bindTrigger(7, 1, 0, "TV mode");    // living room, scene 1, press 1x
-    store.bindTrigger(12, 1, 0, "Good bye");  // hallway, same scene number
+    store.bindTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0, "TV mode");    // living room, scene 1, press 1x
+    store.bindTrigger(SOURCE_CENTRAL_SCENE, 12, 1, 0, "Good bye");  // hallway, same scene number
 
-    EXPECT_EQ(store.resolveTrigger(7, 1, 0), std::optional<std::string>("TV mode"));
-    EXPECT_EQ(store.resolveTrigger(12, 1, 0), std::optional<std::string>("Good bye"));
-    EXPECT_FALSE(store.resolveTrigger(7, 2, 0).has_value());   // different scene number
-    EXPECT_FALSE(store.resolveTrigger(99, 1, 0).has_value());  // unknown source
+    EXPECT_EQ(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0), std::optional<std::string>("TV mode"));
+    EXPECT_EQ(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 12, 1, 0), std::optional<std::string>("Good bye"));
+    EXPECT_FALSE(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 7, 2, 0).has_value());   // different scene number
+    EXPECT_FALSE(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 99, 1, 0).has_value());  // unknown source
 }
 
 TEST_F(SceneStoreTest, TriggerRebindAndUnbind)
 {
+    using SceneStore::SOURCE_CENTRAL_SCENE;
     SceneStore::Store store(dbPath_);
     store.setHomeId(kHomeId);
-    store.bindTrigger(7, 1, 0, "scene-a");
-    store.bindTrigger(7, 1, 0, "scene-b");  // rebind same key
-    EXPECT_EQ(store.resolveTrigger(7, 1, 0), std::optional<std::string>("scene-b"));
+    store.bindTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0, "scene-a");
+    store.bindTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0, "scene-b");  // rebind same key
+    EXPECT_EQ(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0), std::optional<std::string>("scene-b"));
     EXPECT_EQ(store.listTriggers().size(), 1U);  // rebind, not a second row
-    store.unbindTrigger(7, 1, 0);
-    EXPECT_FALSE(store.resolveTrigger(7, 1, 0).has_value());
+    store.unbindTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0);
+    EXPECT_FALSE(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0).has_value());
     EXPECT_TRUE(store.listTriggers().empty());
+}
+
+TEST_F(SceneStoreTest, TriggerSourceDiscriminator)
+{
+    // Same (node, selector, key) on three different sources are distinct
+    // rows that resolve independently — no collision (#124).
+    using SceneStore::SOURCE_BASIC_SET;
+    using SceneStore::SOURCE_CENTRAL_SCENE;
+    using SceneStore::SOURCE_SCENE_ACTIVATION;
+    SceneStore::Store store(dbPath_);
+    store.setHomeId(kHomeId);
+    store.bindTrigger(SOURCE_CENTRAL_SCENE, 5, 1, 0, "central");
+    store.bindTrigger(SOURCE_BASIC_SET, 5, 1, 0, "basic");
+    store.bindTrigger(SOURCE_SCENE_ACTIVATION, 5, 1, 0, "activation");
+
+    EXPECT_EQ(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 5, 1, 0), std::optional<std::string>("central"));
+    EXPECT_EQ(store.resolveTrigger(SOURCE_BASIC_SET, 5, 1, 0), std::optional<std::string>("basic"));
+    EXPECT_EQ(store.resolveTrigger(SOURCE_SCENE_ACTIVATION, 5, 1, 0), std::optional<std::string>("activation"));
+    EXPECT_EQ(store.listTriggers().size(), 3U);  // three distinct rows
+
+    // Unbinding one source leaves the others intact.
+    store.unbindTrigger(SOURCE_BASIC_SET, 5, 1, 0);
+    EXPECT_FALSE(store.resolveTrigger(SOURCE_BASIC_SET, 5, 1, 0).has_value());
+    EXPECT_TRUE(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 5, 1, 0).has_value());
+    EXPECT_TRUE(store.resolveTrigger(SOURCE_SCENE_ACTIVATION, 5, 1, 0).has_value());
 }
 
 TEST_F(SceneStoreTest, PersistsAcrossRestart)
 {
+    using SceneStore::SOURCE_CENTRAL_SCENE;
     {
         SceneStore::Store store(dbPath_);
         store.setHomeId(kHomeId);
         store.setScene("TV mode", {action(5, {0x25, 0x01, 0xFF})});
-        store.bindTrigger(7, 1, 0, "TV mode");
+        store.bindTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0, "TV mode");
     }  // first "daemon" stops
 
     SceneStore::Store reopened(dbPath_);  // second "daemon" starts on the same file
     reopened.setHomeId(kHomeId);
     EXPECT_TRUE(reopened.getScene("TV mode").has_value());
-    EXPECT_EQ(reopened.resolveTrigger(7, 1, 0), std::optional<std::string>("TV mode"));
+    EXPECT_EQ(reopened.resolveTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0), std::optional<std::string>("TV mode"));
 }
 
 TEST_F(SceneStoreTest, HomeScoping)
 {
+    using SceneStore::SOURCE_CENTRAL_SCENE;
     SceneStore::Store store(dbPath_);
     store.setHomeId(kHomeId);
     store.setScene("TV mode", {action(5, {0x25, 0x01, 0xFF})});
-    store.bindTrigger(7, 1, 0, "TV mode");
+    store.bindTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0, "TV mode");
 
     store.setHomeId(kOtherHome);  // different network
     EXPECT_FALSE(store.getScene("TV mode").has_value());
-    EXPECT_FALSE(store.resolveTrigger(7, 1, 0).has_value());
+    EXPECT_FALSE(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0).has_value());
     EXPECT_TRUE(store.listScenes().empty());
 
     store.setHomeId(kHomeId);  // back to the original network
     EXPECT_TRUE(store.getScene("TV mode").has_value());
-    EXPECT_EQ(store.resolveTrigger(7, 1, 0), std::optional<std::string>("TV mode"));
+    EXPECT_EQ(store.resolveTrigger(SOURCE_CENTRAL_SCENE, 7, 1, 0), std::optional<std::string>("TV mode"));
 }
 
 TEST_F(SceneStoreTest, NoHomeBoundIsGraceful)
@@ -160,5 +189,5 @@ TEST_F(SceneStoreTest, NoHomeBoundIsGraceful)
     store.setScene("x", {action(1, {0x01})});
     EXPECT_FALSE(store.getScene("x").has_value());
     EXPECT_TRUE(store.listScenes().empty());
-    EXPECT_FALSE(store.resolveTrigger(1, 1, 0).has_value());
+    EXPECT_FALSE(store.resolveTrigger(SceneStore::SOURCE_CENTRAL_SCENE, 1, 1, 0).has_value());
 }

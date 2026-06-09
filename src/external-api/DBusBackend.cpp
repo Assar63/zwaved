@@ -520,21 +520,23 @@ auto emitListScenes(DBusBackend::Impl& /*impl*/) -> std::vector<std::string>
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
 auto emitBindSceneTrigger(DBusBackend::Impl& /*impl*/,
+                          std::uint8_t source,
                           std::uint8_t sourceNodeId,
                           std::uint8_t sceneNumber,
                           std::uint8_t keyAttribute,
                           const std::string& sceneId) -> void
 {
-    SceneStore::instance().bindTrigger(sourceNodeId, sceneNumber, keyAttribute, sceneId);
+    SceneStore::instance().bindTrigger(source, sourceNodeId, sceneNumber, keyAttribute, sceneId);
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
 auto emitUnbindSceneTrigger(DBusBackend::Impl& /*impl*/,
+                            std::uint8_t source,
                             std::uint8_t sourceNodeId,
                             std::uint8_t sceneNumber,
                             std::uint8_t keyAttribute) -> void
 {
-    SceneStore::instance().unbindTrigger(sourceNodeId, sceneNumber, keyAttribute);
+    SceneStore::instance().unbindTrigger(source, sourceNodeId, sceneNumber, keyAttribute);
 }
 
 auto emitListSceneTriggers(DBusBackend::Impl& /*impl*/) -> std::vector<SceneTriggerEntry>
@@ -542,7 +544,8 @@ auto emitListSceneTriggers(DBusBackend::Impl& /*impl*/) -> std::vector<SceneTrig
     std::vector<SceneTriggerEntry> out;
     for (const auto& trigger : SceneStore::instance().listTriggers())
     {
-        out.emplace_back(trigger.sourceNodeId, trigger.sceneNumber, trigger.keyAttribute, trigger.sceneId);
+        out.emplace_back(
+            trigger.source, trigger.sourceNodeId, trigger.sceneNumber, trigger.keyAttribute, trigger.sceneId);
     }
     return out;
 }

@@ -92,12 +92,28 @@ rather than a clean SQ2 observation.
   park Tier 2.
 - ❌ Device won't encapsulate at all → Tier 2 not viable with this device.
 
-## Optional observability aid
+## Observability aid: the encap probe
 
-If the existing logging isn't enough to spot encap frames, a one-line debug log
-in the cc-translator (`if (auto e = MultiChannel::decodeEncap(ccData)) Logger::info(...)`)
-makes inbound encapsulation visible without building any responder. Add it
-behind a temporary debug flag during the spike; remove before merging anything.
+Build the daemon with the spike probe enabled to log every inbound Multi
+Channel encapsulated frame — no responder needed, read-only:
+
+```bash
+cmake -S . -B cmake-build-gnu -DZWAVED_SPIKE_ENCAP_LOG=ON
+cmake --build cmake-build-gnu --target zwaved
+```
+
+`src/spike/EncapProbe.cpp` then subscribes to the raw `ApplicationCommand` bus
+event and, for any frame that decodes as `MULTI_CHANNEL_CMD_ENCAP` (via #144's
+`decodeEncap`), logs e.g.:
+
+```
+[encap-probe] node=7 src-ep=0 dst-ep=2 inner-len=3 inner-cc=0x25
+```
+
+So during SQ2 you watch the daemon log for an `[encap-probe]` line from the
+device under test with `dst-ep` matching the endpoint you bound. The option is
+**off by default** (excluded from normal builds). Turn it back off — or delete
+`src/spike/` + the `ZWAVED_SPIKE_ENCAP_LOG` option — once the spike concludes.
 
 ## Recording the result
 

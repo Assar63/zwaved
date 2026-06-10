@@ -135,6 +135,11 @@ endif()
 set(ZWAVED_LOGGER_SINK "stdout" CACHE STRING "Logger sink (stdout, syslog)")
 set_property(CACHE ZWAVED_LOGGER_SINK PROPERTY STRINGS "stdout" "syslog")
 
+# Temporary spike aids (off by default; remove with their issue). #143:
+# log inbound Multi Channel encapsulated frames so the E1 Tier 2 spike can
+# observe whether a real device addresses a controller endpoint.
+option(ZWAVED_SPIKE_ENCAP_LOG "Spike #143: log inbound Multi Channel encap frames" OFF)
+
 # Process source subdirectories
 add_subdirectory(src)
 

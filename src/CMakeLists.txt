@@ -21,6 +21,7 @@ add_subdirectory(zwave-protocol)
 add_subdirectory(cc-translator)
 add_subdirectory(orchestrator)
 add_subdirectory(external-api)
+add_subdirectory(spike)
 
 target_link_libraries(zwaved PRIVATE PkgConfig::LIBUDEV)
 

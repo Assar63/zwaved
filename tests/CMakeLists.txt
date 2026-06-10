@@ -423,7 +423,7 @@ target_include_directories(MultichannelAssociation_test PRIVATE
     "${SRC_DIR}/application"
     "${GENERATED_APPLICATION_DIR}"
 )
-target_link_libraries(MultichannelAssociation_test PRIVATE GTest::gtest GTest::gtest_main)
+target_link_libraries(MultichannelAssociation_test PRIVATE GTest::gtest GTest::gtest_main zwaved_bus)
 zwaved_test_target(MultichannelAssociation_test)
 gtest_discover_tests(MultichannelAssociation_test)
 
@@ -435,8 +435,6 @@ add_executable(PendingQueue_test
     PendingQueue_test.cpp
     "${CMAKE_SOURCE_DIR}/src/pending-queue/PendingQueue.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
-    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
-    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
 )
 target_include_directories(PendingQueue_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/pending-queue"
@@ -448,6 +446,7 @@ target_link_libraries(PendingQueue_test PRIVATE
     GTest::gtest
     GTest::gtest_main
     PkgConfig::SQLITE3
+    zwaved_bus
 )
 zwaved_test_target(PendingQueue_test)
 gtest_discover_tests(PendingQueue_test)
@@ -457,8 +456,6 @@ add_executable(SceneStore_test
     SceneStore_test.cpp
     "${CMAKE_SOURCE_DIR}/src/scene-store/SceneStore.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
-    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
-    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
 )
 target_include_directories(SceneStore_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/scene-store"
@@ -470,6 +467,7 @@ target_link_libraries(SceneStore_test PRIVATE
     GTest::gtest
     GTest::gtest_main
     PkgConfig::SQLITE3
+    zwaved_bus
 )
 zwaved_test_target(SceneStore_test)
 gtest_discover_tests(SceneStore_test)
@@ -480,8 +478,6 @@ gtest_discover_tests(SceneStore_test)
 # in via the eventpp::eventpp interface target.
 add_executable(MessageBus_test
     MessageBus_test.cpp
-    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
-    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
 )
 target_include_directories(MessageBus_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/message-bus"
@@ -491,7 +487,7 @@ add_dependencies(MessageBus_test zwaved_codegen)
 target_link_libraries(MessageBus_test PRIVATE
     GTest::gtest
     GTest::gtest_main
-    eventpp::eventpp
+    zwaved_bus
 )
 zwaved_test_target(MessageBus_test)
 gtest_discover_tests(MessageBus_test)
@@ -503,8 +499,6 @@ add_executable(PolicyRegister_test
     PolicyRegister_test.cpp
     "${CMAKE_SOURCE_DIR}/src/policy-register/PolicyRegister.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
-    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
-    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
 )
 target_include_directories(PolicyRegister_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/policy-register"
@@ -516,7 +510,7 @@ target_link_libraries(PolicyRegister_test PRIVATE
     GTest::gtest
     GTest::gtest_main
     PkgConfig::SQLITE3
-    eventpp::eventpp
+    zwaved_bus
 )
 zwaved_test_target(PolicyRegister_test)
 gtest_discover_tests(PolicyRegister_test)
@@ -528,8 +522,6 @@ add_executable(NodeMetadata_test
     NodeMetadata_test.cpp
     "${CMAKE_SOURCE_DIR}/src/node-metadata/NodeMetadata.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
-    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
-    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
 )
 target_include_directories(NodeMetadata_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/node-metadata"
@@ -541,7 +533,7 @@ target_link_libraries(NodeMetadata_test PRIVATE
     GTest::gtest
     GTest::gtest_main
     PkgConfig::SQLITE3
-    eventpp::eventpp
+    zwaved_bus
 )
 zwaved_test_target(NodeMetadata_test)
 gtest_discover_tests(NodeMetadata_test)
@@ -555,8 +547,6 @@ add_executable(WakeUpOrchestrator_test
     "${CMAKE_SOURCE_DIR}/src/orchestrator/WakeUpOrchestrator.cpp"
     "${CMAKE_SOURCE_DIR}/src/pending-queue/PendingQueue.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
-    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
-    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
 )
 target_include_directories(WakeUpOrchestrator_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/pending-queue"
@@ -568,7 +558,7 @@ target_link_libraries(WakeUpOrchestrator_test PRIVATE
     GTest::gtest
     GTest::gtest_main
     PkgConfig::SQLITE3
-    eventpp::eventpp
+    zwaved_bus
 )
 zwaved_test_target(WakeUpOrchestrator_test)
 gtest_discover_tests(WakeUpOrchestrator_test)
@@ -579,8 +569,6 @@ add_executable(SceneOrchestrator_test
     "${CMAKE_SOURCE_DIR}/src/orchestrator/SceneOrchestrator.cpp"
     "${CMAKE_SOURCE_DIR}/src/scene-store/SceneStore.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
-    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
-    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
 )
 target_include_directories(SceneOrchestrator_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/scene-store"
@@ -592,7 +580,7 @@ target_link_libraries(SceneOrchestrator_test PRIVATE
     GTest::gtest
     GTest::gtest_main
     PkgConfig::SQLITE3
-    eventpp::eventpp
+    zwaved_bus
 )
 zwaved_test_target(SceneOrchestrator_test)
 gtest_discover_tests(SceneOrchestrator_test)
@@ -604,8 +592,6 @@ add_executable(ThermostatOrchestrator_test
     "${CMAKE_SOURCE_DIR}/src/node-metadata/NodeMetadata.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
-    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
-    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
 )
 target_include_directories(ThermostatOrchestrator_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/node-metadata"
@@ -618,7 +604,7 @@ target_link_libraries(ThermostatOrchestrator_test PRIVATE
     GTest::gtest
     GTest::gtest_main
     PkgConfig::SQLITE3
-    eventpp::eventpp
+    zwaved_bus
 )
 zwaved_test_target(ThermostatOrchestrator_test)
 gtest_discover_tests(ThermostatOrchestrator_test)
@@ -632,8 +618,6 @@ add_executable(InclusionOrchestrator_test
     "${CMAKE_SOURCE_DIR}/src/orchestrator/InclusionOrchestrator.cpp"
     "${CMAKE_SOURCE_DIR}/src/policy-register/PolicyRegister.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
-    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
-    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
 )
 target_include_directories(InclusionOrchestrator_test PRIVATE
     "${CMAKE_SOURCE_DIR}/src/policy-register"
@@ -645,7 +629,7 @@ target_link_libraries(InclusionOrchestrator_test PRIVATE
     GTest::gtest
     GTest::gtest_main
     PkgConfig::SQLITE3
-    eventpp::eventpp
+    zwaved_bus
 )
 zwaved_test_target(InclusionOrchestrator_test)
 gtest_discover_tests(InclusionOrchestrator_test)

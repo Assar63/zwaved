@@ -280,9 +280,15 @@ governs.
   surface) ✅, **#135** (terminal UI) ✅. A logical thermostat (the climate nodes
   sharing a `room=` metadata tag) can be driven and read end-to-end (see MANUAL
   §16e). Aggregation/mirroring only; closed-loop control remains a future epic.
-  E1 remains exploratory here.
+- **E1 (addressable presence) is filed** as epic **#142**. Tier 1 (associate to
+  the controller node) is **already delivered** — it underpins E2 (#119). The
+  actionable new work is Tier 2 (Multi Channel endpoints), gated on a device-
+  compatibility spike: children **#143** (Tier 2 spike), **#144** (CC 0x60
+  encap/decap codec), **#145** (endpoint responder `src/endpoint/`), **#146**
+  (inbound endpoint routing). **#147** (Tier 3 virtual slave nodes) is filed but
+  **blocked** — the current Static Controller dongle can't host slave nodes.
 - Old TODO.md stubs are superseded by this doc:
-  - "Virtual nodes" (#29) → **E1** (addressable presence).
+  - "Virtual nodes" (#29) → **E1 / epic #142** (addressable presence).
   - "Scene controller thread" (#30) → **E2 / epic #119** (closed in favour of
     #119, delivered).
   - "Thermostat management" → **E3**.

@@ -536,6 +536,33 @@ events:
       - { name: mode,         type: u8,   default: 0 }
       - { name: "off",        type: bool, default: false }
 
+  - name: LogicalThermostatState
+    category: transient
+    direction: { publishers: [orchestrator], subscribers: [external-api] }
+    doc: |
+      Aggregated state of a *logical thermostat* (#131/#133) — the climate
+      nodes sharing the node-metadata tag `groupKey=groupValue`. Published by
+      the ThermostatOrchestrator whenever a member's report changes the
+      aggregate. `memberCount` is how many tagged nodes were resolved.
+      `mode` / `fanMode` carry `MODE_MIXED` (0xFF) when members disagree;
+      `operatingState` is "active" (heating/cooling) if any member is.
+      The setpoint fields carry the most-recently-reported member setpoint
+      (with its `setpointType` so the client knows which). Aggregation only
+      — closed-loop control is a separate future epic.
+    constants:
+      - { name: MODE_MIXED, value: 0xFF }
+    fields:
+      - { name: groupKey,          type: string }
+      - { name: groupValue,        type: string }
+      - { name: memberCount,       type: u8,  default: 0 }
+      - { name: mode,              type: u8,  default: 0 }
+      - { name: operatingState,    type: u8,  default: 0 }
+      - { name: fanMode,           type: u8,  default: 0 }
+      - { name: setpointType,      type: u8,  default: 0 }
+      - { name: setpointScale,     type: u8,  default: 0 }
+      - { name: setpointPrecision, type: u8,  default: 0 }
+      - { name: setpointValue,     type: i32, default: 0, doc: "raw; target = value / 10^precision" }
+
   - name: WakeUpIntervalReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -1166,6 +1193,36 @@ events:
     fields:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
+
+  - name: LogicalThermostatModeCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [orchestrator] }
+    doc: |
+      Set the thermostat mode of a *logical thermostat* (#131/#133) — every
+      climate node tagged `groupKey=groupValue` that supports Thermostat Mode
+      (CC 0x40). The ThermostatOrchestrator fans this out to one
+      SetThermostatModeCommand per resolved member.
+    fields:
+      - { name: groupKey,   type: string }
+      - { name: groupValue, type: string }
+      - { name: mode,       type: u8, default: 0 }
+
+  - name: LogicalThermostatSetpointCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [orchestrator] }
+    doc: |
+      Set the setpoint of a *logical thermostat* (#131/#133) — every climate
+      node tagged `groupKey=groupValue` that supports Thermostat Setpoint
+      (CC 0x43). The ThermostatOrchestrator fans this out to one
+      SetThermostatSetpointCommand per resolved member. Raw precision/scale/
+      value encoding, same as the per-node command.
+    fields:
+      - { name: groupKey,     type: string }
+      - { name: groupValue,   type: string }
+      - { name: setpointType, type: u8,  default: 0 }
+      - { name: precision,    type: u8,  default: 0 }
+      - { name: scale,        type: u8,  default: 0 }
+      - { name: value,        type: i32, default: 0, doc: "raw; target = value / 10^precision" }
 
   - name: GetBatteryCommand
     category: command

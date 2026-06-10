@@ -583,6 +583,32 @@ target_link_libraries(SceneOrchestrator_test PRIVATE
 zwaved_test_target(SceneOrchestrator_test)
 gtest_discover_tests(SceneOrchestrator_test)
 
+# ---- ThermostatOrchestrator -----------------------------------------
+add_executable(ThermostatOrchestrator_test
+    ThermostatOrchestrator_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/orchestrator/ThermostatOrchestrator.cpp"
+    "${CMAKE_SOURCE_DIR}/src/node-metadata/NodeMetadata.cpp"
+    "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+    "${CMAKE_SOURCE_DIR}/src/message-bus/MessageBus.cpp"
+    "${ZWAVED_GENERATED_DIR}/MessageBus.gen.cpp"
+)
+target_include_directories(ThermostatOrchestrator_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/node-metadata"
+    "${CMAKE_SOURCE_DIR}/src/node-registry"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(ThermostatOrchestrator_test zwaved_codegen)
+target_link_libraries(ThermostatOrchestrator_test PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    PkgConfig::SQLITE3
+    eventpp::eventpp
+)
+zwaved_test_target(ThermostatOrchestrator_test)
+gtest_discover_tests(ThermostatOrchestrator_test)
+
 # ---- InclusionOrchestrator ------------------------------------------
 # Bus-driven: publishes NodeIncluded, asserts on the lifeline + policy
 # command sequence. Links the orchestrator (armed by its constructor),

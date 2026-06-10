@@ -274,11 +274,11 @@ governs.
   Basic Set 0x20 + Scene Activation 0x2B, behind a `source` discriminator) ✅.
   Scenes run end-to-end from Central Scene, Basic Set, or Scene Activation
   presses (see MANUAL §16d).
-- **E3 (thermostat management) is filed** as epic **#131**, scoped to
+- **E3 (thermostat management) is in progress** as epic **#131**, scoped to
   aggregation/mirroring (the closed-loop control deferred to its own epic) and
   grouping via node metadata (#83) rather than a new store. Children: **#132**
-  (NodeMetadata reverse lookup / nodes-by-tag), **#133** (ThermostatOrchestrator
-  fan-out + mirror), **#134** (D-Bus logical-thermostat surface), **#135**
+  (NodeMetadata reverse lookup / nodes-by-tag) ✅, **#133** (ThermostatOrchestrator
+  fan-out + mirror) ✅, **#134** (D-Bus logical-thermostat surface), **#135**
   (terminal UI). E1 remains exploratory here.
 - Old TODO.md stubs are superseded by this doc:
   - "Virtual nodes" (#29) → **E1** (addressable presence).

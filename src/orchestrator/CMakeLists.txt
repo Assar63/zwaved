@@ -10,4 +10,5 @@ target_sources(zwaved PRIVATE
     WakeUpOrchestrator.cpp
     InclusionOrchestrator.cpp
     SceneOrchestrator.cpp
+    ThermostatOrchestrator.cpp
 )

@@ -94,7 +94,7 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
     auto& obj = *impl->object;
 
     // Methods + signals are emitted from InterfaceManifest.yml by
-    // scripts/codegen/. The five hand-written cache-update
+    // scripts/codegen/. The hand-written cache-update
     // subscribers below feed impl->last* state for the
     // `custom: emitGet*` handlers; subscribeGeneratedSignals()
     // appends the signal-emission subscribers, which run after the
@@ -140,6 +140,12 @@ auto DBusBackend::run(const std::atomic<bool>& running) -> void
         {
             std::scoped_lock const lock(impl->stateMutex);
             impl->lastDaemonError = error;
+        }));
+    subs.emplace_back(MessageBus::subscribe<MessageBus::LogicalThermostatState>(
+        [this](const MessageBus::LogicalThermostatState& state) -> void
+        {
+            std::scoped_lock const lock(impl->stateMutex);
+            impl->lastLogicalThermostat[{state.groupKey, state.groupValue}] = state;
         }));
 
     subscribeGeneratedSignals(*impl);
@@ -556,5 +562,60 @@ auto emitListSceneTriggers(DBusBackend::Impl& /*impl*/) -> std::vector<SceneTrig
             trigger.source, trigger.sourceNodeId, trigger.sceneNumber, trigger.keyAttribute, trigger.sceneId);
     }
     return out;
+}
+
+// ---- Logical thermostat (#134) ---------------------------------------
+// Set* publish the command events the ThermostatOrchestrator (#133) fans
+// out; GetLogicalThermostatState reads the per-group cache fed by the
+// LogicalThermostatState subscriber in run().
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitSetLogicalThermostatMode(DBusBackend::Impl& /*impl*/,
+                                  const std::string& groupKey,
+                                  const std::string& groupValue,
+                                  std::uint8_t mode) -> void
+{
+    MessageBus::publish(
+        MessageBus::LogicalThermostatModeCommand{.groupKey = groupKey, .groupValue = groupValue, .mode = mode});
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus method
+auto emitSetLogicalThermostatSetpoint(DBusBackend::Impl& /*impl*/,
+                                      const std::string& groupKey,
+                                      const std::string& groupValue,
+                                      std::uint8_t setpointType,
+                                      std::uint8_t precision,
+                                      std::uint8_t scale,
+                                      std::int32_t value) -> void
+{
+    MessageBus::publish(MessageBus::LogicalThermostatSetpointCommand{
+        .groupKey     = groupKey,
+        .groupValue   = groupValue,
+        .setpointType = setpointType,
+        .precision    = precision,
+        .scale        = scale,
+        .value        = value,
+    });
+}
+
+auto emitGetLogicalThermostatState(DBusBackend::Impl& impl,
+                                   const std::string& groupKey,
+                                   const std::string& groupValue) -> LogicalThermostatStateTuple
+{
+    std::scoped_lock const lock(impl.stateMutex);
+    const auto entry = impl.lastLogicalThermostat.find({groupKey, groupValue});
+    if (entry == impl.lastLogicalThermostat.end())
+    {
+        return LogicalThermostatStateTuple{0, 0, 0, 0, 0, 0, 0, 0};
+    }
+    const auto& state = entry->second;
+    return LogicalThermostatStateTuple{state.memberCount,
+                                       state.mode,
+                                       state.operatingState,
+                                       state.fanMode,
+                                       state.setpointType,
+                                       state.setpointScale,
+                                       state.setpointPrecision,
+                                       state.setpointValue};
 }
 }  // namespace ExternalApi

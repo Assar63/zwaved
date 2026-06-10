@@ -64,7 +64,7 @@ def cpp_param_type(param: DBusParam) -> str:
     return _dbus_to_cpp(param.dbus)
 
 
-PRIMITIVE_PARAM_TYPES = {"bool", "std::uint8_t", "std::uint16_t", "std::uint32_t", "std::uint64_t"}
+PRIMITIVE_PARAM_TYPES = {"bool", "std::uint8_t", "std::uint16_t", "std::uint32_t", "std::uint64_t", "std::int32_t"}
 
 
 def cpp_param_decl(param: DBusParam) -> str:
@@ -132,6 +132,7 @@ RETURN_TUPLE_ALIASES: dict[str, str] = {
     "GetNodeMetadata":    "NodeMetadataTuple",
     "GetScene":           "SceneActionEntry",
     "ListSceneTriggers":  "SceneTriggerEntry",
+    "GetLogicalThermostatState": "LogicalThermostatStateTuple",
 }
 
 

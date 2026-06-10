@@ -90,6 +90,17 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
+    proxy.uponSignal("IndicatorReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t sourceNodeId, std::uint8_t value) -> void
+            {
+                std::ostringstream stream;
+                stream << "IndicatorReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " value=" << static_cast<unsigned>(value);
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("SwitchMultilevelReport")
         .onInterface(IFACE_NAME)
         .call(

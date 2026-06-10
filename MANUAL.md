@@ -392,6 +392,33 @@ stream on `ccData[0] == 0x20 && ccData[1] == 0x03` (Basic REPORT) and
 read `ccData[2]` (current value), optionally `ccData[3]` (target) and
 `ccData[4]` (duration) for v2+ frames.
 
+## 11c. Driving an Indicator (CC 0x87)
+
+Controls a node's indicator (LED / buzzer). v1 is a single value byte:
+`0x00` off, `0x01..0x63` level, `0xFF` on — same shape as Basic. Useful
+for "find this node" blink or status LEDs.
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `SetIndicator` | `(y y y) → ()` | nodeId, value, callbackId |
+| `GetIndicator` | `(y y) → ()` | nodeId, callbackId; reply arrives as the `IndicatorReport` signal |
+
+```bash
+# Turn node 5's indicator on, callback id 7:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetIndicator yyy 5 0xFF 7
+# Read it back:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetIndicator yy 5 8
+# → later: IndicatorReport y y  5 255
+```
+
+Unsolicited / GET replies are decoded by the cc-translator into the typed
+`IndicatorReport(y y)` signal — `(sourceNodeId, value)`. The terminal's
+`[c]` Control submenu → `[i]` sets an indicator value, and the report
+renders in the activity pane. The v3+ structured (multi-indicator) form is
+a follow-up; v1 covers the common single-indicator case.
+
 ## 11c. Driving a Multilevel Switch (CC 0x26)
 
 `SetMultilevelSwitch` sends a Multilevel Switch SET (Command Class

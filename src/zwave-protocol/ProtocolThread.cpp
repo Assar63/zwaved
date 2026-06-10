@@ -18,6 +18,7 @@
 #include "application/ColorSwitch.hpp"
 #include "application/Configuration.hpp"
 #include "application/DoorLock.hpp"
+#include "application/Indicator.hpp"
 #include "application/ManufacturerSpecific.hpp"
 #include "application/Meter.hpp"
 #include "application/MultichannelAssociation.hpp"
@@ -285,6 +286,16 @@ auto onSetSwitchBinary(const MessageBus::SetSwitchBinaryCommand& cmd) -> void
 auto onGetSwitchBinary(const MessageBus::GetSwitchBinaryCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, BinarySwitch::encodeGet());
+}
+
+auto onSetIndicator(const MessageBus::SetIndicatorCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, Indicator::encodeSet(cmd.value));
+}
+
+auto onGetIndicator(const MessageBus::GetIndicatorCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, Indicator::encodeGet());
 }
 
 auto onSetBasic(const MessageBus::SetBasicCommand& cmd) -> void
@@ -1089,7 +1100,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 47;
+constexpr std::size_t SUBSCRIPTION_COUNT = 49;
 
 auto subscribeBus() -> void
 {
@@ -1102,6 +1113,8 @@ auto subscribeBus() -> void
     subscribe<MessageBus::RequestNodeInfoCommand>(onRequestNodeInfoCommand);
     subscribe<MessageBus::SetSwitchBinaryCommand>(onSetSwitchBinary);
     subscribe<MessageBus::GetSwitchBinaryCommand>(onGetSwitchBinary);
+    subscribe<MessageBus::SetIndicatorCommand>(onSetIndicator);
+    subscribe<MessageBus::GetIndicatorCommand>(onGetIndicator);
     subscribe<MessageBus::SetBasicCommand>(onSetBasic);
     subscribe<MessageBus::GetBasicCommand>(onGetBasic);
     subscribe<MessageBus::SetMultilevelSwitchCommand>(onSetMultilevelSwitch);

@@ -393,6 +393,17 @@ events:
       - { name: sourceNodeId, type: u8, default: 0 }
       - { name: state,        type: u8, default: 0, doc: "0=Off, 1=On, 2=Unknown" }
 
+  - name: IndicatorReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Indicator (CC 0x87) Report. Republished by the cc-translator
+      from inbound ApplicationCommand frames whose ccData parses as an
+      Indicator Report (v1). `value`: 0x00 off, 0x01..0x63 level, 0xFF on.
+    fields:
+      - { name: sourceNodeId, type: u8, default: 0 }
+      - { name: value,        type: u8, default: 0 }
+
   - name: BatteryReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -986,6 +997,23 @@ events:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
 
+  - name: SetIndicatorCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: "Set a node's Indicator (CC 0x87) value (0 off, 1..99 level, 0xFF on)."
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: value,      type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetIndicatorCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query a node's Indicator value.
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
   - name: SetBasicCommand
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
@@ -1524,6 +1552,21 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetSwitchBinaryCommand
+
+    - name: SetIndicator
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: value,      dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: SetIndicatorCommand
+
+    - name: GetIndicator
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetIndicatorCommand
 
     - name: SetBasic
       params:
@@ -2269,6 +2312,13 @@ dbus:
         - { name: state,        dbus: y, doc: "0=Off, 1=On, 2=Unknown" }
       triggered_by:
         event: BinarySwitchReport
+
+    - name: IndicatorReport
+      params:
+        - { name: sourceNodeId, dbus: y }
+        - { name: value,        dbus: y, doc: "0x00 off, 0x01..0x63 level, 0xFF on" }
+      triggered_by:
+        event: IndicatorReport
 
     - name: SwitchMultilevelReport
       params:
@@ -3365,6 +3415,38 @@ modules:
           - { name: bitAddress,          type: bool, doc: "destination is a bitmask of endpoints" }
           - { name: innerCommand,        type: bytes, doc: "encapsulated CC frame (class + cmd + params)" }
 
+  - name: Indicator
+    wire:
+      class_byte: 0x87
+      prefix: INDICATOR
+    description: |
+      Control a node's indicator (LED / buzzer). v1 single value byte:
+      0x00 off, 0x01..0x63 level, 0xFF on. SET / GET / REPORT. The v3+
+      structured (indicatorId + property/value tuples) form is a follow-up;
+      v1 covers the common single-indicator case. decodeReport is hand-
+      written; the SET / GET encoders are generated.
+    constants:
+      - { name: VALUE_OFF, value: 0x00 }
+      - { name: VALUE_ON,  value: 0xFF }
+    commands:
+      - name: Set
+        wire:
+          byte: 0x01
+          payload:
+            - "value"
+        encode_args:
+          - { name: value, type: u8 }
+      - name: Get
+        wire:
+          byte: 0x02
+          payload: []
+        encode_args: []
+      - name: Report
+        wire:
+          byte: 0x03
+        decoded_struct:
+          - { name: value, type: u8 }
+
 
 # =====================================================================
 # 5. Translation rules
@@ -3394,6 +3476,16 @@ translations:
     map:
       sourceNodeId: event.sourceNodeId
       state:        "static_cast<u8>(decoded.state)"
+
+  - publishes: IndicatorReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: Indicator.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId: event.sourceNodeId
+      value:        decoded.value
 
   - publishes: MultilevelSwitchReport
     triggered_by: ApplicationCommand

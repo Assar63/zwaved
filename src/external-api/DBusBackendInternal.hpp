@@ -9,9 +9,11 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <sdbus-c++/IConnection.h>
@@ -72,6 +74,19 @@ using SceneTriggerEntry = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t
 
 using DaemonErrorTuple = sdbus::Struct<std::uint8_t, std::string, std::uint8_t, std::string>;
 
+// GetLogicalThermostatState return: (memberCount, mode, operatingState,
+// fanMode, setpointType, setpointScale, setpointPrecision, setpointValue) —
+// the aggregated logical-thermostat state (#134). mode/fanMode carry 0xFF
+// when members disagree.
+using LogicalThermostatStateTuple = sdbus::Struct<std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::int32_t>;
+
 using NetworkStatusTuple = sdbus::Struct<bool,
                                          std::string,
                                          std::string,
@@ -114,6 +129,11 @@ struct DBusBackend::Impl
     std::vector<MessageBus::NodeInfo> lastNodes;
     MessageBus::SessionStatus lastSessionStatus;
     MessageBus::DaemonError lastDaemonError;
+
+    // Per-group cache of the latest LogicalThermostatState (#134), keyed by
+    // (groupKey, groupValue), fed by a cache subscriber. GetLogicalThermostat
+    // State reads it; a group not yet addressed+reported returns zeros.
+    std::map<std::pair<std::string, std::string>, MessageBus::LogicalThermostatState> lastLogicalThermostat;
 
     // Captured the first time `run()` is called; powers the uptime
     // field of GetNetworkStatus. steady_clock so it doesn't jump

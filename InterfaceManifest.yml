@@ -2112,6 +2112,49 @@ dbus:
       action:
         custom: emitListSceneTriggers
 
+    # ---- Logical thermostat (#131/#134) ---------------------------
+    # Drive and read a *logical thermostat* — the climate nodes sharing
+    # the node-metadata tag groupKey=groupValue (#83/#132). The Set
+    # methods publish the command events the ThermostatOrchestrator
+    # (#133) fans out; GetLogicalThermostatState reads the backend's
+    # per-group cache of the LogicalThermostatState event (zeros if the
+    # group hasn't been addressed and reported yet).
+    - name: SetLogicalThermostatMode
+      params:
+        - { name: groupKey,   dbus: s, cpp: string }
+        - { name: groupValue, dbus: s, cpp: string }
+        - { name: mode,       dbus: y, cpp: u8 }
+      action:
+        custom: emitSetLogicalThermostatMode
+
+    - name: SetLogicalThermostatSetpoint
+      params:
+        - { name: groupKey,     dbus: s, cpp: string }
+        - { name: groupValue,   dbus: s, cpp: string }
+        - { name: setpointType, dbus: y, cpp: u8 }
+        - { name: precision,    dbus: y, cpp: u8 }
+        - { name: scale,        dbus: y, cpp: u8 }
+        - { name: value,        dbus: i, cpp: i32 }
+      action:
+        custom: emitSetLogicalThermostatSetpoint
+
+    - name: GetLogicalThermostatState
+      params:
+        - { name: groupKey,   dbus: s, cpp: string }
+        - { name: groupValue, dbus: s, cpp: string }
+      returns:
+        struct:
+          - { name: memberCount,       dbus: y, source: cached.LogicalThermostatState.memberCount }
+          - { name: mode,              dbus: y, source: cached.LogicalThermostatState.mode }
+          - { name: operatingState,    dbus: y, source: cached.LogicalThermostatState.operatingState }
+          - { name: fanMode,           dbus: y, source: cached.LogicalThermostatState.fanMode }
+          - { name: setpointType,      dbus: y, source: cached.LogicalThermostatState.setpointType }
+          - { name: setpointScale,     dbus: y, source: cached.LogicalThermostatState.setpointScale }
+          - { name: setpointPrecision, dbus: y, source: cached.LogicalThermostatState.setpointPrecision }
+          - { name: setpointValue,     dbus: i, source: cached.LogicalThermostatState.setpointValue }
+      action:
+        custom: emitGetLogicalThermostatState
+
   # ---- 3b. Signals ------------------------------------------------
   # Each signal is triggered by one or more MessageBus events. The
   # default mapping copies named fields straight through; CC-decoder
@@ -2492,6 +2535,21 @@ dbus:
         - { name: actionCount,  dbus: u }
       triggered_by:
         event: SceneActivated
+
+    - name: LogicalThermostatStateChanged
+      params:
+        - { name: groupKey,          dbus: s }
+        - { name: groupValue,        dbus: s }
+        - { name: memberCount,       dbus: y }
+        - { name: mode,              dbus: y, doc: "0xFF = members disagree (mixed)" }
+        - { name: operatingState,    dbus: y }
+        - { name: fanMode,           dbus: y, doc: "0xFF = members disagree (mixed)" }
+        - { name: setpointType,      dbus: y }
+        - { name: setpointScale,     dbus: y }
+        - { name: setpointPrecision, dbus: y }
+        - { name: setpointValue,     dbus: i }
+      triggered_by:
+        event: LogicalThermostatState
 
 # =====================================================================
 # 4. Protocol modules

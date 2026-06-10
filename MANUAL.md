@@ -1227,6 +1227,50 @@ lands in the activity pane — e.g. `SceneActivated node=7 scene=1 1x -> "tv" (2
 actions)`; inbound `BasicSetReceived` / `SceneActivationSet` frames are logged
 there too.
 
+## 16e. Logical thermostats (climate-group control)
+
+A **logical thermostat** is the set of climate nodes that share a node-metadata
+tag (§16c) — e.g. every node with `room = Living room`. Writing a mode or
+setpoint to the logical thermostat fans it out to all tagged members that
+support the relevant Thermostat CC; member reports are aggregated back into one
+logical state. Pure orchestration (no virtual node); membership is *derived*
+from metadata at call time, so re-tagging a node moves it between thermostats
+with no extra bookkeeping. Aggregation only — closed-loop control (setpoint vs
+measured temperature, schedules) is a separate future epic.
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `SetLogicalThermostatMode` | `(s s y) → ()` | groupKey, groupValue, mode → fans out a Thermostat Mode Set to each member supporting CC 0x40 |
+| `SetLogicalThermostatSetpoint` | `(s s y y y i) → ()` | groupKey, groupValue, setpointType, precision, scale, value → fans out to members supporting CC 0x43 |
+| `GetLogicalThermostatState` | `(s s) → (y y y y y y y i)` | aggregated (memberCount, mode, operatingState, fanMode, setpointType, setpointScale, setpointPrecision, setpointValue) |
+
+Aggregation rules: `mode` / `fanMode` report the common member value, or `0xFF`
+(**mixed**) when members disagree; `operatingState` is "active"
+(heating/cooling) if any member is; the setpoint fields carry the
+most-recently-reported member setpoint. `memberCount` distinguishes "no members
+tagged" from "idle". A `GetLogicalThermostatState` for a group that hasn't been
+addressed *and* had a member report yet returns all-zeros.
+
+Whenever the aggregate changes, the daemon emits
+`LogicalThermostatStateChanged(s s y y y y y y y i)` — the group identity
+followed by the same aggregated fields — so a UI can track every logical
+thermostat without polling.
+
+Example — drive all `room = Living room` thermostats to heat (mode 1) and 21.5 °C
+(setpoint type 1 heating, precision 1, scale 0 = °C, raw value 215):
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetLogicalThermostatMode ssy room "Living room" 1
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetLogicalThermostatSetpoint ssyyyi room "Living room" 1 1 0 215
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetLogicalThermostatState ss room "Living room"
+# → y y y y y y y i   2 1 1 0 1 0 1 215   (2 members, mode heat, heating, …, 21.5°C)
+```
+
+(Tag members first with `SetNodeMetadata` / group with `GetNodesByMetadata`, §16c.)
+
 ## 17. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's

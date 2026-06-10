@@ -278,7 +278,7 @@ governs.
   aggregation/mirroring (the closed-loop control deferred to its own epic) and
   grouping via node metadata (#83) rather than a new store. Children: **#132**
   (NodeMetadata reverse lookup / nodes-by-tag) ✅, **#133** (ThermostatOrchestrator
-  fan-out + mirror) ✅, **#134** (D-Bus logical-thermostat surface), **#135**
+  fan-out + mirror) ✅, **#134** (D-Bus logical-thermostat surface) ✅, **#135**
   (terminal UI). E1 remains exploratory here.
 - Old TODO.md stubs are superseded by this doc:
   - "Virtual nodes" (#29) → **E1** (addressable presence).

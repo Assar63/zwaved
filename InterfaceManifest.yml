@@ -420,6 +420,33 @@ events:
       - { name: status,            type: u8,   default: 0 }
       - { name: duration,          type: u8,   default: 0 }
 
+  - name: MultiChannelEndPointReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Multi Channel (CC 0x60) End Point Report (#13). How many
+      endpoints the node presents. `dynamic`: the count can change;
+      `identical`: all endpoints share capabilities (one CapabilityGet
+      describes them all).
+    fields:
+      - { name: sourceNodeId,  type: u8,   default: 0 }
+      - { name: endpointCount, type: u8,   default: 0 }
+      - { name: dynamic,       type: bool, default: false }
+      - { name: identical,     type: bool, default: false }
+
+  - name: MultiChannelCapabilityReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Multi Channel (CC 0x60) Capability Report (#13). One endpoint's
+      generic/specific device class and the Command Classes it supports.
+    fields:
+      - { name: sourceNodeId,   type: u8,    default: 0 }
+      - { name: endpoint,       type: u8,    default: 0 }
+      - { name: generic,        type: u8,    default: 0 }
+      - { name: specific,       type: u8,    default: 0 }
+      - { name: commandClasses, type: bytes }
+
   - name: BatteryReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -1046,6 +1073,38 @@ events:
       - { name: ccData,     type: bytes }
       - { name: callbackId, type: u8,    default: 0 }
 
+  - name: SendDataToEndpointCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Send an arbitrary CC frame to a specific Multi Channel endpoint on a
+      node (#13). The daemon wraps `ccData` in a MULTI_CHANNEL_CMD_ENCAP
+      addressed from the controller root (source endpoint 0) to
+      `endpoint`. Lets the daemon drive the (nodeId, endpoint) members it
+      can already configure via Multi Channel Association (CC 0x8E).
+    fields:
+      - { name: nodeId,     type: u8,    default: 0 }
+      - { name: endpoint,   type: u8,    default: 0 }
+      - { name: ccData,     type: bytes }
+      - { name: callbackId, type: u8,    default: 0 }
+
+  - name: GetMultiChannelEndpointsCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query how many Multi Channel endpoints a node presents (CC 0x60 END_POINT_GET).
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
+  - name: GetMultiChannelCapabilityCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: Query one Multi Channel endpoint's device class + CC list (CC 0x60 CAPABILITY_GET).
+    fields:
+      - { name: nodeId,     type: u8, default: 0 }
+      - { name: endpoint,   type: u8, default: 0 }
+      - { name: callbackId, type: u8, default: 0 }
+
   - name: SetBasicCommand
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
@@ -1608,6 +1667,30 @@ dbus:
         - { name: callbackId, dbus: y,  cpp: u8 }
       action:
         publish: SendSupervisedCommand
+
+    - name: SendDataToEndpoint
+      params:
+        - { name: nodeId,     dbus: y,  cpp: u8 }
+        - { name: endpoint,   dbus: y,  cpp: u8 }
+        - { name: ccData,     dbus: ay, cpp: bytes }
+        - { name: callbackId, dbus: y,  cpp: u8 }
+      action:
+        publish: SendDataToEndpointCommand
+
+    - name: GetMultiChannelEndpoints
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetMultiChannelEndpointsCommand
+
+    - name: GetMultiChannelCapability
+      params:
+        - { name: nodeId,     dbus: y, cpp: u8 }
+        - { name: endpoint,   dbus: y, cpp: u8 }
+        - { name: callbackId, dbus: y, cpp: u8 }
+      action:
+        publish: GetMultiChannelCapabilityCommand
 
     - name: SetBasic
       params:
@@ -2370,6 +2453,25 @@ dbus:
         - { name: duration,          dbus: y }
       triggered_by:
         event: SupervisionReport
+
+    - name: MultiChannelEndPointReport
+      params:
+        - { name: sourceNodeId,  dbus: y }
+        - { name: endpointCount, dbus: y }
+        - { name: dynamic,       dbus: b }
+        - { name: identical,     dbus: b }
+      triggered_by:
+        event: MultiChannelEndPointReport
+
+    - name: MultiChannelCapabilityReport
+      params:
+        - { name: sourceNodeId,   dbus: y }
+        - { name: endpoint,       dbus: y }
+        - { name: generic,        dbus: y }
+        - { name: specific,       dbus: y }
+        - { name: commandClasses, dbus: ay }
+      triggered_by:
+        event: MultiChannelCapabilityReport
 
     - name: SwitchMultilevelReport
       params:
@@ -3454,8 +3556,12 @@ modules:
       # Endpoint fields: low 7 bits are the endpoint, bit 7 of the
       # destination byte is the "bit address" flag (multicast to a bitmask
       # of endpoints rather than a single one).
-      - { name: ENDPOINT_MASK,      value: 0x7F }
-      - { name: BIT_ADDRESS_FLAG,   value: 0x80 }
+      - { name: ENDPOINT_MASK,           value: 0x7F }
+      - { name: BIT_ADDRESS_FLAG,        value: 0x80 }
+      # End Point Report properties1: bit 7 dynamic (count changes),
+      # bit 6 identical (all endpoints share capabilities).
+      - { name: ENDPOINT_DYNAMIC_FLAG,   value: 0x80 }
+      - { name: ENDPOINT_IDENTICAL_FLAG, value: 0x40 }
     commands:
       - name: Encap
         wire:
@@ -3465,6 +3571,30 @@ modules:
           - { name: destinationEndpoint, type: u8 }
           - { name: bitAddress,          type: bool, doc: "destination is a bitmask of endpoints" }
           - { name: innerCommand,        type: bytes, doc: "encapsulated CC frame (class + cmd + params)" }
+      # Endpoint discovery (#13, controller side). Get encoders + Report
+      # decoders are hand-written in MultiChannel.cpp; the manifest just
+      # contributes the command bytes (decoded_struct documents the shape).
+      - name: EndpointGet
+        wire:
+          byte: 0x07
+      - name: EndpointReport
+        wire:
+          byte: 0x08
+        decoded_struct:
+          - { name: endpointCount, type: u8 }
+          - { name: dynamic,       type: bool }
+          - { name: identical,     type: bool }
+      - name: CapabilityGet
+        wire:
+          byte: 0x09
+      - name: CapabilityReport
+        wire:
+          byte: 0x0A
+        decoded_struct:
+          - { name: endpoint,       type: u8 }
+          - { name: generic,        type: u8 }
+          - { name: specific,       type: u8 }
+          - { name: commandClasses, type: bytes }
 
   - name: Indicator
     wire:
@@ -3584,6 +3714,31 @@ translations:
       moreStatusUpdates: decoded.moreStatusUpdates
       status:            decoded.status
       duration:          decoded.duration
+
+  - publishes: MultiChannelEndPointReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: MultiChannel.decodeEndpointReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:  event.sourceNodeId
+      endpointCount: decoded.endpointCount
+      dynamic:       decoded.dynamic
+      identical:     decoded.identical
+
+  - publishes: MultiChannelCapabilityReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: MultiChannel.decodeCapabilityReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:   event.sourceNodeId
+      endpoint:       decoded.endpoint
+      generic:        decoded.generic
+      specific:       decoded.specific
+      commandClasses: decoded.commandClasses
 
   - publishes: MultilevelSwitchReport
     triggered_by: ApplicationCommand

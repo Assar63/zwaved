@@ -138,6 +138,39 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
+    proxy.uponSignal("MultiChannelEndPointReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTBEGIN(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId, std::uint8_t endpointCount, bool dynamic, bool identical) -> void
+            // NOLINTEND(bugprone-easily-swappable-parameters)
+            {
+                std::ostringstream stream;
+                stream << "MultiChannelEndPointReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " endpoints=" << static_cast<unsigned>(endpointCount) << (dynamic ? " dynamic" : "")
+                       << (identical ? " identical" : "");
+                logLine(stream.str());
+            });
+
+    proxy.uponSignal("MultiChannelCapabilityReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTBEGIN(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t endpoint,
+               std::uint8_t generic,
+               std::uint8_t specific,
+               const std::vector<std::uint8_t>& ccs) -> void
+            // NOLINTEND(bugprone-easily-swappable-parameters)
+            {
+                std::ostringstream stream;
+                stream << "MultiChannelCapabilityReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " endpoint=" << static_cast<unsigned>(endpoint) << " generic=0x" << std::hex << std::setw(2)
+                       << std::setfill('0') << static_cast<unsigned>(generic) << " specific=0x" << std::setw(2)
+                       << static_cast<unsigned>(specific) << std::dec << " ccs=" << ccs.size();
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("SwitchMultilevelReport")
         .onInterface(IFACE_NAME)
         .call(

@@ -21,6 +21,7 @@
 #include "application/Indicator.hpp"
 #include "application/ManufacturerSpecific.hpp"
 #include "application/Meter.hpp"
+#include "application/MultiChannel.hpp"
 #include "application/MultichannelAssociation.hpp"
 #include "application/MultilevelSwitch.hpp"
 #include "application/NodeVersion.hpp"
@@ -309,6 +310,24 @@ auto onSendSupervised(const MessageBus::SendSupervisedCommand& cmd) -> void
     pushSendData(cmd.nodeId,
                  cmd.callbackId,
                  Supervision::encodeGet(cmd.sessionId, false, std::span<const std::uint8_t>(cmd.ccData)));
+}
+
+auto onSendDataToEndpoint(const MessageBus::SendDataToEndpointCommand& cmd) -> void
+{
+    // Wrap from the controller root (source endpoint 0) to the target endpoint.
+    pushSendData(cmd.nodeId,
+                 cmd.callbackId,
+                 MultiChannel::encodeEncap(0, cmd.endpoint, std::span<const std::uint8_t>(cmd.ccData)));
+}
+
+auto onGetMultiChannelEndpoints(const MessageBus::GetMultiChannelEndpointsCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, MultiChannel::encodeEndpointGet());
+}
+
+auto onGetMultiChannelCapability(const MessageBus::GetMultiChannelCapabilityCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId, cmd.callbackId, MultiChannel::encodeCapabilityGet(cmd.endpoint));
 }
 
 auto onGetBasic(const MessageBus::GetBasicCommand& cmd) -> void
@@ -1108,7 +1127,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 50;
+constexpr std::size_t SUBSCRIPTION_COUNT = 53;
 
 auto subscribeBus() -> void
 {
@@ -1124,6 +1143,9 @@ auto subscribeBus() -> void
     subscribe<MessageBus::SetIndicatorCommand>(onSetIndicator);
     subscribe<MessageBus::GetIndicatorCommand>(onGetIndicator);
     subscribe<MessageBus::SendSupervisedCommand>(onSendSupervised);
+    subscribe<MessageBus::SendDataToEndpointCommand>(onSendDataToEndpoint);
+    subscribe<MessageBus::GetMultiChannelEndpointsCommand>(onGetMultiChannelEndpoints);
+    subscribe<MessageBus::GetMultiChannelCapabilityCommand>(onGetMultiChannelCapability);
     subscribe<MessageBus::SetBasicCommand>(onSetBasic);
     subscribe<MessageBus::GetBasicCommand>(onGetBasic);
     subscribe<MessageBus::SetMultilevelSwitchCommand>(onSetMultilevelSwitch);

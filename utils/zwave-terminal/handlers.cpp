@@ -371,6 +371,31 @@ auto handleSetIndicator(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> v
     }
 }
 
+auto handleGetMultiChannelCapability(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId   = promptNodeId("Node ID (1-232):");
+    auto endpoint = promptByte("Endpoint (1-127):", 1, BYTE_MAX);
+    if (!nodeId.has_value() || !endpoint.has_value())
+    {
+        logLine("GetMultiChannelCapability: cancelled or invalid");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("GetMultiChannelCapability")
+            .onInterface(IFACE_NAME)
+            .withArguments(*nodeId, *endpoint, sessionCounter);
+        logLine("GetMultiChannelCapability node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " endpoint=" + std::to_string(static_cast<unsigned>(*endpoint)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetMultiChannelCapability failed: "} + err.what());
+    }
+}
+
 auto handleSetBasic(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
 {
     auto nodeId = promptNodeId("Node ID (1-232):");

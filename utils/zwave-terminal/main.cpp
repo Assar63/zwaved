@@ -153,6 +153,12 @@ auto run() -> int
                          [&] { handleSimpleGet(*proxy, sessionCounter, "GetUserCodeCount"); }},
                         {'a', "Association members", [&] { handleGetAssociation(*proxy, sessionCounter); }},
                         {'r', "Association groupings", [&] { handleGetAssociationGroupings(*proxy, sessionCounter); }},
+                        {'h',
+                         "Multi Channel endpoints",
+                         [&] { handleSimpleGet(*proxy, sessionCounter, "GetMultiChannelEndpoints"); }},
+                        {'j',
+                         "Multi Channel capability",
+                         [&] { handleGetMultiChannelCapability(*proxy, sessionCounter); }},
                     });
             }
             else if (key == 'c' || key == 'C')

@@ -330,6 +330,20 @@ target_link_libraries(SceneActivation_test PRIVATE GTest::gtest GTest::gtest_mai
 zwaved_test_target(SceneActivation_test)
 gtest_discover_tests(SceneActivation_test)
 
+# ---- Indicator ------------------------------------------------------
+add_executable(Indicator_test
+    Indicator_test.cpp
+    "${SRC_DIR}/application/Indicator.cpp"
+    "${GENERATED_APPLICATION_DIR}/Indicator.gen.cpp"
+)
+target_include_directories(Indicator_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(Indicator_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(Indicator_test)
+gtest_discover_tests(Indicator_test)
+
 # ---- MultiChannel ---------------------------------------------------
 # No .gen.cpp (header-only constants; hand-written encap/decap codec).
 add_executable(MultiChannel_test

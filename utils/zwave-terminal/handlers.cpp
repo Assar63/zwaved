@@ -348,6 +348,29 @@ auto handleSetUserCode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> vo
 // fire-and-forget SendData; completion arrives as SendDataStatus and any
 // reply as the matching typed report signal.
 
+auto handleSetIndicator(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
+{
+    auto nodeId = promptNodeId("Node ID (1-232):");
+    auto value  = promptByte("Indicator value (0=off, 0xFF=on, 1-99=level):", BYTE_MIN, BYTE_MAX);
+    if (!nodeId.has_value() || !value.has_value())
+    {
+        logLine("SetIndicator: cancelled or invalid");
+        return;
+    }
+    ++sessionCounter;
+    try
+    {
+        proxy.callMethod("SetIndicator").onInterface(IFACE_NAME).withArguments(*nodeId, *value, sessionCounter);
+        logLine("SetIndicator node=" + std::to_string(static_cast<unsigned>(*nodeId)) +
+                " value=" + std::to_string(static_cast<unsigned>(*value)) +
+                " callback=" + std::to_string(static_cast<unsigned>(sessionCounter)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetIndicator failed: "} + err.what());
+    }
+}
+
 auto handleSetBasic(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
 {
     auto nodeId = promptNodeId("Node ID (1-232):");

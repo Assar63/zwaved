@@ -164,6 +164,7 @@ auto run() -> int
                         {'f', "Switch binary OFF", [&] { handleSwitchBinary(*proxy, sessionCounter, false); }},
                         {'w', "Multilevel switch set", [&] { handleSetMultilevelSwitch(*proxy, sessionCounter); }},
                         {'b', "Basic set", [&] { handleSetBasic(*proxy, sessionCounter); }},
+                        {'i', "Indicator set", [&] { handleSetIndicator(*proxy, sessionCounter); }},
                         {'c', "Configuration set", [&] { handleSetConfiguration(*proxy, sessionCounter); }},
                         {'t', "Thermostat mode set", [&] { handleSetThermostatMode(*proxy, sessionCounter); }},
                         {'p', "Thermostat setpoint set", [&] { handleSetThermostatSetpoint(*proxy, sessionCounter); }},

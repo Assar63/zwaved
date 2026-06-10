@@ -10,11 +10,23 @@ companion `zwave-terminal` client, and packaging.
 > management) and the "unlikely" backlog (OTA, metrics, fuzzing, …) — live in
 > `FUTURE.md`.
 
+> **Daemon roles** (GitHub labels `role: controller` / `role: responder`):
+> the daemon plays two roles toward the Z-Wave network. **Controller** =
+> *initiates* — drives and queries real nodes (CC Set/Get, inclusion, network
+> ops); this is the default for unlabelled CC / network work. **Responder** =
+> *reacts to / is addressed by* devices — the orchestrators that fire on
+> inbound device events (wake-ups, Central Scene presses, Basic Set / Scene
+> Activation, thermostat reports) and the E1 protocol-level presence work
+> (answering endpoint/capability queries, hosting virtual nodes). The
+> "Inclusion & wake-up orchestration" and "Closed-loop automation" sections
+> below, and the E1 epic, are **responder-role**; most "Command classes" and
+> "Network & node operations" are **controller-role**.
+
 ---
 
 ## zwaved daemon
 
-### Network & node operations
+### Network & node operations  _(role: controller)_
 
 - [x] **Binary Switch (CC `0x25`)** — `SetSwitchBinary` over D-Bus, end-to-end including SendData and Report decode.
 - [x] **Association (CC `0x85`)** — `SetAssociation` / `RemoveAssociation` / `GetAssociation` / `GetAssociationGroupings`; `AssociationReport` and `AssociationGroupingsReport` signals on the unsolicited path.
@@ -34,7 +46,7 @@ companion `zwave-terminal` client, and packaging.
 - [ ] [Controller backup/restore (FUNC_ID_NVM_BACKUP_RESTORE 0xF8)](https://github.com/Assar63/zwaved/issues/5)
 - [ ] [Per-node liveness](https://github.com/Assar63/zwaved/issues/6)
 
-### Inclusion & wake-up orchestration
+### Inclusion & wake-up orchestration  _(role: responder)_
 
 Coordinated plan for two flows: **what happens after a node is included** (lifeline → policy → wake-up interval) and **what happens when a sleeping node wakes up** (drain pending commands → tell it to sleep again, fast, to preserve battery). The work splits across two new CC codecs, a SQLite-backed queue + policy register, and a dedicated `src/orchestrator/` module that holds the state machines. Orchestrators talk to ProtocolThread via the message bus only — same loose-coupling rule the existing modules follow — which leaves room for a future SecurityOrchestrator (#26/#27) to hook into the inclusion flow without rewriting it.
 
@@ -50,14 +62,14 @@ Implementation order (each shippable independently):
 
 **The full inclusion + wake-up orchestration plan is now complete (steps 1–7).**
 
-### Closed-loop automation (epic)
+### Closed-loop automation (epic)  _(role: responder)_
 
 > [epic: daemon-side closed-loop automation](https://github.com/Assar63/zwaved/issues/101) — daemon *reacts* to node events by *driving* other nodes/CCs (PolicyRegister desired-state re-assertion, verify-after-set, event-triggered cross-node reactions, set/level coalescing, schedules). Orchestrators stay in `src/orchestrator/` (prio 204, bus-only). Full rationale in the issue; broader design context in `FUTURE.md`.
 
 - [x] [epic: Thermostat management](https://github.com/Assar63/zwaved/issues/131) (FUTURE.md E3) — **complete**. A **logical thermostat** that fans a Mode/Setpoint Set out to the real climate nodes sharing a node-metadata tag (#83, e.g. `room=living-room`) and mirrors their Reports into an aggregated logical state. Pure orchestration (no virtual nodes). Aggregation/mirroring only; closed-loop control (setpoint-vs-measured, schedules) deferred to its own epic. Children all merged: [#132](https://github.com/Assar63/zwaved/issues/132) reverse lookup, [#133](https://github.com/Assar63/zwaved/issues/133) ThermostatOrchestrator, [#134](https://github.com/Assar63/zwaved/issues/134) D-Bus surface, [#135](https://github.com/Assar63/zwaved/issues/135) terminal UI. See MANUAL §16e.
 - [ ] [epic: Addressable presence](https://github.com/Assar63/zwaved/issues/142) (FUTURE.md E1) — give the daemon a presence real devices can associate to. **Tier 1** (associate to the controller node) already delivered (underpins E2 #119). Actionable new work is **Tier 2** (Multi Channel endpoints on the controller node), gated on a device-compat spike: [#143](https://github.com/Assar63/zwaved/issues/143) spike, [#144](https://github.com/Assar63/zwaved/issues/144) CC 0x60 encap codec, [#145](https://github.com/Assar63/zwaved/issues/145) endpoint responder, [#146](https://github.com/Assar63/zwaved/issues/146) inbound routing. [#147](https://github.com/Assar63/zwaved/issues/147) Tier 3 (virtual slave nodes) is **blocked** — needs a Bridge Controller dongle.
 
-### Command classes
+### Command classes  _(role: controller, unless noted)_
 
 **Simple — single fixed-shape payload, mirrors the existing BinarySwitch / Association pattern:**
 

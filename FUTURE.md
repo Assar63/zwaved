@@ -220,6 +220,22 @@ governs.
 
 ## Cross-cutting notes
 
+- **Two daemon roles — controller vs responder** (GitHub labels
+  `role: controller` / `role: responder`). The daemon plays two roles toward the
+  network, and it's worth naming which a piece of work is:
+  - **Controller (initiator):** the daemon *drives and queries* real nodes —
+    inclusion/exclusion, CC Set/Get, network ops, firmware push. This is the
+    default and the bulk of the codebase.
+  - **Responder:** the daemon *reacts to or is addressed by* devices. This isn't
+    new with E1 — **the whole orchestrator layer is responder-role**: it fires on
+    inbound device-originated events (wake-ups, Central Scene presses, Basic Set /
+    Scene Activation, thermostat reports) decoded off `APPLICATION_COMMAND_HANDLER`
+    by the cc-translator, then reacts. E1 extends the responder role *down to the
+    protocol level* — answering Multi Channel endpoint/capability queries (Tier 2)
+    and hosting virtual slave nodes (Tier 3) — so real devices can address the
+    daemon directly, not just trigger it. The split clarifies dependencies: a
+    responder feature needs an inbound decode + (sometimes) a reply path; a
+    controller feature needs an outbound command + callback correlation.
 - **Reuse, don't reinvent:** the orchestrator pattern (bus-only, prio 204), the
   SQLite `(home_id, …)`-keyed store idiom, the cc-translator for typed decode,
   and the manifest-driven codegen all extend cleanly to these. Tier 1 needs *no*

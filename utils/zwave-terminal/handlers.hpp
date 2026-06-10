@@ -31,6 +31,7 @@ auto handleGetUserCode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> vo
 auto handleSetUserCode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleSetBasic(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleSetIndicator(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
+auto handleGetMultiChannelCapability(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleSetThermostatMode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleGetThermostatSetpoint(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 auto handleSetThermostatSetpoint(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;

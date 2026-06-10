@@ -861,6 +861,47 @@ on every per-CC Set (so e.g. `SetSwitchBinary` returns the applied status)
 are a follow-up, best built alongside the closed-loop automation epic (#101,
 verify-after-set).
 
+## 11q. Multi Channel — addressing endpoints (CC 0x60)
+
+A multi-endpoint node (e.g. a 2-gang switch, each gang an endpoint) is driven
+by **encapsulating** the inner CC frame for a specific endpoint. The daemon
+can already configure `(node, endpoint)` members in a Multi Channel
+Association group (§14b); these methods let it actually *address* those
+endpoints and *discover* them.
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `SendDataToEndpoint` | `(y y ay y) → ()` | nodeId, endpoint, inner ccData, callbackId — wraps ccData in `MULTI_CHANNEL_CMD_ENCAP` to the endpoint |
+| `GetMultiChannelEndpoints` | `(y y) → ()` | nodeId, callbackId; reply → `MultiChannelEndPointReport` signal |
+| `GetMultiChannelCapability` | `(y y y) → ()` | nodeId, endpoint, callbackId; reply → `MultiChannelCapabilityReport` signal |
+
+```bash
+# Turn endpoint 2 of node 5 on — inner = Binary Switch SET on (0x25 0x01 0xFF):
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SendDataToEndpoint yyayy 5 2 3 0x25 0x01 0xFF 7
+# Discover endpoints:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetMultiChannelEndpoints yy 5 8
+# → later: MultiChannelEndPointReport y y b b  5 2 false true   (2 endpoints, identical)
+# Query endpoint 2's capabilities:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetMultiChannelCapability yyy 5 2 9
+# → later: MultiChannelCapabilityReport y y y y ay  5 2 16 1 [0x25]
+```
+
+Discovery replies are decoded into the typed `MultiChannelEndPointReport(y y b
+b)` and `MultiChannelCapabilityReport(y y y y ay)` signals. The terminal's
+`[g]` Get submenu has `[h]` Multi Channel endpoints and `[j]` Multi Channel
+capability.
+
+**Scope:** this is the controller side — discover endpoints and address an
+endpoint on send. Persisting the discovered endpoint table in NodeRegistry,
+and *unwrapping inbound encapsulated replies* into endpoint-tagged typed
+reports (so a Report from endpoint 2 surfaces as such), are follow-ups — the
+latter is #146 (shared with the E1 Tier 2 responder work). For now an
+encapsulated inbound reply arrives as a raw `ApplicationCommand` with
+`ccData[0] == 0x60 && ccData[1] == 0x0D`.
+
 ## 12. Unsolicited node events
 
 When a node sends an unsolicited Command Class frame — most commonly a

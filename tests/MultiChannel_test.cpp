@@ -67,3 +67,61 @@ TEST(MultiChannel, EncodeDecodeRoundTrip)
     EXPECT_EQ(decoded->destinationEndpoint, 7);
     EXPECT_EQ(decoded->innerCommand, (std::vector<std::uint8_t>{0x26, 0x01, 0x63, 0x00}));
 }
+
+TEST(MultiChannel, EncodeEndpointGet)
+{
+    EXPECT_EQ(MultiChannel::encodeEndpointGet(), (std::vector<std::uint8_t>{CC_MULTI_CHANNEL, 0x07}));
+}
+
+TEST(MultiChannel, DecodeEndpointReport)
+{
+    // properties1 0xC0 = dynamic | identical; properties2 0x03 = 3 endpoints.
+    const std::array<std::uint8_t, 4> bytes{CC_MULTI_CHANNEL, 0x08, 0xC0, 0x03};
+    const auto report = MultiChannel::decodeEndpointReport(std::span<const std::uint8_t>(bytes));
+    ASSERT_TRUE(report.has_value());
+    EXPECT_EQ(report->endpointCount, 3);
+    EXPECT_TRUE(report->dynamic);
+    EXPECT_TRUE(report->identical);
+}
+
+TEST(MultiChannel, DecodeEndpointReportMasksCountAndFlags)
+{
+    // properties1 0x00 = neither flag; properties2 0x82 -> count 2 (bit7 masked off).
+    const std::array<std::uint8_t, 4> bytes{CC_MULTI_CHANNEL, 0x08, 0x00, 0x82};
+    const auto report = MultiChannel::decodeEndpointReport(std::span<const std::uint8_t>(bytes));
+    ASSERT_TRUE(report.has_value());
+    EXPECT_EQ(report->endpointCount, 2);
+    EXPECT_FALSE(report->dynamic);
+    EXPECT_FALSE(report->identical);
+}
+
+TEST(MultiChannel, EncodeCapabilityGetMasksEndpoint)
+{
+    EXPECT_EQ(MultiChannel::encodeCapabilityGet(0x82),  // bit 7 masked off -> 2
+              (std::vector<std::uint8_t>{CC_MULTI_CHANNEL, 0x09, 0x02}));
+}
+
+TEST(MultiChannel, DecodeCapabilityReport)
+{
+    // endpoint 2, generic 0x10, specific 0x01, CCs {0x25, 0x20}.
+    const std::array<std::uint8_t, 7> bytes{CC_MULTI_CHANNEL, 0x0A, 0x02, 0x10, 0x01, 0x25, 0x20};
+    const auto report = MultiChannel::decodeCapabilityReport(std::span<const std::uint8_t>(bytes));
+    ASSERT_TRUE(report.has_value());
+    EXPECT_EQ(report->endpoint, 2);
+    EXPECT_EQ(report->generic, 0x10);
+    EXPECT_EQ(report->specific, 0x01);
+    EXPECT_EQ(report->commandClasses, (std::vector<std::uint8_t>{0x25, 0x20}));
+}
+
+TEST(MultiChannel, DecodeDiscoveryRejectsMalformed)
+{
+    const std::array<std::uint8_t, 3> shortEp{CC_MULTI_CHANNEL, 0x08, 0x00};  // missing count byte
+    EXPECT_FALSE(MultiChannel::decodeEndpointReport(std::span<const std::uint8_t>(shortEp)).has_value());
+    const std::array<std::uint8_t, 4> shortCap{CC_MULTI_CHANNEL, 0x0A, 0x02, 0x10};  // missing specific
+    EXPECT_FALSE(MultiChannel::decodeCapabilityReport(std::span<const std::uint8_t>(shortCap)).has_value());
+    // A capability report with an empty CC list is still valid (5 bytes).
+    const std::array<std::uint8_t, 5> noCcs{CC_MULTI_CHANNEL, 0x0A, 0x01, 0x10, 0x01};
+    const auto report = MultiChannel::decodeCapabilityReport(std::span<const std::uint8_t>(noCcs));
+    ASSERT_TRUE(report.has_value());
+    EXPECT_TRUE(report->commandClasses.empty());
+}

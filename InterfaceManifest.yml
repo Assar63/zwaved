@@ -3336,6 +3336,35 @@ modules:
       - { name: GroupingsGet,    wire: { byte: 0x05 } }
       - { name: GroupingsReport, wire: { byte: 0x06 } }
 
+  - name: MultiChannel
+    wire:
+      class_byte: 0x60
+      prefix: MULTI_CHANNEL
+    description: |
+      Multi Channel (CC 0x60) encapsulation layer (E1 Tier 2, #144). Wraps
+      an inner Command Class frame with a source + destination endpoint so a
+      single node can present several addressable endpoints. Only the v2+
+      MULTI_CHANNEL_CMD_ENCAP (0x0D) is handled. The encap/decap is
+      hand-written (variable-length inner payload) in MultiChannel.cpp; the
+      manifest contributes the command byte + endpoint-field masks. Inbound
+      decap feeds the endpoint routing (#146); encode wraps an outbound
+      endpoint-addressed frame.
+    constants:
+      # Endpoint fields: low 7 bits are the endpoint, bit 7 of the
+      # destination byte is the "bit address" flag (multicast to a bitmask
+      # of endpoints rather than a single one).
+      - { name: ENDPOINT_MASK,      value: 0x7F }
+      - { name: BIT_ADDRESS_FLAG,   value: 0x80 }
+    commands:
+      - name: Encap
+        wire:
+          byte: 0x0D
+        decoded_struct:
+          - { name: sourceEndpoint,      type: u8 }
+          - { name: destinationEndpoint, type: u8 }
+          - { name: bitAddress,          type: bool, doc: "destination is a bitmask of endpoints" }
+          - { name: innerCommand,        type: bytes, doc: "encapsulated CC frame (class + cmd + params)" }
+
 
 # =====================================================================
 # 5. Translation rules

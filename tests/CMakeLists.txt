@@ -330,6 +330,20 @@ target_link_libraries(SceneActivation_test PRIVATE GTest::gtest GTest::gtest_mai
 zwaved_test_target(SceneActivation_test)
 gtest_discover_tests(SceneActivation_test)
 
+# ---- MultiChannel ---------------------------------------------------
+# No .gen.cpp (header-only constants; hand-written encap/decap codec).
+add_executable(MultiChannel_test
+    MultiChannel_test.cpp
+    "${SRC_DIR}/application/MultiChannel.cpp"
+)
+target_include_directories(MultiChannel_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(MultiChannel_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(MultiChannel_test)
+gtest_discover_tests(MultiChannel_test)
+
 # ---- DoorLock -------------------------------------------------------
 add_executable(DoorLock_test
     DoorLock_test.cpp

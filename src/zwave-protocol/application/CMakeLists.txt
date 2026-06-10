@@ -54,6 +54,7 @@ target_sources(zwaved PRIVATE
     ColorSwitch.cpp
     CentralScene.cpp
     SceneActivation.cpp
+    MultiChannel.cpp
     ThermostatMode.cpp
     ThermostatSetpoint.cpp
     ThermostatOperatingState.cpp

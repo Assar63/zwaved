@@ -57,6 +57,7 @@ target_sources(zwaved PRIVATE
     SceneActivation.cpp
     MultiChannel.cpp
     Indicator.cpp
+    Supervision.cpp
     ThermostatMode.cpp
     ThermostatSetpoint.cpp
     ThermostatOperatingState.cpp

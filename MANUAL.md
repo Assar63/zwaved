@@ -392,33 +392,6 @@ stream on `ccData[0] == 0x20 && ccData[1] == 0x03` (Basic REPORT) and
 read `ccData[2]` (current value), optionally `ccData[3]` (target) and
 `ccData[4]` (duration) for v2+ frames.
 
-## 11c. Driving an Indicator (CC 0x87)
-
-Controls a node's indicator (LED / buzzer). v1 is a single value byte:
-`0x00` off, `0x01..0x63` level, `0xFF` on — same shape as Basic. Useful
-for "find this node" blink or status LEDs.
-
-| Method | Signature | Notes |
-|--------|-----------|-------|
-| `SetIndicator` | `(y y y) → ()` | nodeId, value, callbackId |
-| `GetIndicator` | `(y y) → ()` | nodeId, callbackId; reply arrives as the `IndicatorReport` signal |
-
-```bash
-# Turn node 5's indicator on, callback id 7:
-busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
-    com.tiunda.ZWaved1 SetIndicator yyy 5 0xFF 7
-# Read it back:
-busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
-    com.tiunda.ZWaved1 GetIndicator yy 5 8
-# → later: IndicatorReport y y  5 255
-```
-
-Unsolicited / GET replies are decoded by the cc-translator into the typed
-`IndicatorReport(y y)` signal — `(sourceNodeId, value)`. The terminal's
-`[c]` Control submenu → `[i]` sets an indicator value, and the report
-renders in the activity pane. The v3+ structured (multi-indicator) form is
-a follow-up; v1 covers the common single-indicator case.
-
 ## 11c. Driving a Multilevel Switch (CC 0x26)
 
 `SetMultilevelSwitch` sends a Multilevel Switch SET (Command Class
@@ -829,6 +802,64 @@ Door Lock CONFIGURATION (auto-relock) and User Code v2 extended fields are
 deferred. In the terminal, the `[c]` Control submenu has `[d]` Door lock set
 and `[u]` User code set; the `[g]` Get submenu has `[d]` Door lock, `[u]`
 User code, and `[x]` User code slot count.
+
+## 11o. Driving an Indicator (CC 0x87)
+
+Controls a node's indicator (LED / buzzer). v1 is a single value byte:
+`0x00` off, `0x01..0x63` level, `0xFF` on — same shape as Basic. Useful
+for "find this node" blink or status LEDs.
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `SetIndicator` | `(y y y) → ()` | nodeId, value, callbackId |
+| `GetIndicator` | `(y y) → ()` | nodeId, callbackId; reply arrives as the `IndicatorReport` signal |
+
+```bash
+# Turn node 5's indicator on, callback id 7:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SetIndicator yyy 5 0xFF 7
+# Read it back:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetIndicator yy 5 8
+# → later: IndicatorReport y y  5 255
+```
+
+Unsolicited / GET replies are decoded by the cc-translator into the typed
+`IndicatorReport(y y)` signal — `(sourceNodeId, value)`. The terminal's
+`[c]` Control submenu → `[i]` sets an indicator value, and the report
+renders in the activity pane. The v3+ structured (multi-indicator) form is
+a follow-up; v1 covers the common single-indicator case.
+
+## 11p. Supervised send (CC 0x6C)
+
+Supervision wraps an outbound CC frame so the node returns an explicit
+**applied/working/fail** status — distinguishing "the bytes were
+transmitted" (the `SendDataStatus` answer) from "the node actually obeyed".
+
+`SendSupervised(nodeId, sessionId, ccData, callbackId)` encapsulates the raw
+`ccData` (a complete inner CC frame) in a Supervision GET. `sessionId` is a
+caller-chosen 6-bit nonce (0–63) that the node echoes in its report, so the
+caller correlates the reply to the request.
+
+```bash
+# Supervised "Binary Switch SET on" (inner = 0x25 0x01 0xFF) to node 5,
+# session nonce 7, callback 9:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SendSupervised yyayy 5 7 3 0x25 0x01 0xFF 9
+# → later: SupervisionReport y y b y y  5 7 false 255 0   (session 7, status success)
+```
+
+The reply arrives as the typed `SupervisionReport(y y b y y)` signal —
+`(sourceNodeId, sessionId, moreStatusUpdates, status, duration)`. `status`:
+`0x00` no-support, `0x01` working, `0x02` fail, `0xFF` success;
+`moreStatusUpdates` means a final report follows after `duration`. The
+terminal renders it in the activity pane (`status=success`).
+
+**Scope:** this is the MVP — a generic supervised send keyed on a
+caller-chosen session. A daemon-side session table and a `supervised` toggle
+on every per-CC Set (so e.g. `SetSwitchBinary` returns the applied status)
+are a follow-up, best built alongside the closed-loop automation epic (#101,
+verify-after-set).
 
 ## 12. Unsolicited node events
 

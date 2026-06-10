@@ -27,6 +27,7 @@
 #include "application/Notification.hpp"
 #include "application/SensorBinary.hpp"
 #include "application/SensorMultilevel.hpp"
+#include "application/Supervision.hpp"
 #include "application/ThermostatFanMode.hpp"
 #include "application/ThermostatMode.hpp"
 #include "application/ThermostatOperatingState.hpp"
@@ -301,6 +302,13 @@ auto onGetIndicator(const MessageBus::GetIndicatorCommand& cmd) -> void
 auto onSetBasic(const MessageBus::SetBasicCommand& cmd) -> void
 {
     pushSendData(cmd.nodeId, cmd.callbackId, Basic::encodeSet(cmd.value));
+}
+
+auto onSendSupervised(const MessageBus::SendSupervisedCommand& cmd) -> void
+{
+    pushSendData(cmd.nodeId,
+                 cmd.callbackId,
+                 Supervision::encodeGet(cmd.sessionId, false, std::span<const std::uint8_t>(cmd.ccData)));
 }
 
 auto onGetBasic(const MessageBus::GetBasicCommand& cmd) -> void
@@ -1100,7 +1108,7 @@ template <typename Event, typename Handler> auto subscribe(Handler&& handler) ->
 // Count of bus subscriptions registered by `subscribeBus`. Kept in sync
 // with the body — used only as a `vector::reserve` hint so off-by-one is
 // harmless beyond an extra reallocation.
-constexpr std::size_t SUBSCRIPTION_COUNT = 49;
+constexpr std::size_t SUBSCRIPTION_COUNT = 50;
 
 auto subscribeBus() -> void
 {
@@ -1115,6 +1123,7 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetSwitchBinaryCommand>(onGetSwitchBinary);
     subscribe<MessageBus::SetIndicatorCommand>(onSetIndicator);
     subscribe<MessageBus::GetIndicatorCommand>(onGetIndicator);
+    subscribe<MessageBus::SendSupervisedCommand>(onSendSupervised);
     subscribe<MessageBus::SetBasicCommand>(onSetBasic);
     subscribe<MessageBus::GetBasicCommand>(onGetBasic);
     subscribe<MessageBus::SetMultilevelSwitchCommand>(onSetMultilevelSwitch);

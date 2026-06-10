@@ -344,6 +344,20 @@ target_link_libraries(Indicator_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Indicator_test)
 gtest_discover_tests(Indicator_test)
 
+# ---- Supervision ----------------------------------------------------
+# No .gen.cpp (header-only constants; hand-written encap + report decode).
+add_executable(Supervision_test
+    Supervision_test.cpp
+    "${SRC_DIR}/application/Supervision.cpp"
+)
+target_include_directories(Supervision_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(Supervision_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(Supervision_test)
+gtest_discover_tests(Supervision_test)
+
 # ---- MultiChannel ---------------------------------------------------
 # No .gen.cpp (header-only constants; hand-written encap/decap codec).
 add_executable(MultiChannel_test

@@ -96,7 +96,7 @@ auto draw(std::uint8_t lastSession) -> void
 
     mvprintw(row++, 0, "  [1] Add zwave node          [2] Remove zwave node");
     mvprintw(row++, 0, "  [g] Get from node…          [c] Control / set on node…");
-    mvprintw(row++, 0, "  [p] Policy…                 [e] Scenes…");
+    mvprintw(row++, 0, "  [p] Policy…                 [e] Scenes…           [h] Logical thermostat…");
     mvprintw(row++, 0, "  [l] List included nodes     [n] Network status     [i] Dongle info");
     mvprintw(row++, 0, "  [f] Remove failed node      [L] Set lifeline (controller -> group 1)");
     mvprintw(row++, 0, "  [s] Stop current operation (session %u)", static_cast<unsigned>(lastSession));

@@ -59,6 +59,9 @@ auto handleSetScene(sdbus::IProxy& proxy) -> void;
 auto handleDeleteScene(sdbus::IProxy& proxy) -> void;
 auto handleBindSceneTrigger(sdbus::IProxy& proxy) -> void;
 auto handleUnbindSceneTrigger(sdbus::IProxy& proxy) -> void;
+auto handleSetLogicalThermostatMode(sdbus::IProxy& proxy) -> void;
+auto handleSetLogicalThermostatSetpoint(sdbus::IProxy& proxy) -> void;
+auto handleGetLogicalThermostatState(sdbus::IProxy& proxy) -> void;
 }  // namespace zwt
 
 #endif  // ZWAVE_TERMINAL_HANDLERS_HPP

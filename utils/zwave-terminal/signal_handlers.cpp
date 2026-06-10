@@ -210,6 +210,37 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
+    proxy.uponSignal("LogicalThermostatStateChanged")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](const std::string& groupKey,
+               const std::string& groupValue,
+               std::uint8_t memberCount,
+               std::uint8_t mode,
+               std::uint8_t operatingState,
+               std::uint8_t fanMode,
+               std::uint8_t /*setpointType*/,
+               std::uint8_t /*setpointScale*/,
+               std::uint8_t /*setpointPrecision*/,
+               std::int32_t setpointValue) -> void
+            {
+                std::ostringstream stream;
+                stream << "LogicalThermostat " << groupKey << "=" << groupValue
+                       << " members=" << static_cast<unsigned>(memberCount) << " mode=";
+                if (mode == LOGICAL_MODE_MIXED)
+                {
+                    stream << "mixed";
+                }
+                else
+                {
+                    stream << static_cast<unsigned>(mode);
+                }
+                stream << " op=" << static_cast<unsigned>(operatingState) << " fan=" << static_cast<unsigned>(fanMode)
+                       << " setpoint=" << setpointValue;
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("DoorLockOperationReport")
         .onInterface(IFACE_NAME)
         .call(

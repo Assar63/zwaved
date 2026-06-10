@@ -204,6 +204,15 @@ auto run() -> int
                                   {'u', "Unbind trigger", [&] { handleUnbindSceneTrigger(*proxy); }},
                               });
             }
+            else if (key == 'h' || key == 'H')
+            {
+                runActionMenu("Logical thermostat (climate group)",
+                              {
+                                  {'m', "Set group mode", [&] { handleSetLogicalThermostatMode(*proxy); }},
+                                  {'s', "Set group setpoint", [&] { handleSetLogicalThermostatSetpoint(*proxy); }},
+                                  {'g', "Get group state", [&] { handleGetLogicalThermostatState(*proxy); }},
+                              });
+            }
             else if (key == 'l')
             {
                 handleListNodes(*proxy);

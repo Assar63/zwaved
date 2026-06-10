@@ -1419,5 +1419,153 @@ auto handleUnbindSceneTrigger(sdbus::IProxy& proxy) -> void
     }
 }
 
+// ---- Logical thermostat (#134/#135) ----------------------------------
+// Drive / read a logical thermostat — the climate nodes sharing the
+// node-metadata tag groupKey=groupValue. No callbackId: these address a
+// group, and the daemon fans out / aggregates.
+
+namespace
+{
+// Aggregated GetLogicalThermostatState return shape (mirrors the daemon's
+// LogicalThermostatStateTuple).
+using LogicalThermostatStateTuple = sdbus::Struct<std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::uint8_t,
+                                                  std::int32_t>;
+
+// Field indices into LogicalThermostatStateTuple (named so std::get<N> for
+// N > 4 stays out of the magic-number checker).
+constexpr std::size_t LT_SETPOINT_SCALE = 5;
+constexpr std::size_t LT_SETPOINT_PREC  = 6;
+constexpr std::size_t LT_SETPOINT_VALUE = 7;
+
+// Prompt the group key + value shared by all logical-thermostat actions.
+auto promptGroup() -> std::optional<std::pair<std::string, std::string>>
+{
+    auto key = promptLine("Group key (e.g. room):");
+    if (!key.has_value())
+    {
+        return std::nullopt;
+    }
+    auto value = promptLine("Group value (e.g. Living room):");
+    if (!value.has_value())
+    {
+        return std::nullopt;
+    }
+    return std::make_pair(*key, *value);
+}
+}  // namespace
+
+auto handleSetLogicalThermostatMode(sdbus::IProxy& proxy) -> void
+{
+    auto group = promptGroup();
+    if (!group.has_value())
+    {
+        logLine("SetLogicalThermostatMode: cancelled or empty group");
+        return;
+    }
+    auto mode = promptByte("Mode (0=off, 1=heat, 2=cool, 3=auto, …):", BYTE_MIN, BYTE_MAX);
+    if (!mode.has_value())
+    {
+        logLine("SetLogicalThermostatMode: cancelled or invalid mode");
+        return;
+    }
+    try
+    {
+        proxy.callMethod("SetLogicalThermostatMode")
+            .onInterface(IFACE_NAME)
+            .withArguments(group->first, group->second, *mode);
+        logLine("SetLogicalThermostatMode " + group->first + "=" + group->second +
+                " mode=" + std::to_string(static_cast<unsigned>(*mode)));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetLogicalThermostatMode failed: "} + err.what());
+    }
+}
+
+auto handleSetLogicalThermostatSetpoint(sdbus::IProxy& proxy) -> void
+{
+    auto group = promptGroup();
+    if (!group.has_value())
+    {
+        logLine("SetLogicalThermostatSetpoint: cancelled or empty group");
+        return;
+    }
+    auto setpointType = promptByte("Setpoint type (1=heating, 2=cooling):", BYTE_MIN, BYTE_MAX);
+    auto precision    = promptByte("Precision (decimals, e.g. 1):", BYTE_MIN, BYTE_MAX);
+    auto scale        = promptByte("Scale (0=C, 1=F):", BYTE_MIN, BYTE_MAX);
+    auto value        = promptInt32("Raw value (e.g. 215 for 21.5 at precision 1):");
+    if (!setpointType.has_value() || !precision.has_value() || !scale.has_value() || !value.has_value())
+    {
+        logLine("SetLogicalThermostatSetpoint: cancelled or invalid");
+        return;
+    }
+    try
+    {
+        proxy.callMethod("SetLogicalThermostatSetpoint")
+            .onInterface(IFACE_NAME)
+            .withArguments(group->first, group->second, *setpointType, *precision, *scale, *value);
+        logLine("SetLogicalThermostatSetpoint " + group->first + "=" + group->second +
+                " type=" + std::to_string(static_cast<unsigned>(*setpointType)) + " value=" + std::to_string(*value));
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"SetLogicalThermostatSetpoint failed: "} + err.what());
+    }
+}
+
+auto handleGetLogicalThermostatState(sdbus::IProxy& proxy) -> void
+{
+    auto group = promptGroup();
+    if (!group.has_value())
+    {
+        logLine("GetLogicalThermostatState: cancelled or empty group");
+        return;
+    }
+    LogicalThermostatStateTuple state;
+    try
+    {
+        proxy.callMethod("GetLogicalThermostatState")
+            .onInterface(IFACE_NAME)
+            .withArguments(group->first, group->second)
+            .storeResultsTo(state);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetLogicalThermostatState failed: "} + err.what());
+        return;
+    }
+    std::ostringstream stream;
+    stream << "LogicalThermostat " << group->first << "=" << group->second
+           << " members=" << static_cast<unsigned>(std::get<0>(state)) << " mode=";
+    if (std::get<1>(state) == LOGICAL_MODE_MIXED)
+    {
+        stream << "mixed";
+    }
+    else
+    {
+        stream << static_cast<unsigned>(std::get<1>(state));
+    }
+    stream << " op=" << static_cast<unsigned>(std::get<2>(state)) << " fan=";
+    if (std::get<3>(state) == LOGICAL_MODE_MIXED)
+    {
+        stream << "mixed";
+    }
+    else
+    {
+        stream << static_cast<unsigned>(std::get<3>(state));
+    }
+    stream << " setpoint(type=" << static_cast<unsigned>(std::get<4>(state))
+           << " scale=" << static_cast<unsigned>(std::get<LT_SETPOINT_SCALE>(state))
+           << " prec=" << static_cast<unsigned>(std::get<LT_SETPOINT_PREC>(state))
+           << " raw=" << std::get<LT_SETPOINT_VALUE>(state) << ")";
+    logLine(stream.str());
+}
+
 // NOLINTBEGIN(readability-function-cognitive-complexity): flat key-dispatch table
 }  // namespace zwt

@@ -404,6 +404,22 @@ events:
       - { name: sourceNodeId, type: u8, default: 0 }
       - { name: value,        type: u8, default: 0 }
 
+  - name: SupervisionReport
+    category: transient
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Typed Supervision (CC 0x6C) Report. Republished by the cc-translator
+      from inbound ApplicationCommand frames whose ccData parses as a
+      Supervision Report. `sessionId` echoes the GET's nonce; `status`:
+      0x00 no support, 0x01 working, 0x02 fail, 0xFF success;
+      `moreStatusUpdates` means a final report follows after `duration`.
+    fields:
+      - { name: sourceNodeId,      type: u8,   default: 0 }
+      - { name: sessionId,         type: u8,   default: 0 }
+      - { name: moreStatusUpdates, type: bool, default: false }
+      - { name: status,            type: u8,   default: 0 }
+      - { name: duration,          type: u8,   default: 0 }
+
   - name: BatteryReport
     category: transient
     direction: { publishers: [cc-translator], subscribers: [external-api] }
@@ -1014,6 +1030,22 @@ events:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
 
+  - name: SendSupervisedCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Send an arbitrary CC frame to a node wrapped in Supervision (CC 0x6C)
+      GET, so the node returns a SupervisionReport distinguishing
+      transmitted from applied. `sessionId` is a caller-chosen 6-bit nonce
+      the node echoes in its report, so the caller correlates without a
+      daemon-side session table (#14 MVP). `ccData` is the raw inner CC
+      frame (class + cmd + params).
+    fields:
+      - { name: nodeId,     type: u8,    default: 0 }
+      - { name: sessionId,  type: u8,    default: 0 }
+      - { name: ccData,     type: bytes }
+      - { name: callbackId, type: u8,    default: 0 }
+
   - name: SetBasicCommand
     category: command
     direction: { publishers: [external-api], subscribers: [zwave-protocol] }
@@ -1567,6 +1599,15 @@ dbus:
         - { name: callbackId, dbus: y, cpp: u8 }
       action:
         publish: GetIndicatorCommand
+
+    - name: SendSupervised
+      params:
+        - { name: nodeId,     dbus: y,  cpp: u8 }
+        - { name: sessionId,  dbus: y,  cpp: u8 }
+        - { name: ccData,     dbus: ay, cpp: bytes }
+        - { name: callbackId, dbus: y,  cpp: u8 }
+      action:
+        publish: SendSupervisedCommand
 
     - name: SetBasic
       params:
@@ -2319,6 +2360,16 @@ dbus:
         - { name: value,        dbus: y, doc: "0x00 off, 0x01..0x63 level, 0xFF on" }
       triggered_by:
         event: IndicatorReport
+
+    - name: SupervisionReport
+      params:
+        - { name: sourceNodeId,      dbus: y }
+        - { name: sessionId,         dbus: y, doc: "echoes the GET nonce" }
+        - { name: moreStatusUpdates, dbus: b }
+        - { name: status,            dbus: y, doc: "0 no-support, 1 working, 2 fail, 0xFF success" }
+        - { name: duration,          dbus: y }
+      triggered_by:
+        event: SupervisionReport
 
     - name: SwitchMultilevelReport
       params:
@@ -3447,6 +3498,40 @@ modules:
         decoded_struct:
           - { name: value, type: u8 }
 
+  - name: Supervision
+    wire:
+      class_byte: 0x6C
+      prefix: SUPERVISION
+    description: |
+      Explicit-acknowledgement encapsulation (#14). SUPERVISION_GET (0x01)
+      wraps an outbound CC frame with a 6-bit session id; the node replies
+      with SUPERVISION_REPORT (0x02) carrying a `status` that distinguishes
+      *transmitted* (the existing SendData answer) from *applied* (the node
+      obeyed). The GET encapsulation is hand-written (dynamic inner
+      payload, like Multi Channel); the manifest contributes the command
+      bytes, the status codes, and the session-id / more-updates masks.
+    constants:
+      # properties byte: bit 7 = more-status-updates, bits 0..5 = session id.
+      - { name: SESSION_ID_MASK,     value: 0x3F }
+      - { name: MORE_UPDATES_FLAG,   value: 0x80 }
+      # Report status values.
+      - { name: STATUS_NO_SUPPORT,   value: 0x00 }
+      - { name: STATUS_WORKING,      value: 0x01 }
+      - { name: STATUS_FAIL,         value: 0x02 }
+      - { name: STATUS_SUCCESS,      value: 0xFF }
+    commands:
+      - name: Get
+        wire:
+          byte: 0x01
+      - name: Report
+        wire:
+          byte: 0x02
+        decoded_struct:
+          - { name: sessionId,         type: u8 }
+          - { name: moreStatusUpdates, type: bool }
+          - { name: status,            type: u8 }
+          - { name: duration,          type: u8 }
+
 
 # =====================================================================
 # 5. Translation rules
@@ -3486,6 +3571,19 @@ translations:
     map:
       sourceNodeId: event.sourceNodeId
       value:        decoded.value
+
+  - publishes: SupervisionReport
+    triggered_by: ApplicationCommand
+    decode:
+      codec: Supervision.decodeReport
+      input: ccData
+      on_none: skip
+    map:
+      sourceNodeId:      event.sourceNodeId
+      sessionId:         decoded.sessionId
+      moreStatusUpdates: decoded.moreStatusUpdates
+      status:            decoded.status
+      duration:          decoded.duration
 
   - publishes: MultilevelSwitchReport
     triggered_by: ApplicationCommand

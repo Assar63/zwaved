@@ -101,6 +101,43 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine(stream.str());
             });
 
+    proxy.uponSignal("SupervisionReport")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTBEGIN(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t sourceNodeId,
+               std::uint8_t sessionId,
+               bool moreStatusUpdates,
+               std::uint8_t status,
+               std::uint8_t duration) -> void
+            // NOLINTEND(bugprone-easily-swappable-parameters)
+            {
+                constexpr std::uint8_t statusSuccess = 0xFF;
+                const char* label                    = "?";
+                switch (status)
+                {
+                case 0:
+                    label = "no-support";
+                    break;
+                case 1:
+                    label = "working";
+                    break;
+                case 2:
+                    label = "fail";
+                    break;
+                case statusSuccess:
+                    label = "success";
+                    break;
+                default:
+                    break;
+                }
+                std::ostringstream stream;
+                stream << "SupervisionReport node=" << static_cast<unsigned>(sourceNodeId)
+                       << " session=" << static_cast<unsigned>(sessionId) << " status=" << label
+                       << " dur=" << static_cast<unsigned>(duration) << (moreStatusUpdates ? " (more)" : "");
+                logLine(stream.str());
+            });
+
     proxy.uponSignal("SwitchMultilevelReport")
         .onInterface(IFACE_NAME)
         .call(

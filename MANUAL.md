@@ -1271,6 +1271,12 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 
 (Tag members first with `SetNodeMetadata` / group with `GetNodesByMetadata`, §16c.)
 
+`zwave-terminal` drives this from the `[h]` **Logical thermostat** submenu: `[m]`
+set group mode, `[s]` set group setpoint, `[g]` read the aggregated group state
+(all prompt the group key + value first). `LogicalThermostatStateChanged` lands
+in the activity pane as `LogicalThermostat room=Living room members=2 mode=heat
+op=1 fan=… setpoint=215` (mode/fan render as `mixed` when members disagree).
+
 ## 17. Future: ubus
 
 A second backend implementing the same methods/signals over OpenWrt's

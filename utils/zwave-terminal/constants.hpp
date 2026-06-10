@@ -74,6 +74,9 @@ constexpr int NODE_ID_MAX = 232;
 constexpr int BYTE_MIN = 0x00;
 constexpr int BYTE_MAX = 0xFF;
 
+// Logical-thermostat mode / fan-mode sentinel: members disagree (#134/#135).
+constexpr std::uint8_t LOGICAL_MODE_MIXED = 0xFF;
+
 // Association group IDs are 1..255 per spec (0 reserved).
 constexpr int GROUP_ID_MIN = 1;
 constexpr int GROUP_ID_MAX = 255;

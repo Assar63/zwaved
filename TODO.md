@@ -102,7 +102,14 @@ Implementation order (each shippable independently):
 
 **Security — encrypted transport. Each of these is an order of magnitude more work than the simple CCs combined; treat as a dedicated epic:**
 
-- [ ] [Security S0 (CC 0x98)](https://github.com/Assar63/zwaved/issues/26)
+- [ ] **epic: [Security S0 (CC 0x98)](https://github.com/Assar63/zwaved/issues/26)** — encrypted transport (AES-128-CBC + AES-128-CMAC, single network key). Seven phases, each its own PR:
+  - [ ] [#162](https://github.com/Assar63/zwaved/issues/162) phase 1 — crypto primitives + spec vectors
+  - [ ] [#163](https://github.com/Assar63/zwaved/issues/163) phase 2 — network key generation + persistence
+  - [ ] [#164](https://github.com/Assar63/zwaved/issues/164) phase 3 — nonce protocol (per-peer)
+  - [ ] [#165](https://github.com/Assar63/zwaved/issues/165) phase 4 — encapsulation codec
+  - [ ] [#166](https://github.com/Assar63/zwaved/issues/166) phase 5 — ProtocolThread integration
+  - [ ] [#167](https://github.com/Assar63/zwaved/issues/167) phase 6 — inclusion bootstrap
+  - [ ] [#168](https://github.com/Assar63/zwaved/issues/168) phase 7 — on-bench acceptance
 - [ ] [Security S2 (CC 0x9F)](https://github.com/Assar63/zwaved/issues/27)
 - [x] **CRC-16 Encapsulation (CC `0x56`)** — [#28](https://github.com/Assar63/zwaved/issues/28): transport-only integrity wrapper. `Crc16Encap` codec (CRC-16/AUG-CCITT `checksum` + `verifyAndUnwrap` + `encode`); a hand-written inbound unwrapper (`src/cc-translator/Encapsulation.cpp`) verifies the CRC and republishes the inner frame as an `ApplicationCommand` so the normal decoders fire (bad CRC → dropped + warned). No D-Bus/terminal surface. 6 codec tests. This establishes the inbound-unwrap seam that Transport Service (#25) and the Multi Channel reply-unwrap (#146) plug into.
 

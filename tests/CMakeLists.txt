@@ -358,6 +358,20 @@ target_link_libraries(Crc16Encap_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Crc16Encap_test)
 gtest_discover_tests(Crc16Encap_test)
 
+# ---- TransportService -----------------------------------------------
+# No .gen.cpp (header-only constants; hand-written split + reassembler + FCS).
+add_executable(TransportService_test
+    TransportService_test.cpp
+    "${SRC_DIR}/application/TransportService.cpp"
+)
+target_include_directories(TransportService_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(TransportService_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(TransportService_test)
+gtest_discover_tests(TransportService_test)
+
 # ---- Supervision ----------------------------------------------------
 # No .gen.cpp (header-only constants; hand-written encap + report decode).
 add_executable(Supervision_test

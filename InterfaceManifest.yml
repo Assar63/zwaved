@@ -3680,6 +3680,49 @@ modules:
         wire:
           byte: 0x01
 
+  - name: TransportService
+    wire:
+      class_byte: 0x55
+      prefix: TRANSPORT_SERVICE
+    description: |
+      Transport Service (#25) — segmentation for datagrams longer than the
+      radio MTU. A datagram (itself a CC frame) is split into a FIRST_SEGMENT
+      plus SUBSEQUENT_SEGMENTs, each carrying an 11-bit datagram size, a 4-bit
+      session id, an 11-bit datagram offset (subsequent only), and a 2-byte
+      CRC-16 Frame Check Sequence. Command bytes + field layout per zwave.xml
+      (v2): the command occupies the top 5 bits of the command byte (mask
+      0xF8). Transport-only: no D-Bus surface. The split encoder + the
+      stateful reassembler are hand-written in TransportService.cpp;
+      reassembly is driven from src/cc-translator/Encapsulation.cpp, which
+      republishes the reassembled inner frame as an ApplicationCommand.
+    constants:
+      # The command occupies the top 5 bits of the command byte; the low 3
+      # bits carry datagram_size high bits (FIRST / SUBSEQUENT).
+      - { name: COMMAND_MASK,       value: 0xF8 }
+      - { name: DATAGRAM_SIZE_MASK, value: 0x07 }
+      # Properties byte: session id (high nibble) + Ext flag +
+      # (subsequent) datagram_offset high bits.
+      - { name: SESSION_ID_MASK,    value: 0xF0 }
+      - { name: SESSION_ID_SHIFT,   value: 0x04 }
+      - { name: EXT_FLAG,           value: 0x08 }
+      - { name: OFFSET_HIGH_MASK,   value: 0x07 }
+    commands:
+      - name: FirstSegment
+        wire:
+          byte: 0xC0
+      - name: SegmentRequest
+        wire:
+          byte: 0xC8
+      - name: SubsequentSegment
+        wire:
+          byte: 0xE0
+      - name: SegmentComplete
+        wire:
+          byte: 0xE8
+      - name: SegmentWait
+        wire:
+          byte: 0xF0
+
 
 # =====================================================================
 # 5. Translation rules

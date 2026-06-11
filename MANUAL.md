@@ -927,6 +927,16 @@ alongside the raw `ApplicationCommand`. Use the typed signal when you
 only care about that specific CC; use the raw signal when you need to
 handle arbitrary CCs.
 
+**Transport-layer unwrapping.** Some inbound frames arrive wrapped in a
+transport/integrity CC. The daemon verifies/unwraps these transparently and
+re-broadcasts the *inner* CC as a fresh `ApplicationCommand`, so both the raw
+and typed forms above work unchanged — no client-side handling needed:
+
+- **CRC-16 Encapsulation (CC `0x56`, #28)** — a pre-S0 integrity wrapper some
+  legacy non-secure devices still use. The daemon checks the CRC-16/AUG-CCITT
+  trailer and, on success, republishes the inner frame; a frame that fails the
+  CRC is dropped (logged as a warning), never surfaced.
+
 ## 13. Listing nodes
 
 `GetNodes` returns the daemon's in-memory list of currently-included

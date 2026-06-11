@@ -104,7 +104,7 @@ Implementation order (each shippable independently):
 
 - [ ] [Security S0 (CC 0x98)](https://github.com/Assar63/zwaved/issues/26)
 - [ ] [Security S2 (CC 0x9F)](https://github.com/Assar63/zwaved/issues/27)
-- [ ] [CRC-16 Encapsulation (CC 0x56)](https://github.com/Assar63/zwaved/issues/28)
+- [x] **CRC-16 Encapsulation (CC `0x56`)** — [#28](https://github.com/Assar63/zwaved/issues/28): transport-only integrity wrapper. `Crc16Encap` codec (CRC-16/AUG-CCITT `checksum` + `verifyAndUnwrap` + `encode`); a hand-written inbound unwrapper (`src/cc-translator/Encapsulation.cpp`) verifies the CRC and republishes the inner frame as an `ApplicationCommand` so the normal decoders fire (bad CRC → dropped + warned). No D-Bus/terminal surface. 6 codec tests. This establishes the inbound-unwrap seam that Transport Service (#25) and the Multi Channel reply-unwrap (#146) plug into.
 
 ### Persistence & configuration
 

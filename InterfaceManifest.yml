@@ -3662,6 +3662,24 @@ modules:
           - { name: status,            type: u8 }
           - { name: duration,          type: u8 }
 
+  - name: Crc16Encap
+    wire:
+      class_byte: 0x56
+      prefix: CRC16
+    description: |
+      CRC-16 Encapsulation (#28) — a pre-S0 integrity wrapper. CRC16_ENCAP
+      (0x01) carries an inner CC frame followed by a 2-byte big-endian
+      CRC-16/AUG-CCITT (poly 0x1021, init 0x1D0F) over [CC, cmd, inner].
+      Transport-only: verify-on-receive in practice. No D-Bus surface; the
+      hand-written unwrapper (src/cc-translator/Encapsulation.cpp) verifies
+      the CRC and republishes the inner frame as an ApplicationCommand so
+      the normal decoders fire. verifyAndUnwrap / encode are hand-written in
+      Crc16Encap.cpp; the manifest contributes the command byte.
+    commands:
+      - name: Encap
+        wire:
+          byte: 0x01
+
 
 # =====================================================================
 # 5. Translation rules

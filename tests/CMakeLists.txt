@@ -344,6 +344,20 @@ target_link_libraries(Indicator_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Indicator_test)
 gtest_discover_tests(Indicator_test)
 
+# ---- Crc16Encap -----------------------------------------------------
+# No .gen.cpp (header-only constants; hand-written CRC + verify/unwrap).
+add_executable(Crc16Encap_test
+    Crc16Encap_test.cpp
+    "${SRC_DIR}/application/Crc16Encap.cpp"
+)
+target_include_directories(Crc16Encap_test PRIVATE
+    "${SRC_DIR}/application"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(Crc16Encap_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(Crc16Encap_test)
+gtest_discover_tests(Crc16Encap_test)
+
 # ---- Supervision ----------------------------------------------------
 # No .gen.cpp (header-only constants; hand-written encap + report decode).
 add_executable(Supervision_test

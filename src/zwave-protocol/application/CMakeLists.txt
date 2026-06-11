@@ -59,6 +59,7 @@ target_sources(zwaved PRIVATE
     Indicator.cpp
     Supervision.cpp
     Crc16Encap.cpp
+    TransportService.cpp
     ThermostatMode.cpp
     ThermostatSetpoint.cpp
     ThermostatOperatingState.cpp

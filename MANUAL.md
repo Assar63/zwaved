@@ -937,6 +937,17 @@ and typed forms above work unchanged — no client-side handling needed:
   trailer and, on success, republishes the inner frame; a frame that fails the
   CRC is dropped (logged as a warning), never surfaced.
 
+- **Transport Service (CC `0x55`, #25)** — segmentation for datagrams longer
+  than the radio MTU. A long inner CC frame is split by the sender into a
+  `FIRST_SEGMENT` plus one or more `SUBSEQUENT_SEGMENT`s, each carrying the
+  total datagram size, a session id, its byte offset and a 2-byte CRC-16 Frame
+  Check Sequence. The daemon reassembles per source node — segments may arrive
+  out of order, each is placed at its offset, and the inner frame is
+  republished only once every byte is present; a segment that fails its FCS is
+  dropped. Reassembly only (the MVP): the daemon never *sends* segmented
+  datagrams yet, and `SEGMENT_REQUEST` retransmit, inactivity timeout and
+  concurrent multi-session reassembly are deferred follow-ups.
+
 ## 13. Listing nodes
 
 `GetNodes` returns the daemon's in-memory list of currently-included

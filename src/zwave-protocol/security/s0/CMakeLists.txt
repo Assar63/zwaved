@@ -5,7 +5,12 @@
 
 target_sources(zwaved PRIVATE
     Crypto.cpp
+    NetworkKey.cpp
+    # Constructor-armed (CONFIG_SECURITY_PRIO) — must be a direct zwaved
+    # source, never a passively-linked archive member, or its .init_array
+    # entry is dropped and the key is never loaded.
+    NetworkKeyService.cpp
 )
 
-# AES-128 ECB/OFB/CBC via OpenSSL libcrypto (no TLS).
+# AES-128 ECB/OFB/CBC + RAND_bytes via OpenSSL libcrypto (no TLS).
 target_link_libraries(zwaved PRIVATE PkgConfig::OPENSSL)

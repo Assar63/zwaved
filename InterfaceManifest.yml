@@ -151,6 +151,20 @@ events:
       - { name: commandId, type: u8,   default: 0, doc: "HostApi::CMD_ADD_NODE_TO_NETWORK / CMD_REMOVE_NODE_FROM_NETWORK / 0" }
       - { name: sessionId, type: u8,   default: 0 }
 
+  - name: S0NetworkKeyReady
+    category: state
+    direction: { publishers: [zwave-protocol], subscribers: [orchestrator] }
+    doc: |
+      Security S0 (CC 0x98) network-key lifecycle. Published once the key has
+      been loaded from disk or freshly generated, so future secure
+      orchestration (#26 SecurityOrchestrator) can defer secure work until a
+      key exists. `generated` distinguishes a brand-new key (created on this
+      run) from one loaded from disk. Retained, so a late subscriber sees the
+      current state on subscribe.
+    fields:
+      - { name: ready,     type: bool, default: false }
+      - { name: generated, type: bool, default: false }
+
   - name: DaemonError
     category: state
     direction: { publishers: [zwave-protocol, zwave-dongle, external-api, config], subscribers: [external-api] }
@@ -185,6 +199,7 @@ events:
       - { name: CODE_NONE,                        value: 0x00, doc: "default — no error to report" }
       - { name: CODE_DONGLE_OPEN_FAILED,          value: 0x10, doc: "serial port open() / configure failed" }
       - { name: CODE_DONGLE_INTROSPECTION_FAILED, value: 0x11, doc: "GET_VERSION or MEMORY_GET_ID didn't answer" }
+      - { name: CODE_S0_KEY_FAILED,               value: 0x12, doc: "S0 network key couldn't be loaded or generated" }
       - { name: CODE_UDEV_INIT_FAILED,            value: 0x20, doc: "libudev context or monitor creation failed" }
       - { name: CODE_DBUS_BIND_FAILED,            value: 0x30, doc: "couldn't acquire the system-bus name" }
       - { name: CODE_EXTERNAL_API_NO_BACKEND,     value: 0x31, doc: "no external-API backend compiled in" }
@@ -254,6 +269,16 @@ events:
     doc: Daemon-wide feature toggles.
     fields:
       - { name: autoLifeline, type: bool, default: true }
+
+  - name: SecurityConfig
+    category: config
+    direction: { publishers: [config], subscribers: [zwave-protocol] }
+    doc: |
+      Security key-file locations. An empty s0KeyFile means fall back to
+      <stateDir>/security/s0.key (StorageConfig). S2 (#27) will extend this
+      event with its multiple key files.
+    fields:
+      - { name: s0KeyFile, type: string }
 
   # ---- 2c. Transient protocol events ------------------------------
 

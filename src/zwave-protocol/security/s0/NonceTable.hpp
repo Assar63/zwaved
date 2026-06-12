@@ -60,6 +60,10 @@ class NonceTable
 /// Process-wide table of nonces this controller has issued — shared between the
 /// inbound NONCE_GET responder (#164) and the inbound decryptor (#165).
 [[nodiscard]] auto issuedNonces() -> NonceTable&;
+
+/// A fresh cryptographically-random 8-byte nonce (libcrypto RAND_bytes), for
+/// the sender-nonce half of an outbound encryption IV.
+[[nodiscard]] auto randomNonce() -> Nonce;
 }  // namespace S0
 
 #endif  // ZWAVED_S0_NONCE_TABLE_HPP

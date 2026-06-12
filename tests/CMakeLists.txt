@@ -460,6 +460,49 @@ target_link_libraries(s0_inbound_decrypt_test PRIVATE
 zwaved_test_target(s0_inbound_decrypt_test)
 gtest_discover_tests(s0_inbound_decrypt_test)
 
+# ---- NodeRegistry secure flag ---------------------------------------
+# Security S0 (CC 0x98) phase 6: the per-node `secure` column + API.
+add_executable(node_registry_secure_test
+    node_registry_secure_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(node_registry_secure_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/node-registry"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+target_link_libraries(node_registry_secure_test PRIVATE
+    GTest::gtest GTest::gtest_main PkgConfig::SQLITE3 zwaved_bus)
+zwaved_test_target(node_registry_secure_test)
+gtest_discover_tests(node_registry_secure_test)
+
+# ---- S0 inclusion bootstrap -----------------------------------------
+# Security S0 (CC 0x98) phase 6: the bootstrap orchestrator sequence.
+# Links the orchestrator (armed by its constructor attribute), the full S0
+# stack, NodeRegistry, Logger, the bus, sqlite3, and libcrypto.
+add_executable(s0_bootstrap_test
+    s0_bootstrap_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/orchestrator/SecurityBootstrapOrchestrator.cpp"
+    "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${SRC_DIR}/security/s0/Encapsulation.cpp"
+    "${SRC_DIR}/security/s0/NetworkKey.cpp"
+    "${SRC_DIR}/security/s0/NonceTable.cpp"
+    "${SRC_DIR}/security/s0/Security.cpp"
+    "${SRC_DIR}/security/s0/Crypto.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(s0_bootstrap_test PRIVATE
+    "${SRC_DIR}/security/s0"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(s0_bootstrap_test PRIVATE
+    GTest::gtest GTest::gtest_main PkgConfig::SQLITE3 PkgConfig::OPENSSL zwaved_bus)
+zwaved_test_target(s0_bootstrap_test)
+gtest_discover_tests(s0_bootstrap_test)
+
 # ---- S0 nonce responder ---------------------------------------------
 # Security S0 (CC 0x98) phase 3: bus-driven NONCE_GET -> NONCE_REPORT
 # reactor. Links the responder (armed by its constructor attribute), the

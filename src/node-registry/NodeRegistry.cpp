@@ -24,7 +24,7 @@ namespace
 constexpr const char* DEFAULT_STATE_DIR = "/var/lib/zwaved";
 constexpr const char* STATE_DIR_ENV     = "ZWAVED_STATE_DIR";
 constexpr const char* DB_FILENAME       = "nodes.db";
-constexpr int CURRENT_SCHEMA_VERSION    = 1;
+constexpr int CURRENT_SCHEMA_VERSION    = 2;
 
 constexpr const char* SCHEMA_SQL = R"(
 CREATE TABLE IF NOT EXISTS nodes (
@@ -34,9 +34,13 @@ CREATE TABLE IF NOT EXISTS nodes (
     generic_type    INTEGER NOT NULL,
     specific_type   INTEGER NOT NULL,
     command_classes BLOB,
+    secure          INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (home_id, node_id)
 )
 )";
+
+// v1 -> v2: add the Security S0 `secure` flag (#167) without dropping data.
+constexpr const char* MIGRATE_V1_TO_V2_SQL = "ALTER TABLE nodes ADD COLUMN secure INTEGER NOT NULL DEFAULT 0";
 
 constexpr const char* UPSERT_SQL =
     "INSERT INTO nodes (home_id, node_id, basic_type, generic_type, specific_type, command_classes) "
@@ -50,7 +54,9 @@ constexpr const char* UPSERT_SQL =
 constexpr const char* DELETE_SQL = "DELETE FROM nodes WHERE home_id = ? AND node_id = ?";
 
 constexpr const char* SELECT_FOR_HOME_SQL =
-    "SELECT node_id, basic_type, generic_type, specific_type, command_classes FROM nodes WHERE home_id = ?";
+    "SELECT node_id, basic_type, generic_type, specific_type, command_classes, secure FROM nodes WHERE home_id = ?";
+
+constexpr const char* SET_SECURE_SQL = "UPDATE nodes SET secure = ? WHERE home_id = ? AND node_id = ?";
 
 // Bind positions for UPSERT (1-based per sqlite3_bind_*).
 constexpr int BIND_HOME     = 1;
@@ -66,6 +72,12 @@ constexpr int COL_BASIC    = 1;
 constexpr int COL_GENERIC  = 2;
 constexpr int COL_SPECIFIC = 3;
 constexpr int COL_CCS      = 4;
+constexpr int COL_SECURE   = 5;
+
+// Bind positions for SET_SECURE (1-based).
+constexpr int BIND_SECURE_VALUE = 1;
+constexpr int BIND_SECURE_HOME  = 2;
+constexpr int BIND_SECURE_NODE  = 3;
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct State
@@ -250,22 +262,33 @@ auto execOrLog(sqlite3* database, const char* sql, const char* what) -> bool
 
 auto migrateSchema(sqlite3* database) -> bool
 {
-    if (readSchemaVersion(database) >= CURRENT_SCHEMA_VERSION)
+    const int version = readSchemaVersion(database);
+    if (version >= CURRENT_SCHEMA_VERSION)
     {
         return true;
     }
-    // Pre-v1 databases keyed nodes by node_id only — they can't be reused
-    // safely under a different dongle. Drop and recreate; GET_INIT_DATA on
-    // the next connect re-seeds from the dongle's bitmap.
-    if (!execOrLog(database, "DROP TABLE IF EXISTS nodes", "DROP TABLE"))
+    if (version == 1)
     {
-        return false;
+        // v1 -> v2: a correctly-keyed table that just lacks the `secure`
+        // column — add it in place, preserving the included-node data.
+        if (!execOrLog(database, MIGRATE_V1_TO_V2_SQL, "ALTER TABLE"))
+        {
+            return false;
+        }
     }
-    if (!execOrLog(database, SCHEMA_SQL, "CREATE TABLE"))
+    else
     {
-        return false;
+        // version 0: a fresh database, or a pre-v1 one keyed by node_id only
+        // (unsafe under a different dongle). Drop and recreate at the current
+        // schema; GET_INIT_DATA on the next connect re-seeds from the dongle's
+        // bitmap.
+        if (!execOrLog(database, "DROP TABLE IF EXISTS nodes", "DROP TABLE") ||
+            !execOrLog(database, SCHEMA_SQL, "CREATE TABLE"))
+        {
+            return false;
+        }
     }
-    if (!execOrLog(database, "PRAGMA user_version = 1", "PRAGMA user_version"))
+    if (!execOrLog(database, "PRAGMA user_version = 2", "PRAGMA user_version"))
     {
         return false;
     }
@@ -296,6 +319,7 @@ auto loadNodesForHome(sqlite3* database, const std::string& homeId) -> std::map<
         {
             info.commandClasses.assign(blob, blob + blobSize);
         }
+        info.secure = sqlite3_column_int(stmt.raw(), COL_SECURE) != 0;
         result.emplace(info.nodeId, info);
     }
     return result;
@@ -542,4 +566,40 @@ auto NodeRegistry::snapshot() -> std::vector<NodeInfo>
         result.push_back(info);
     }
     return result;
+}
+
+auto NodeRegistry::setSecure(std::uint8_t nodeId, bool secure) -> void
+{
+    initIfNeeded();
+    std::scoped_lock const lock(state().mutex);
+    const auto iter = state().nodes.find(nodeId);
+    if (iter == state().nodes.end())
+    {
+        return;  // unknown node — nothing to flag
+    }
+    iter->second.secure = secure;
+    // `secure` isn't part of NodeListChanged, so no republish is needed; just
+    // persist. NodeSecurityStatus already carries the per-node signal.
+    const auto& home = state().currentHomeId;
+    if (state().db == nullptr || !home.has_value())
+    {
+        return;
+    }
+    Stmt stmt(state().db, SET_SECURE_SQL, "SET SECURE");
+    if (!stmt.valid())
+    {
+        return;
+    }
+    stmt.bindInt(BIND_SECURE_VALUE, secure ? 1 : 0)
+        .bindText(BIND_SECURE_HOME, *home)
+        .bindInt(BIND_SECURE_NODE, nodeId)
+        .execDone();
+}
+
+auto NodeRegistry::isSecure(std::uint8_t nodeId) -> bool
+{
+    initIfNeeded();
+    std::scoped_lock const lock(state().mutex);
+    const auto iter = state().nodes.find(nodeId);
+    return iter != state().nodes.end() && iter->second.secure;
 }

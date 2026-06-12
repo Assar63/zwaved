@@ -961,9 +961,10 @@ and typed forms above work unchanged — no client-side handling needed:
   `<state_dir>/security/s0.key`, mode `0600`); **back it up — losing it forces
   re-inclusion of every secure node.** When a newly-included node advertises
   CC `0x98`, the daemon runs the S0 inclusion bootstrap (scheme negotiation +
-  network-key exchange) and marks the node secure on success. Encrypting the
-  daemon's *outbound* commands to secure nodes is still a follow-up (#175). The
-  S0 wire path is pending end-to-end verification on real hardware (#168).
+  network-key exchange) and marks the node secure on success. From then on the
+  daemon transparently encapsulates its *outbound* commands to that node
+  (fetching a fresh nonce per message). The full S0 wire path is pending
+  end-to-end verification on real hardware (#168).
 
 ## 13. Listing nodes
 

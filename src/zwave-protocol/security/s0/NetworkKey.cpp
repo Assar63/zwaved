@@ -113,3 +113,24 @@ auto S0::NetworkKey::loadOrGenerate(const std::filesystem::path& path) -> std::o
     }
     return Loaded{.key = key, .generated = true};
 }
+
+namespace
+{
+// Function-local static (not a namespace-scope global): set once at startup,
+// read on the bus thread thereafter.
+auto keySlot() -> std::optional<S0::Crypto::Key>&
+{
+    static std::optional<S0::Crypto::Key> slot;
+    return slot;
+}
+}  // namespace
+
+auto S0::NetworkKey::current() -> std::optional<Crypto::Key>
+{
+    return keySlot();
+}
+
+auto S0::NetworkKey::setCurrent(const Crypto::Key& key) -> void
+{
+    keySlot() = key;
+}

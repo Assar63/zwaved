@@ -948,6 +948,21 @@ and typed forms above work unchanged — no client-side handling needed:
   datagrams yet, and `SEGMENT_REQUEST` retransmit, inactivity timeout and
   concurrent multi-session reassembly are deferred follow-ups.
 
+- **Security S0 (CC `0x98`, #26)** — encrypted command encapsulation. When a
+  node sends a `MESSAGE_ENCAPSULATION` frame, the daemon recovers the nonce it
+  had issued that node, authenticates the frame (AES-128 CBC-MAC) and decrypts
+  it (AES-128-OFB) with the network key, then republishes the inner CC frame so
+  the normal decoders run. A frame that fails authentication, or references a
+  nonce the daemon never issued / that has expired, is dropped (logged as a
+  warning), never surfaced. On the first successfully-decrypted frame from a
+  node the daemon emits a **`NodeSecurityStatus(nodeId, secure)`** signal
+  (retained — a late subscriber learns which nodes are secure). The network key
+  lives at the `[security] s0_key_file` path (default
+  `<state_dir>/security/s0.key`, mode `0600`); **back it up — losing it forces
+  re-inclusion of every secure node.** Inbound only so far: encrypting the
+  daemon's *outbound* commands to secure nodes is a follow-up (#175), as is the
+  inclusion-time secure bootstrap (#167).
+
 ## 13. Listing nodes
 
 `GetNodes` returns the daemon's in-memory list of currently-included

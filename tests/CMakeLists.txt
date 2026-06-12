@@ -429,6 +429,37 @@ target_link_libraries(s0_encapsulation_test PRIVATE GTest::gtest GTest::gtest_ma
 zwaved_test_target(s0_encapsulation_test)
 gtest_discover_tests(s0_encapsulation_test)
 
+# ---- S0 inbound decrypt seam ----------------------------------------
+# Security S0 (CC 0x98) phase 5: cc-translator's inbound MESSAGE_ENCAPSULATION
+# decrypt path. Links the seam (armed by its constructor attribute), the full
+# S0 stack, Logger, the bus, and libcrypto.
+add_executable(s0_inbound_decrypt_test
+    s0_inbound_decrypt_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/cc-translator/Encapsulation.cpp"
+    "${SRC_DIR}/application/Crc16Encap.cpp"     # other unwrappers the seam calls
+    "${SRC_DIR}/application/TransportService.cpp"
+    "${SRC_DIR}/security/s0/Encapsulation.cpp"
+    "${SRC_DIR}/security/s0/NetworkKey.cpp"
+    "${SRC_DIR}/security/s0/NonceTable.cpp"
+    "${SRC_DIR}/security/s0/Security.cpp"
+    "${SRC_DIR}/security/s0/Crypto.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(s0_inbound_decrypt_test PRIVATE
+    "${SRC_DIR}/security/s0"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(s0_inbound_decrypt_test PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    PkgConfig::OPENSSL
+    zwaved_bus
+)
+zwaved_test_target(s0_inbound_decrypt_test)
+gtest_discover_tests(s0_inbound_decrypt_test)
+
 # ---- S0 nonce responder ---------------------------------------------
 # Security S0 (CC 0x98) phase 3: bus-driven NONCE_GET -> NONCE_REPORT
 # reactor. Links the responder (armed by its constructor attribute), the

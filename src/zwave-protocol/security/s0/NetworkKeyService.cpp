@@ -57,6 +57,7 @@ auto loadKey() -> void
         return;
     }
 
+    S0::NetworkKey::setCurrent(loaded->key);  // make it available to the encrypt/decrypt paths
     if (loaded->generated)
     {
         // Audit trail: key generation is a security-significant, one-time event.

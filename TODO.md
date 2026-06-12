@@ -102,15 +102,27 @@ Implementation order (each shippable independently):
 
 **Security — encrypted transport. Each of these is an order of magnitude more work than the simple CCs combined; treat as a dedicated epic:**
 
-- [ ] **epic: [Security S0 (CC 0x98)](https://github.com/Assar63/zwaved/issues/26)** — encrypted transport (AES-128-CBC + AES-128-CMAC, single network key). Seven phases, each its own PR:
-  - [x] [#162](https://github.com/Assar63/zwaved/issues/162) phase 1 — crypto primitives + spec vectors (AES-128 ECB/OFB/CBC-MAC over libcrypto; FIPS-197 + NIST SP800-38A vectors)
-  - [ ] [#163](https://github.com/Assar63/zwaved/issues/163) phase 2 — network key generation + persistence
-  - [ ] [#164](https://github.com/Assar63/zwaved/issues/164) phase 3 — nonce protocol (per-peer)
-  - [ ] [#165](https://github.com/Assar63/zwaved/issues/165) phase 4 — encapsulation codec
-  - [ ] [#166](https://github.com/Assar63/zwaved/issues/166) phase 5 — ProtocolThread integration
-  - [ ] [#167](https://github.com/Assar63/zwaved/issues/167) phase 6 — inclusion bootstrap
-  - [ ] [#168](https://github.com/Assar63/zwaved/issues/168) phase 7 — on-bench acceptance
-- [ ] [Security S2 (CC 0x9F)](https://github.com/Assar63/zwaved/issues/27)
+- [ ] **epic: [Security S0 (CC 0x98)](https://github.com/Assar63/zwaved/issues/26)** — encrypted transport (AES-128-OFB + CBC-MAC, single network key). **Code-complete**; only on-bench hardware acceptance remains:
+  - [x] [#162](https://github.com/Assar63/zwaved/issues/162) phase 1 — crypto primitives (AES-128 ECB/OFB/CBC-MAC over libcrypto; FIPS-197 + NIST SP800-38A vectors)
+  - [x] [#163](https://github.com/Assar63/zwaved/issues/163) phase 2 — network key generation + persistence (config-driven `[security] s0_key_file`)
+  - [x] [#164](https://github.com/Assar63/zwaved/issues/164) phase 3 — nonce protocol (NonceTable + NONCE_GET responder)
+  - [x] [#165](https://github.com/Assar63/zwaved/issues/165) phase 4 — encapsulation codec (MESSAGE_ENCAPSULATION 0x81)
+  - [x] [#166](https://github.com/Assar63/zwaved/issues/166) phase 5 — inbound decrypt seam + `NodeSecurityStatus` + key accessor
+  - [x] [#167](https://github.com/Assar63/zwaved/issues/167) phase 6 — inclusion bootstrap (SCHEME → KEY_SET → VERIFY)
+  - [x] [#175](https://github.com/Assar63/zwaved/issues/175) phase 5b — outbound encrypt-on-send
+  - [ ] [#168](https://github.com/Assar63/zwaved/issues/168) phase 7 — on-bench acceptance (hardware) ⚠️ S0 wire path unverified against a real device until this
+- [ ] **epic: [Security S2 (CC 0x9F)](https://github.com/Assar63/zwaved/issues/27)** — encrypted transport, second generation (AES-128-CCM + Curve25519 ECDH inclusion + multi-class keys + SPAN/MPAN nonces). The biggest epic in the daemon; builds on S0. Eleven phases (MPAN may be deferred), each its own PR:
+  - [ ] [#179](https://github.com/Assar63/zwaved/issues/179) phase 1 — crypto primitives + spec vectors
+  - [ ] [#180](https://github.com/Assar63/zwaved/issues/180) phase 2 — multi-class network-key storage
+  - [ ] [#181](https://github.com/Assar63/zwaved/issues/181) phase 3 — SPAN (Singlecast Pre-Agreed Nonce) protocol
+  - [ ] [#182](https://github.com/Assar63/zwaved/issues/182) phase 4 — encapsulation codec
+  - [ ] [#183](https://github.com/Assar63/zwaved/issues/183) phase 5 — KEX handshake
+  - [ ] [#184](https://github.com/Assar63/zwaved/issues/184) phase 6 — public-key exchange + DSK confirmation UX
+  - [ ] [#185](https://github.com/Assar63/zwaved/issues/185) phase 7 — network key install per granted class
+  - [ ] [#186](https://github.com/Assar63/zwaved/issues/186) phase 8 — ProtocolThread integration
+  - [ ] [#187](https://github.com/Assar63/zwaved/issues/187) phase 9 — inclusion bootstrap wiring
+  - [ ] [#188](https://github.com/Assar63/zwaved/issues/188) phase 10 — MPAN (multicast, optional)
+  - [ ] [#189](https://github.com/Assar63/zwaved/issues/189) phase 11 — on-bench acceptance (hardware)
 - [x] **CRC-16 Encapsulation (CC `0x56`)** — [#28](https://github.com/Assar63/zwaved/issues/28): transport-only integrity wrapper. `Crc16Encap` codec (CRC-16/AUG-CCITT `checksum` + `verifyAndUnwrap` + `encode`); a hand-written inbound unwrapper (`src/cc-translator/Encapsulation.cpp`) verifies the CRC and republishes the inner frame as an `ApplicationCommand` so the normal decoders fire (bad CRC → dropped + warned). No D-Bus/terminal surface. 6 codec tests. This establishes the inbound-unwrap seam that Transport Service (#25) and the Multi Channel reply-unwrap (#146) plug into.
 
 ### Persistence & configuration

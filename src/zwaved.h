@@ -33,6 +33,7 @@ constexpr int CONFIG_LOGGER_PRIO             = 101;
 constexpr int CONFIG_CONFIG_PRIO             = 102;
 constexpr int CONFIG_ZWAVE_STARTUP_PRIO      = 103;
 constexpr int CONFIG_CC_TRANSLATOR_PRIO      = 110;
+constexpr int CONFIG_SECURITY_PRIO           = 111;
 constexpr int CONFIG_ZWAVE_DONGLE_PRIO       = 201;
 constexpr int CONFIG_ZWAVE_PROTOCOL_PRIO     = 202;
 constexpr int CONFIG_ZWAVE_EXTERNAL_API_PRIO = 203;

@@ -230,6 +230,14 @@ auto loadStorageSection(const ParsedFile& file, MessageBus::StorageConfig& stora
     }
 }
 
+auto loadSecuritySection(const ParsedFile& file, MessageBus::SecurityConfig& security) -> void
+{
+    if (const auto value = firstValue(file, "security", "s0_key_file"); value.has_value())
+    {
+        security.s0KeyFile = *value;
+    }
+}
+
 auto loadDonglesSection(const ParsedFile& file, MessageBus::DonglesConfig& dongles) -> void
 {
     const auto entries = allValues(file, "dongles", "accept");
@@ -283,6 +291,7 @@ auto Config::load() -> void
     MessageBus::DonglesConfig dongles{
         .accept = {MessageBus::AcceptedDongleConfig{.vid = "0658", .pid = "0200", .name = "Aeotec Z-Stick Gen5"}}};
     MessageBus::BehaviorConfig behavior{.autoLifeline = true};
+    MessageBus::SecurityConfig security{};
 
     const auto path = resolvePath();
     if (!std::filesystem::exists(path))
@@ -304,6 +313,7 @@ auto Config::load() -> void
         const auto& file = *parsed;
         loadLoggerSection(file, logger);
         loadStorageSection(file, storage);
+        loadSecuritySection(file, security);
         loadDonglesSection(file, dongles);
         loadBehaviorSection(file, behavior);
         Logger::info("Config: loaded " + path.string());
@@ -311,6 +321,7 @@ auto Config::load() -> void
 
     MessageBus::publish(logger);
     MessageBus::publish(storage);
+    MessageBus::publish(security);
     MessageBus::publish(dongles);
     MessageBus::publish(behavior);
 }

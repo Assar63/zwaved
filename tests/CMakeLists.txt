@@ -371,6 +371,20 @@ target_link_libraries(s0_crypto_test PRIVATE GTest::gtest GTest::gtest_main PkgC
 zwaved_test_target(s0_crypto_test)
 gtest_discover_tests(s0_crypto_test)
 
+# ---- S0 network key -------------------------------------------------
+# Security S0 (CC 0x98) phase 2: load-or-generate key persistence. Pure
+# core (no bus); links libcrypto for RAND_bytes.
+add_executable(s0_network_key_test
+    s0_network_key_test.cpp
+    "${SRC_DIR}/security/s0/NetworkKey.cpp"
+)
+target_include_directories(s0_network_key_test PRIVATE
+    "${SRC_DIR}/security/s0"
+)
+target_link_libraries(s0_network_key_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(s0_network_key_test)
+gtest_discover_tests(s0_network_key_test)
+
 # ---- TransportService -----------------------------------------------
 # No .gen.cpp (header-only constants; hand-written split + reassembler + FCS).
 add_executable(TransportService_test

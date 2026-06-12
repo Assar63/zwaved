@@ -8,6 +8,7 @@ target_sources(zwaved PRIVATE
     NetworkKey.cpp
     NonceTable.cpp
     Security.cpp
+    Encapsulation.cpp
     # Constructor-armed (CONFIG_SECURITY_PRIO) — must be direct zwaved
     # sources, never passively-linked archive members, or their .init_array
     # entries are dropped and the services never run.

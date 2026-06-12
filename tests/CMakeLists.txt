@@ -413,6 +413,22 @@ target_link_libraries(s0_security_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(s0_security_test)
 gtest_discover_tests(s0_security_test)
 
+# ---- S0 encapsulation codec -----------------------------------------
+# Security S0 (CC 0x98) phase 4: MESSAGE_ENCAPSULATION encrypt/decrypt.
+# Composes the crypto primitives; links libcrypto.
+add_executable(s0_encapsulation_test
+    s0_encapsulation_test.cpp
+    "${SRC_DIR}/security/s0/Encapsulation.cpp"
+    "${SRC_DIR}/security/s0/Crypto.cpp"
+)
+target_include_directories(s0_encapsulation_test PRIVATE
+    "${SRC_DIR}/security/s0"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(s0_encapsulation_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(s0_encapsulation_test)
+gtest_discover_tests(s0_encapsulation_test)
+
 # ---- S0 nonce responder ---------------------------------------------
 # Security S0 (CC 0x98) phase 3: bus-driven NONCE_GET -> NONCE_REPORT
 # reactor. Links the responder (armed by its constructor attribute), the

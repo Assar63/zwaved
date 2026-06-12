@@ -107,6 +107,7 @@ RUN apt-get update \
         libudev-dev \
         libsdbus-c++-dev \
         libsqlite3-dev \
+        libssl-dev \
         libsystemd-dev \
         libgtest-dev \
         libncurses-dev \

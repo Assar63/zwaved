@@ -105,6 +105,10 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUDEV REQUIRED IMPORTED_TARGET libudev)
 pkg_check_modules(SQLITE3 REQUIRED IMPORTED_TARGET sqlite3)
 
+# Security S0 (CC 0x98) crypto primitives use AES-128 ECB/OFB/CBC. libcrypto
+# only (no TLS) — in the Ubuntu base + ubiquitous on Yocto/OpenWRT.
+pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET libcrypto)
+
 # Header-only event dispatcher / queue. Expected to be provided by the
 # system / cross-sysroot (e.g. Yocto meta-oe recipe, distro package);
 # not vendored in-tree.

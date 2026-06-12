@@ -116,7 +116,7 @@ readonly PREREQS=(
     "g++-15:g++-15"
     "clang++-20:clang-20"
 )
-readonly DEV_PKGS=(libudev-dev libsdbus-c++-dev libsqlite3-dev libgtest-dev)
+readonly DEV_PKGS=(libudev-dev libsdbus-c++-dev libsqlite3-dev libssl-dev libgtest-dev)
 
 sudo_prefix() {
     if [[ "$(id -u)" -eq 0 ]]; then

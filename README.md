@@ -22,6 +22,7 @@ A C++ application that manages Z-Wave device communication through a dedicated t
 - **libudev** development files (`libudev-dev`) — USB device monitoring
 - **sdbus-c++** 2.x — D-Bus interface; install from source (the Debian/Ubuntu package is still on 1.x). Requires `libsystemd-dev` for the underlying sd-bus
 - **SQLite3** development files (`libsqlite3-dev`) — node-registry persistence
+- **OpenSSL** development files (`libssl-dev`, provides libcrypto) — Security S0 (CC 0x98) AES-128 primitives
 - **eventpp** (header-only) — in-process publish/subscribe bus; not packaged on most distros, install from source
 - **GoogleTest** development files (`libgtest-dev`) — only needed when `ZWAVED_BUILD_TESTS=ON` (default)
 
@@ -129,7 +130,7 @@ sudo apt install -y g++-15 gcc-15
 sudo apt install -y clang-20 llvm-20
 
 # CMake + runtime libs
-sudo apt install -y cmake libudev-dev libsqlite3-dev libsystemd-dev libgtest-dev
+sudo apt install -y cmake libudev-dev libsqlite3-dev libssl-dev libsystemd-dev libgtest-dev
 
 # sdbus-c++. The Ubuntu/Debian package `libsdbus-c++-dev` ships an older
 # 1.x release; the daemon is built and tested against 2.x. Install from

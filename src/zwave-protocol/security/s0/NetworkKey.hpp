@@ -35,6 +35,16 @@ struct Loaded
 /// std::nullopt on any I/O / wrong-size / RNG failure — the caller treats that
 /// as "S0 unavailable" rather than aborting the daemon.
 [[nodiscard]] auto loadOrGenerate(const std::filesystem::path& path) -> std::optional<Loaded>;
+
+/// The in-process network key, once `NetworkKeyService` has loaded or generated
+/// it at startup; std::nullopt while S0 is unavailable. Set once during the
+/// priority-111 constructor (before any worker thread starts) and read from the
+/// bus thread thereafter, so the plain static needs no further synchronisation.
+[[nodiscard]] auto current() -> std::optional<Crypto::Key>;
+
+/// Publish the loaded key as the process-wide current key (called by the
+/// service after a successful loadOrGenerate).
+auto setCurrent(const Crypto::Key& key) -> void;
 }  // namespace S0::NetworkKey
 
 #endif  // ZWAVED_S0_NETWORK_KEY_HPP

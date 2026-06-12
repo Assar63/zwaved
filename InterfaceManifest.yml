@@ -165,6 +165,20 @@ events:
       - { name: ready,     type: bool, default: false }
       - { name: generated, type: bool, default: false }
 
+  - name: NodeSecurityStatus
+    category: state
+    direction: { publishers: [cc-translator], subscribers: [external-api] }
+    doc: |
+      Per-node Security S0 (CC 0x98) status. Published when the daemon
+      observes a node communicating securely — today, the inbound decrypt seam
+      (#166) emits `secure = true` after it successfully authenticates and
+      decrypts a MESSAGE_ENCAPSULATION frame from that node. The inclusion
+      bootstrap (#167) will also publish it on a verified secure bootstrap.
+      Retained so a late D-Bus subscriber learns which nodes are secure.
+    fields:
+      - { name: nodeId, type: u8,   default: 0 }
+      - { name: secure, type: bool, default: false }
+
   - name: DaemonError
     category: state
     direction: { publishers: [zwave-protocol, zwave-dongle, external-api, config], subscribers: [external-api] }
@@ -2369,6 +2383,12 @@ dbus:
         - { name: homeId,           dbus: ay }
         - { name: controllerNodeId, dbus: y }
       triggered_by: { event: DongleInfo }
+
+    - name: NodeSecurityStatus
+      params:
+        - { name: nodeId, dbus: y }
+        - { name: secure, dbus: b }
+      triggered_by: { event: NodeSecurityStatus }
 
     - name: InitData
       params:

@@ -103,7 +103,7 @@ Implementation order (each shippable independently):
 **Security — encrypted transport. Each of these is an order of magnitude more work than the simple CCs combined; treat as a dedicated epic:**
 
 - [ ] **epic: [Security S0 (CC 0x98)](https://github.com/Assar63/zwaved/issues/26)** — encrypted transport (AES-128-CBC + AES-128-CMAC, single network key). Seven phases, each its own PR:
-  - [ ] [#162](https://github.com/Assar63/zwaved/issues/162) phase 1 — crypto primitives + spec vectors
+  - [x] [#162](https://github.com/Assar63/zwaved/issues/162) phase 1 — crypto primitives + spec vectors (AES-128 ECB/OFB/CBC-MAC over libcrypto; FIPS-197 + NIST SP800-38A vectors)
   - [ ] [#163](https://github.com/Assar63/zwaved/issues/163) phase 2 — network key generation + persistence
   - [ ] [#164](https://github.com/Assar63/zwaved/issues/164) phase 3 — nonce protocol (per-peer)
   - [ ] [#165](https://github.com/Assar63/zwaved/issues/165) phase 4 — encapsulation codec

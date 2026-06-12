@@ -212,9 +212,23 @@ auto clearRequests() -> void
 /// daemon's default transmit options and push it onto the protocol
 /// queue. All onXxx bus-command handlers funnel through here so the
 /// SendData envelope stays in one place.
+///
+/// S0 outbound (#175): a non-Security payload bound for a node we've
+/// bootstrapped secure is diverted to SecurityOutboundOrchestrator, which
+/// encapsulates it (via a nonce round-trip) and sends the encrypted frame
+/// back as a SendDataCommand. CC 0x98 frames (the security layer itself —
+/// nonce gets, the encrypted wrapper) are always sent raw, which is what
+/// breaks the would-be loop.
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): every call site passes (cmd.nodeId, cmd.callbackId, …)
 auto pushSendData(std::uint8_t nodeId, std::uint8_t callbackId, std::vector<std::uint8_t> data) -> void
 {
+    constexpr std::uint8_t ccSecurity = 0x98;
+    if (!data.empty() && data[0] != ccSecurity && NodeRegistry::isSecure(nodeId))
+    {
+        MessageBus::publish(
+            MessageBus::SecureSendRequest{.nodeId = nodeId, .payload = std::move(data), .callbackId = callbackId});
+        return;
+    }
     HostApi::SendDataRequest req{};
     req.nodeId     = nodeId;
     req.data       = std::move(data);

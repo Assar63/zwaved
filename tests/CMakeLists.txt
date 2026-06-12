@@ -477,6 +477,29 @@ target_link_libraries(node_registry_secure_test PRIVATE
 zwaved_test_target(node_registry_secure_test)
 gtest_discover_tests(node_registry_secure_test)
 
+# ---- S0 outbound encrypt-on-send ------------------------------------
+# Security S0 (CC 0x98) phase 5b (#175): the outbound nonce->encrypt flow.
+add_executable(s0_outbound_test
+    s0_outbound_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/orchestrator/SecurityOutboundOrchestrator.cpp"
+    "${SRC_DIR}/security/s0/Encapsulation.cpp"
+    "${SRC_DIR}/security/s0/NetworkKey.cpp"
+    "${SRC_DIR}/security/s0/NonceTable.cpp"
+    "${SRC_DIR}/security/s0/Security.cpp"
+    "${SRC_DIR}/security/s0/Crypto.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(s0_outbound_test PRIVATE
+    "${SRC_DIR}/security/s0"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(s0_outbound_test PRIVATE
+    GTest::gtest GTest::gtest_main PkgConfig::OPENSSL zwaved_bus)
+zwaved_test_target(s0_outbound_test)
+gtest_discover_tests(s0_outbound_test)
+
 # ---- S0 inclusion bootstrap -----------------------------------------
 # Security S0 (CC 0x98) phase 6: the bootstrap orchestrator sequence.
 # Links the orchestrator (armed by its constructor attribute), the full S0

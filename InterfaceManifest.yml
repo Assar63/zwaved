@@ -1480,6 +1480,22 @@ events:
       - { name: nodeId,     type: u8, default: 0 }
       - { name: callbackId, type: u8, default: 0 }
 
+  - name: SecureSendRequest
+    category: command
+    direction: { publishers: [zwave-protocol], subscribers: [orchestrator] }
+    doc: |
+      A non-Security application payload destined for an S0-secure node (#175).
+      ProtocolThread's pushSendData diverts here instead of sending raw when
+      NodeRegistry::isSecure(nodeId) and the payload isn't itself a CC 0x98
+      frame. SecurityOutboundOrchestrator runs the NONCE_GET -> NONCE_REPORT ->
+      encrypt dance and emits the encrypted frame back as a SendDataCommand
+      (which, being a 0x98 frame, ProtocolThread then sends raw). `callbackId`
+      is preserved so the eventual SendDataCallback still correlates.
+    fields:
+      - { name: nodeId,     type: u8,    default: 0 }
+      - { name: payload,    type: bytes }
+      - { name: callbackId, type: u8,    default: 0 }
+
   - name: SendDataCommand
     category: command
     direction: { publishers: [orchestrator, zwave-protocol], subscribers: [zwave-protocol] }

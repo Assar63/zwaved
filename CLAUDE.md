@@ -29,7 +29,7 @@ clang's "not a constant expression" during analysis. Run clang-tidy via
 (the pre-commit hook) only accepts a GCC build dir for this reason, and
 `scripts/bootstrap` sets one up even when `llvm` is the default build.
 
-Requires: GCC 15 (`g++-15`), LLVM/Clang 20 (`clang++-20`), CMake 3.20+, `libudev-dev`, `libsdbus-c++-dev` (pulls in `libsystemd-dev`), `libsqlite3-dev`, eventpp (header-only via `find_package`). C++26 standard.
+Requires: GCC 15 (`g++-15`), LLVM/Clang 20 (`clang++-20`), CMake 3.20+, `libudev-dev`, `libsdbus-c++-dev` (pulls in `libsystemd-dev`), `libsqlite3-dev`, `libssl-dev` (libcrypto, for Security S0 AES), eventpp (header-only via `find_package`). C++26 standard.
 
 `scripts/bootstrap` does one-shot setup (prereq check / apt, `install-hooks`, configure a preset, build once, point `.clangd` at the build dir). Dual-mode: run standalone (downloaded) it clones into a target dir then prepares; run inside a checkout (`./scripts/bootstrap`) it just prepares. Idempotent; `--help` for flags. The manual steps below are the fallback.
 

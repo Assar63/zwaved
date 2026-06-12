@@ -14,3 +14,4 @@ target_sources(zwaved PRIVATE
 )
 
 add_subdirectory(application)
+add_subdirectory(security)

@@ -358,6 +358,19 @@ target_link_libraries(Crc16Encap_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Crc16Encap_test)
 gtest_discover_tests(Crc16Encap_test)
 
+# ---- S0 crypto ------------------------------------------------------
+# Security S0 (CC 0x98) phase 1: AES primitives over OpenSSL libcrypto.
+add_executable(s0_crypto_test
+    s0_crypto_test.cpp
+    "${SRC_DIR}/security/s0/Crypto.cpp"
+)
+target_include_directories(s0_crypto_test PRIVATE
+    "${SRC_DIR}/security/s0"
+)
+target_link_libraries(s0_crypto_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(s0_crypto_test)
+gtest_discover_tests(s0_crypto_test)
+
 # ---- TransportService -----------------------------------------------
 # No .gen.cpp (header-only constants; hand-written split + reassembler + FCS).
 add_executable(TransportService_test

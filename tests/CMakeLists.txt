@@ -358,6 +358,19 @@ target_link_libraries(Crc16Encap_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(Crc16Encap_test)
 gtest_discover_tests(Crc16Encap_test)
 
+# ---- S2 crypto ------------------------------------------------------
+# Security S2 (CC 0x9F) phase 1: AES-128-CCM + CMAC + X25519 over libcrypto.
+add_executable(s2_crypto_test
+    s2_crypto_test.cpp
+    "${SRC_DIR}/security/s2/Crypto.cpp"
+)
+target_include_directories(s2_crypto_test PRIVATE
+    "${SRC_DIR}/security/s2"
+)
+target_link_libraries(s2_crypto_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(s2_crypto_test)
+gtest_discover_tests(s2_crypto_test)
+
 # ---- S0 crypto ------------------------------------------------------
 # Security S0 (CC 0x98) phase 1: AES primitives over OpenSSL libcrypto.
 add_executable(s0_crypto_test

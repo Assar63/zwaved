@@ -385,6 +385,60 @@ target_link_libraries(s0_network_key_test PRIVATE GTest::gtest GTest::gtest_main
 zwaved_test_target(s0_network_key_test)
 gtest_discover_tests(s0_network_key_test)
 
+# ---- S0 nonce table -------------------------------------------------
+# Security S0 (CC 0x98) phase 3: per-peer issued-nonce pool. Pure core
+# (no bus); links libcrypto for RAND_bytes.
+add_executable(s0_nonce_table_test
+    s0_nonce_table_test.cpp
+    "${SRC_DIR}/security/s0/NonceTable.cpp"
+)
+target_include_directories(s0_nonce_table_test PRIVATE
+    "${SRC_DIR}/security/s0"
+)
+target_link_libraries(s0_nonce_table_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(s0_nonce_table_test)
+gtest_discover_tests(s0_nonce_table_test)
+
+# ---- S0 security codec ----------------------------------------------
+# Security S0 (CC 0x98) phase 3: NONCE_GET / NONCE_REPORT wire codec.
+add_executable(s0_security_test
+    s0_security_test.cpp
+    "${SRC_DIR}/security/s0/Security.cpp"
+)
+target_include_directories(s0_security_test PRIVATE
+    "${SRC_DIR}/security/s0"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(s0_security_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(s0_security_test)
+gtest_discover_tests(s0_security_test)
+
+# ---- S0 nonce responder ---------------------------------------------
+# Security S0 (CC 0x98) phase 3: bus-driven NONCE_GET -> NONCE_REPORT
+# reactor. Links the responder (armed by its constructor attribute), the
+# nonce table + codec, Logger, the bus, and libcrypto.
+add_executable(s0_nonce_responder_test
+    s0_nonce_responder_test.cpp
+    "${SRC_DIR}/security/s0/NonceResponder.cpp"
+    "${SRC_DIR}/security/s0/NonceTable.cpp"
+    "${SRC_DIR}/security/s0/Security.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(s0_nonce_responder_test PRIVATE
+    "${SRC_DIR}/security/s0"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(s0_nonce_responder_test PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    PkgConfig::OPENSSL
+    zwaved_bus
+)
+zwaved_test_target(s0_nonce_responder_test)
+gtest_discover_tests(s0_nonce_responder_test)
+
 # ---- TransportService -----------------------------------------------
 # No .gen.cpp (header-only constants; hand-written split + reassembler + FCS).
 add_executable(TransportService_test

@@ -11,4 +11,9 @@ target_sources(zwaved PRIVATE
     InclusionOrchestrator.cpp
     SceneOrchestrator.cpp
     ThermostatOrchestrator.cpp
+    SecurityBootstrapOrchestrator.cpp
 )
+
+# SecurityBootstrapOrchestrator pulls in the S0 codec headers, whose
+# generated SECURITY_* constants live under generated/application/.
+target_include_directories(zwaved PRIVATE "${ZWAVED_GENERATED_DIR}/application")

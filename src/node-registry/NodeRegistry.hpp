@@ -20,6 +20,7 @@ struct NodeInfo
     std::uint8_t genericType  = 0;
     std::uint8_t specificType = 0;
     std::vector<std::uint8_t> commandClasses;
+    bool secure = false;  ///< Security S0 bootstrap verified (#167)
 };
 
 /// Bind the registry to a Z-Wave network identified by its 4-byte
@@ -58,6 +59,16 @@ auto updateDeviceClass(std::uint8_t nodeId,
 /// unsolicited NIF from a node that just woke up. No-op if no
 /// entry exists for `nodeId`.
 auto updateCommandClasses(std::uint8_t nodeId, std::vector<std::uint8_t> commandClasses) -> void;
+
+/// Mark a node's Security S0 status (set true on a verified inclusion
+/// bootstrap, #167). Updates the in-memory entry and persists the flag.
+/// No-op if no entry exists for `nodeId`.
+auto setSecure(std::uint8_t nodeId, bool secure) -> void;
+
+/// Whether `nodeId` completed a verified S0 bootstrap. False for unknown
+/// nodes. Used by the outbound send path (#175) to decide whether to
+/// encapsulate.
+[[nodiscard]] auto isSecure(std::uint8_t nodeId) -> bool;
 
 /// Thread-safe copy of the current registry, sorted ascending by nodeId.
 [[nodiscard]] auto snapshot() -> std::vector<NodeInfo>;

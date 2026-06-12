@@ -64,3 +64,10 @@ auto S0::issuedNonces() -> NonceTable&
     static NonceTable instance;
     return instance;
 }
+
+auto S0::randomNonce() -> Nonce
+{
+    Nonce nonce{};
+    RAND_bytes(nonce.data(), static_cast<int>(nonce.size()));
+    return nonce;
+}

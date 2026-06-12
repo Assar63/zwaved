@@ -6,10 +6,13 @@
 target_sources(zwaved PRIVATE
     Crypto.cpp
     NetworkKey.cpp
-    # Constructor-armed (CONFIG_SECURITY_PRIO) — must be a direct zwaved
-    # source, never a passively-linked archive member, or its .init_array
-    # entry is dropped and the key is never loaded.
+    NonceTable.cpp
+    Security.cpp
+    # Constructor-armed (CONFIG_SECURITY_PRIO) — must be direct zwaved
+    # sources, never passively-linked archive members, or their .init_array
+    # entries are dropped and the services never run.
     NetworkKeyService.cpp
+    NonceResponder.cpp
 )
 
 # AES-128 ECB/OFB/CBC + RAND_bytes via OpenSSL libcrypto (no TLS).

@@ -1469,7 +1469,7 @@ events:
 
   - name: SendDataCommand
     category: command
-    direction: { publishers: [orchestrator], subscribers: [zwave-protocol] }
+    direction: { publishers: [orchestrator, zwave-protocol], subscribers: [zwave-protocol] }
     doc: |
       Send a pre-encoded application-command payload to a node. Unlike
       the per-CC command events, this carries the raw Command Class
@@ -3747,6 +3747,53 @@ modules:
       - name: SegmentWait
         wire:
           byte: 0xF0
+
+  - name: Security
+    wire:
+      class_byte: 0x98
+      prefix: SECURITY
+    description: |
+      Security S0 (#26) — first-generation encrypted command encapsulation
+      (AES-128-OFB + CBC-MAC, single network key). The manifest contributes
+      the command-byte constants; all behaviour is hand-written under
+      src/zwave-protocol/security/s0/ across the epic's phases (#162 crypto,
+      #163 key, #164 nonce, then encap codec / integration / inclusion). The
+      full command set is declared up-front so later phases add no manifest
+      churn.
+    commands:
+      - name: CommandsSupportedGet
+        wire:
+          byte: 0x02
+      - name: CommandsSupportedReport
+        wire:
+          byte: 0x03
+      - name: SchemeGet
+        wire:
+          byte: 0x04
+      - name: SchemeReport
+        wire:
+          byte: 0x05
+      - name: NetworkKeySet
+        wire:
+          byte: 0x06
+      - name: NetworkKeyVerify
+        wire:
+          byte: 0x07
+      - name: SchemeInherit
+        wire:
+          byte: 0x08
+      - name: NonceGet
+        wire:
+          byte: 0x40
+      - name: NonceReport
+        wire:
+          byte: 0x80
+      - name: MessageEncapsulation
+        wire:
+          byte: 0x81
+      - name: MessageEncapsulationNonceGet
+        wire:
+          byte: 0xC1
 
 
 # =====================================================================

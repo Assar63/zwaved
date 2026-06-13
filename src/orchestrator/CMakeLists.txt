@@ -13,6 +13,7 @@ target_sources(zwaved PRIVATE
     ThermostatOrchestrator.cpp
     SecurityBootstrapOrchestrator.cpp
     SecurityOutboundOrchestrator.cpp
+    SecurityS2BootstrapOrchestrator.cpp
 )
 
 # SecurityBootstrapOrchestrator pulls in the S0 codec headers, whose

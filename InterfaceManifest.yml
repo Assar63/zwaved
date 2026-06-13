@@ -191,6 +191,21 @@ events:
       - { name: nodeId, type: u8, default: 0 }
       - { name: scheme, type: u8, default: 0 }
 
+  - name: S2KeyAgreementComplete
+    category: transient
+    direction: { publishers: [orchestrator], subscribers: [orchestrator] }
+    doc: |
+      SecurityS2BootstrapOrchestrator (#187) finished the plaintext
+      key-agreement phase for node `nodeId`: KEX negotiated, public keys
+      exchanged, the ECDH shared secret computed and the temporary
+      bootstrap-channel keys derived (CKDF-TempExtract/Expand, #202). The
+      seam the encrypted temp-channel phase (KEX echo verify + per-class
+      network-key install over SPAN, a later #187 layer) keys off. Internal
+      to the orchestrator for now — no D-Bus mapping until the operator
+      progress surface lands with the DSK UX.
+    fields:
+      - { name: nodeId, type: u8, default: 0 }
+
   - name: DaemonError
     category: state
     direction: { publishers: [zwave-protocol, zwave-dongle, external-api, config], subscribers: [external-api] }

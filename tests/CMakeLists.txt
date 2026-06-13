@@ -467,6 +467,23 @@ target_link_libraries(s2_nonce_sync_test PRIVATE GTest::gtest GTest::gtest_main)
 zwaved_test_target(s2_nonce_sync_test)
 gtest_discover_tests(s2_nonce_sync_test)
 
+# Security S2 (CC 0x9F) SPAN runtime (#187/#199): the per-peer nonce-sync state
+# machine. Drives two managers through a handshake + encap round-trip.
+add_executable(s2_span_manager_test
+    s2_span_manager_test.cpp
+    "${SRC_DIR}/security/s2/SpanManager.cpp"
+    "${SRC_DIR}/security/s2/NonceSync.cpp"
+    "${SRC_DIR}/security/s2/Span.cpp"
+    "${SRC_DIR}/security/s2/Encapsulation.cpp"
+    "${SRC_DIR}/security/s2/Crypto.cpp"
+)
+target_include_directories(s2_span_manager_test PRIVATE
+    "${SRC_DIR}/security/s2"
+)
+target_link_libraries(s2_span_manager_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(s2_span_manager_test)
+gtest_discover_tests(s2_span_manager_test)
+
 # ---- S2 SPAN --------------------------------------------------------
 # Security S2 (CC 0x9F) phase 3: CTR_DRBG SPAN nonce protocol.
 add_executable(s2_span_test

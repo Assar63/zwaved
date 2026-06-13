@@ -129,7 +129,8 @@ Implementation order (each shippable independently):
     - [ ] terminal DSK prompt UX (zwave-terminal, under #73) — surface `DSKPendingConfirmation` + a PIN-entry binding calling `ConfirmDSK`
     - [ ] encrypted temp-channel phase — KEX echo verify (KEX_FAIL on bad PIN here) + per-class `NETWORK_KEY_REPORT` install + `NETWORK_KEY_VERIFY` + `TRANSFER_END` over SPAN + AES-128-CCM (needs SPAN runtime sync, #199):
       - [x] SPAN-establishment wire codec — `NonceSync` (NONCE_GET/REPORT + SPAN extension); the missing nonce-sync primitive shared with #199
-      - [ ] SPAN runtime glue — SPAN table updates on NONCE_REPORT/SPAN-extension, SOS handling, attach-on-send (the #199 ProtocolThread integration)
+      - [x] SPAN runtime state machine — `SpanManager` (per-peer EI exchange, SPAN instantiate, encrypt/receiveNonce, lockstep nonces); pure + two-instance-tested
+      - [ ] ProtocolThread/bus wiring of `SpanManager` — pump real inbound/outbound frames + NONCE_GET/REPORT through it, SOS-on-decrypt-fail resync (the #199 integration)
       - [ ] the encrypted bootstrap state machine on top (echo verify → key install → verify → transfer-end)
   - [ ] [#188](https://github.com/Assar63/zwaved/issues/188) phase 10 — MPAN (multicast, optional)
   - [ ] [#189](https://github.com/Assar63/zwaved/issues/189) phase 11 — on-bench acceptance (hardware)

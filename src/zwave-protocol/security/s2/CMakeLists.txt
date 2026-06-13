@@ -8,6 +8,7 @@ target_sources(zwaved PRIVATE
     NetworkKeys.cpp
     Span.cpp
     NonceSync.cpp
+    SpanManager.cpp
     KeyDerivation.cpp
     Encapsulation.cpp
     Kex.cpp

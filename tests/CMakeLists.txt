@@ -678,6 +678,10 @@ add_executable(s2_bootstrap_test
     "${SRC_DIR}/security/s2/Kex.cpp"
     "${SRC_DIR}/security/s2/PublicKey.cpp"
     "${SRC_DIR}/security/s2/KeyDerivation.cpp"
+    "${SRC_DIR}/security/s2/NonceSync.cpp"
+    "${SRC_DIR}/security/s2/Span.cpp"
+    "${SRC_DIR}/security/s2/SpanManager.cpp"
+    "${SRC_DIR}/security/s2/Encapsulation.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(s2_bootstrap_test PRIVATE

@@ -440,6 +440,20 @@ target_link_libraries(s2_encapsulation_test PRIVATE GTest::gtest GTest::gtest_ma
 zwaved_test_target(s2_encapsulation_test)
 gtest_discover_tests(s2_encapsulation_test)
 
+# ---- S2 key derivation ----------------------------------------------
+# Security S2 (CC 0x9F) phase 9 crypto: CKDF temp + network key derivations.
+add_executable(s2_key_derivation_test
+    s2_key_derivation_test.cpp
+    "${SRC_DIR}/security/s2/KeyDerivation.cpp"
+    "${SRC_DIR}/security/s2/Crypto.cpp"
+)
+target_include_directories(s2_key_derivation_test PRIVATE
+    "${SRC_DIR}/security/s2"
+)
+target_link_libraries(s2_key_derivation_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(s2_key_derivation_test)
+gtest_discover_tests(s2_key_derivation_test)
+
 # ---- S2 SPAN --------------------------------------------------------
 # Security S2 (CC 0x9F) phase 3: CTR_DRBG SPAN nonce protocol.
 add_executable(s2_span_test

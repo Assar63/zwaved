@@ -158,6 +158,32 @@ auto S2::Crypto::cmac(const Key& key, std::span<const std::uint8_t> data) -> Mac
     return out;
 }
 
+auto S2::Crypto::aesEcbEncrypt(const Key& key, const Block& input) -> Block
+{
+    const CipherCtx ctx(EVP_CIPHER_CTX_new(), &EVP_CIPHER_CTX_free);
+    if (ctx == nullptr)
+    {
+        fail("EVP_CIPHER_CTX_new");
+    }
+    if (EVP_EncryptInit_ex(ctx.get(), EVP_aes_128_ecb(), nullptr, key.data(), nullptr) != 1)
+    {
+        fail("ECB init");
+    }
+    EVP_CIPHER_CTX_set_padding(ctx.get(), 0);
+    Block out{};
+    int len = 0;
+    if (EVP_EncryptUpdate(ctx.get(), out.data(), &len, input.data(), toInt(input.size())) != 1)
+    {
+        fail("ECB encrypt");
+    }
+    int finalLen = 0;
+    if (EVP_EncryptFinal_ex(ctx.get(), out.data() + len, &finalLen) != 1)
+    {
+        fail("ECB final");
+    }
+    return out;
+}
+
 auto S2::Crypto::generateKeyPair() -> KeyPair
 {
     const PkeyCtx pctx(EVP_PKEY_CTX_new_id(EVP_PKEY_X25519, nullptr), &EVP_PKEY_CTX_free);

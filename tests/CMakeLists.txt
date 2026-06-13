@@ -682,16 +682,20 @@ add_executable(s2_bootstrap_test
     "${SRC_DIR}/security/s2/Span.cpp"
     "${SRC_DIR}/security/s2/SpanManager.cpp"
     "${SRC_DIR}/security/s2/Encapsulation.cpp"
+    "${SRC_DIR}/security/s2/KeyInstall.cpp"
+    "${SRC_DIR}/security/s2/NetworkKeys.cpp"
+    "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(s2_bootstrap_test PRIVATE
     "${SRC_DIR}/security/s2"
     "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${CMAKE_SOURCE_DIR}/src/node-registry"
     "${ZWAVED_GENERATED_DIR}"
     "${GENERATED_APPLICATION_DIR}"
 )
 target_link_libraries(s2_bootstrap_test PRIVATE
-    GTest::gtest GTest::gtest_main PkgConfig::OPENSSL zwaved_bus)
+    GTest::gtest GTest::gtest_main PkgConfig::OPENSSL PkgConfig::SQLITE3 zwaved_bus)
 zwaved_test_target(s2_bootstrap_test)
 gtest_discover_tests(s2_bootstrap_test)
 

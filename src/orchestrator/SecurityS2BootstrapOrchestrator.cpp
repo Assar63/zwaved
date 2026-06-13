@@ -16,13 +16,18 @@
 //   4. Once we hold the node's full public key, compute the ECDH shared secret
 //      and derive the temporary bootstrap-channel keys (CKDF-TempExtract/
 //      Expand, #202), and publish S2KeyAgreementComplete.
+//   5. Over the encrypted temp channel (SpanManager, temp KeyCCM): answer the
+//      node's NONCE_GET, verify the KEX_SET echo (MITM check) and echo the
+//      KEX_REPORT back (steps 13-18); then, per granted class, transfer the key
+//      (NETWORK_KEY_REPORT), let the node prove install over a fresh class SPAN
+//      (NETWORK_KEY_VERIFY), and close each with TRANSFER_END (steps 20-29).
+//   6. On the node's final TRANSFER_END (Key Request Complete) mark it secure:
+//      NodeRegistry::setSecurityScheme + NodeSecurityStatus (step 30).
 //
 // Deferred to later #187 layers (all unverifiable until hardware, #189):
-//   - the encrypted temp-channel phase: KEX echo verify (where a wrong-but-
-//     well-formed DSK PIN finally surfaces as KEX_FAIL), per-class
-//     NETWORK_KEY_REPORT install, NETWORK_KEY_VERIFY, TRANSFER_END — over SPAN
-//     + AES-128-CCM (needs the SPAN runtime nonce sync, #199);
-//   - the terminal DSK prompt UX (the D-Bus surface lands here).
+//   - the terminal DSK prompt UX (the D-Bus surface already lands here);
+//   - general (post-bootstrap) S2 transport: the inbound decrypt seam + SOS
+//     resync wired through ProtocolThread (#199).
 //
 // Single-session assumption: like the S0 bootstrap, concurrent inclusions are
 // disambiguated only by source node id; there is no inactivity timeout (a
@@ -33,10 +38,13 @@
 
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
+#include "../node-registry/NodeRegistry.hpp"
 #include "../zwave-protocol/security/s2/Crypto.hpp"
 #include "../zwave-protocol/security/s2/Encapsulation.hpp"
 #include "../zwave-protocol/security/s2/Kex.hpp"
 #include "../zwave-protocol/security/s2/KeyDerivation.hpp"
+#include "../zwave-protocol/security/s2/KeyInstall.hpp"
+#include "../zwave-protocol/security/s2/NetworkKeys.hpp"
 #include "../zwave-protocol/security/s2/NonceSync.hpp"
 #include "../zwave-protocol/security/s2/PublicKey.hpp"
 #include "../zwave-protocol/security/s2/SpanManager.hpp"
@@ -77,7 +85,9 @@ enum class Phase : std::uint8_t
     AwaitDsk,            // grant needs a DSK PIN — parked until the operator confirms
     AwaitTempChannel,    // temp keys derived; awaiting the node's NONCE_GET (step 13)
     AwaitKexSetEcho,     // temp SPAN up; awaiting the encrypted KEX_SET echo (step 16)
-    AwaitNetworkKeyGet,  // echoes verified; awaiting per-class NETWORK_KEY_GET (next layer, steps 20+)
+    AwaitNetworkKeyGet,  // echoes verified; awaiting NETWORK_KEY_GET or the final TRANSFER_END (steps 20/30)
+    AwaitClassNonceGet,  // key transferred; awaiting the node's NONCE_GET for the new class SPAN (step 25)
+    AwaitKeyVerify,      // class SPAN up; awaiting the NETWORK_KEY_VERIFY under the new key (step 27)
 };
 
 struct Session
@@ -87,8 +97,10 @@ struct Session
     std::uint8_t grantedKeys = 0;
     S2::Crypto::PublicKey nodePublicKey{};  // the joining node's key (DSK-obfuscated until the PIN is applied)
     S2::KeyDerivation::TempKeys tempKeys{};
-    S2::Kex::Set sentKexSet{};            // step 5, kept to verify the echo in step 16
-    S2::Kex::Report receivedKexReport{};  // step 3, echoed back in step 18
+    S2::Kex::Set sentKexSet{};                             // step 5, kept to verify the echo in step 16
+    S2::Kex::Report receivedKexReport{};                   // step 3, echoed back in step 18
+    std::uint8_t installingKeyBit = 0;                     // the class key currently being installed (steps 20-29)
+    S2::KeyDerivation::NetworkKeys installingClassKeys{};  // its derived KeyCCM + personalization
 };
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
@@ -101,6 +113,7 @@ struct State
     MessageBus::SubscriptionGuard keysSub;
     std::map<std::uint8_t, Session> sessions;  // per-node handshake progress
     S2::SpanManager spanManager;               // per-peer temp-channel SPAN runtime
+    S2::SpanManager classSpanManager;          // per-class verify-channel SPAN (reset per key)
     std::array<std::uint8_t, 4> homeId{};
     std::uint8_t controllerNodeId = 0;
     bool keysReady                = false;
@@ -321,6 +334,128 @@ auto onKexSetEcho(std::uint8_t nodeId, Session& session, std::span<const std::ui
                  " KEX echoes verified — temporary secure channel authenticated");
 }
 
+// The highest secure class in a granted-key bitmask — the scheme we persist.
+auto schemeFor(std::uint8_t grantedKeys) -> NodeRegistry::SecurityScheme
+{
+    if ((grantedKeys & S2::Kex::KEY_S2_ACCESS_CONTROL) != 0)
+    {
+        return NodeRegistry::SecurityScheme::S2AccessControl;
+    }
+    if ((grantedKeys & S2::Kex::KEY_S2_AUTHENTICATED) != 0)
+    {
+        return NodeRegistry::SecurityScheme::S2Authenticated;
+    }
+    return NodeRegistry::SecurityScheme::S2Unauthenticated;
+}
+
+// The raw class key answering a NETWORK_KEY_GET for `keyBit`, from the loaded set.
+auto classKeyForBit(std::uint8_t keyBit) -> std::optional<S2::Crypto::Key>
+{
+    const auto cls  = S2::KeyInstall::classForKeyBit(keyBit);
+    const auto keys = S2::NetworkKeys::current();
+    if (!cls.has_value() || !keys.has_value())
+    {
+        return std::nullopt;
+    }
+    return S2::NetworkKeys::keyFor(*keys, *cls);
+}
+
+auto completeBootstrap(std::uint8_t nodeId, const Session& session) -> void
+{
+    const auto scheme = schemeFor(session.grantedKeys);
+    NodeRegistry::setSecurityScheme(nodeId, scheme);
+    MessageBus::publish(MessageBus::NodeSecurityStatus{.nodeId = nodeId, .scheme = static_cast<std::uint8_t>(scheme)});
+    Logger::info("[s2-bootstrap] node " + std::to_string(nodeId) + " S2 bootstrap complete — node is secure");
+    state().sessions.erase(nodeId);
+}
+
+// Steps 20-30 entry (temp channel): a frame here is either a NETWORK_KEY_GET
+// (transfer the next granted class key) or the terminal TRANSFER_END.
+auto onTempChannelKeyExchange(std::uint8_t nodeId, Session& session, std::span<const std::uint8_t> frame) -> void
+{
+    const auto inner = decryptInbound(nodeId, session, frame);
+    if (!inner.has_value())
+    {
+        Logger::warn("[s2-bootstrap] node " + std::to_string(nodeId) + " temp-channel decrypt failed (key exchange)");
+        return;
+    }
+    const std::span<const std::uint8_t> innerSpan{*inner};
+    const auto command = S2::KeyInstall::commandByte(innerSpan);
+    if (!command.has_value())
+    {
+        return;
+    }
+    if (*command == S2::KeyInstall::TRANSFER_END)
+    {
+        const auto end = S2::KeyInstall::decodeTransferEnd(innerSpan);
+        if (end.has_value() && end->keyRequestComplete)
+        {
+            completeBootstrap(nodeId, session);  // step 30
+        }
+        return;
+    }
+    if (*command != S2::KeyInstall::NETWORK_KEY_GET)
+    {
+        return;
+    }
+    const auto requestedBit = S2::KeyInstall::decodeKeyGet(innerSpan);
+    if (!requestedBit.has_value())
+    {
+        return;
+    }
+    if ((*requestedBit & session.grantedKeys) == 0)
+    {
+        // Step 21 (A4): the node asked for a key we didn't grant.
+        Logger::warn("[s2-bootstrap] node " + std::to_string(nodeId) + " requested an ungranted key — KEX_FAIL");
+        const auto fail = S2::Kex::encodeFail(S2::Kex::FAIL_KEY_GET);
+        sendEncrypted(nodeId, std::span<const std::uint8_t>(fail));
+        state().sessions.erase(nodeId);
+        return;
+    }
+    const auto classKey = classKeyForBit(*requestedBit);
+    if (!classKey.has_value())
+    {
+        Logger::warn("[s2-bootstrap] node " + std::to_string(nodeId) + " no class key available to transfer");
+        return;
+    }
+    // Step 22: transfer the requested key over the temp channel.
+    const auto report = S2::KeyInstall::encodeKeyReport(*requestedBit, *classKey);
+    sendEncrypted(nodeId, std::span<const std::uint8_t>(report));
+    session.installingKeyBit    = *requestedBit;
+    session.installingClassKeys = S2::KeyDerivation::networkKeyExpand(*classKey);
+    session.phase               = Phase::AwaitClassNonceGet;
+}
+
+// Step 27-29: the node proves it installed the key (NETWORK_KEY_VERIFY, encrypted
+// under the *new* class key + its fresh SPAN); on a clean decrypt we answer with
+// TRANSFER_END(Key Verified) over the temp channel.
+auto onKeyVerify(std::uint8_t nodeId, Session& session, std::span<const std::uint8_t> frame) -> void
+{
+    const auto nonce = state().classSpanManager.receiveNonce(nodeId, frame);
+    if (!nonce.has_value())
+    {
+        Logger::warn("[s2-bootstrap] node " + std::to_string(nodeId) + " class-channel nonce unavailable");
+        return;
+    }
+    const S2::Encapsulation::Context context{.senderNodeId   = nodeId,
+                                             .receiverNodeId = state().controllerNodeId,
+                                             .homeId         = state().homeId,
+                                             .sequenceNumber = frame[ENCAP_SEQ_OFFSET]};
+    const auto inner = S2::Encapsulation::decrypt(frame, context, session.installingClassKeys.keyCcm, *nonce);
+    if (!inner.has_value())
+    {
+        // Step 28 (A5): can't decrypt with the new key — the install failed.
+        Logger::warn("[s2-bootstrap] node " + std::to_string(nodeId) + " NETWORK_KEY_VERIFY failed — KEX_FAIL");
+        const auto fail = S2::Kex::encodeFail(S2::Kex::FAIL_KEY_VERIFY);
+        sendEncrypted(nodeId, std::span<const std::uint8_t>(fail));
+        state().sessions.erase(nodeId);
+        return;
+    }
+    Logger::info("[s2-bootstrap] node " + std::to_string(nodeId) + " key class verified");
+    sendEncrypted(nodeId, S2::KeyInstall::encodeTransferEnd(true, false));  // step 29
+    session.phase = Phase::AwaitNetworkKeyGet;  // node requests the next key or sends the final TRANSFER_END
+}
+
 auto onApplicationCommand(const MessageBus::ApplicationCommand& event) -> void
 {
     const auto session = state().sessions.find(event.sourceNodeId);
@@ -367,7 +502,34 @@ auto onApplicationCommand(const MessageBus::ApplicationCommand& event) -> void
         }
         break;
     case Phase::AwaitNetworkKeyGet:
-        break;  // per-class NETWORK_KEY_GET install — the next #187 layer
+        if (*command == MESSAGE_ENCAPSULATION)
+        {
+            onTempChannelKeyExchange(event.sourceNodeId, session->second, ccData);
+        }
+        break;
+    case Phase::AwaitClassNonceGet:
+        if (*command == S2::NonceSync::NONCE_GET)
+        {
+            // Step 25-26: fresh SPAN for the new class key. Reset the channel so a
+            // stale generator from a prior key can't leak in.
+            state().classSpanManager = S2::SpanManager{};
+            state().classSpanManager.configurePeer(
+                event.sourceNodeId,
+                S2::SpanManager::PeerConfig{.classKey        = session->second.installingClassKeys.keyCcm,
+                                            .personalization = session->second.installingClassKeys.personalization,
+                                            .homeId          = state().homeId,
+                                            .ourNodeId       = state().controllerNodeId,
+                                            .peerNodeId      = event.sourceNodeId});
+            sendPlaintext(event.sourceNodeId, state().classSpanManager.respondToNonceGet(event.sourceNodeId));
+            session->second.phase = Phase::AwaitKeyVerify;
+        }
+        break;
+    case Phase::AwaitKeyVerify:
+        if (*command == MESSAGE_ENCAPSULATION)
+        {
+            onKeyVerify(event.sourceNodeId, session->second, ccData);
+        }
+        break;
     }
 }
 

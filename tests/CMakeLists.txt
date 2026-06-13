@@ -454,6 +454,19 @@ target_link_libraries(s2_key_derivation_test PRIVATE GTest::gtest GTest::gtest_m
 zwaved_test_target(s2_key_derivation_test)
 gtest_discover_tests(s2_key_derivation_test)
 
+# Security S2 (CC 0x9F) nonce-sync codec (#187/#199): NONCE_GET/REPORT + SPAN
+# extension. Pure byte codec — no OpenSSL.
+add_executable(s2_nonce_sync_test
+    s2_nonce_sync_test.cpp
+    "${SRC_DIR}/security/s2/NonceSync.cpp"
+)
+target_include_directories(s2_nonce_sync_test PRIVATE
+    "${SRC_DIR}/security/s2"
+)
+target_link_libraries(s2_nonce_sync_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(s2_nonce_sync_test)
+gtest_discover_tests(s2_nonce_sync_test)
+
 # ---- S2 SPAN --------------------------------------------------------
 # Security S2 (CC 0x9F) phase 3: CTR_DRBG SPAN nonce protocol.
 add_executable(s2_span_test

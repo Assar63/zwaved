@@ -399,6 +399,20 @@ target_link_libraries(s2_public_key_test PRIVATE GTest::gtest GTest::gtest_main 
 zwaved_test_target(s2_public_key_test)
 gtest_discover_tests(s2_public_key_test)
 
+# ---- S2 key install -------------------------------------------------
+# Security S2 (CC 0x9F) phase 7: NETWORK_KEY_GET/REPORT/VERIFY + TRANSFER_END.
+add_executable(s2_key_install_test
+    s2_key_install_test.cpp
+    "${SRC_DIR}/security/s2/KeyInstall.cpp"
+    "${SRC_DIR}/security/s2/Kex.cpp"
+)
+target_include_directories(s2_key_install_test PRIVATE
+    "${SRC_DIR}/security/s2"
+)
+target_link_libraries(s2_key_install_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(s2_key_install_test)
+gtest_discover_tests(s2_key_install_test)
+
 # ---- S2 KEX handshake -----------------------------------------------
 # Security S2 (CC 0x9F) phase 5: KEX_GET/REPORT/SET/FAIL codec + grant policy.
 add_executable(s2_kex_test

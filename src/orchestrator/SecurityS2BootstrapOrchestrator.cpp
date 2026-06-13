@@ -3,24 +3,26 @@
 // the per-class network keys. Bus-only, like the other orchestrators
 // (constructor priority 204).
 //
-// This is the *plaintext key-agreement* phase — the first #187 layer. When an
-// included node's NIF advertises CC 0x9F and the S2 network keys exist:
+// This is the *plaintext key-agreement* phase (+ DSK ritual). When an included
+// node's NIF advertises CC 0x9F and the S2 network keys exist:
 //   1. KEX_GET                         (plaintext) -> node replies KEX_REPORT
 //   2. grant = requested ∩ supported (deny Access Control to a CSA node);
 //      KEX_SET with the granted classes -> node sends its PUBLIC_KEY_REPORT
-//   3. We reply with our PUBLIC_KEY_REPORT (un-obfuscated), then — for a grant
-//      that needs no DSK (S2 Unauthenticated only) — compute the ECDH shared
-//      secret and derive the temporary bootstrap-channel keys
-//      (CKDF-TempExtract/Expand, #202), and publish S2KeyAgreementComplete.
+//   3. We reply with our PUBLIC_KEY_REPORT (un-obfuscated). For an
+//      Authenticated / Access Control grant the node obfuscated the first DSK
+//      group, so we raise DSKPendingConfirmation and wait for the operator's
+//      ConfirmDsk (the 5-digit PIN off the device label), which restores the
+//      obfuscated key bytes. For S2 Unauthenticated there's no PIN.
+//   4. Once we hold the node's full public key, compute the ECDH shared secret
+//      and derive the temporary bootstrap-channel keys (CKDF-TempExtract/
+//      Expand, #202), and publish S2KeyAgreementComplete.
 //
 // Deferred to later #187 layers (all unverifiable until hardware, #189):
-//   - the DSK ritual for Authenticated / Access Control (the node obfuscates
-//     the first key bytes; the operator types the PIN). Here a DSK-requiring
-//     grant parks the session at AwaitDsk and goes no further;
-//   - the encrypted temp-channel phase: KEX echo verify, per-class
+//   - the encrypted temp-channel phase: KEX echo verify (where a wrong-but-
+//     well-formed DSK PIN finally surfaces as KEX_FAIL), per-class
 //     NETWORK_KEY_REPORT install, NETWORK_KEY_VERIFY, TRANSFER_END — over SPAN
 //     + AES-128-CCM (needs the SPAN runtime nonce sync, #199);
-//   - the operator D-Bus / terminal progress + DSK confirmation surface.
+//   - the terminal DSK prompt UX (the D-Bus surface lands here).
 //
 // Single-session assumption: like the S0 bootstrap, concurrent inclusions are
 // disambiguated only by source node id; there is no inactivity timeout (a
@@ -72,6 +74,7 @@ struct Session
     Phase phase = Phase::AwaitKexReport;
     S2::Crypto::KeyPair keyPair{};
     std::uint8_t grantedKeys = 0;
+    S2::Crypto::PublicKey nodePublicKey{};  // the joining node's key (DSK-obfuscated until the PIN is applied)
     S2::KeyDerivation::TempKeys tempKeys{};
 };
 
@@ -80,6 +83,7 @@ struct State
 {
     MessageBus::SubscriptionGuard includedSub;
     MessageBus::SubscriptionGuard appCmdSub;
+    MessageBus::SubscriptionGuard confirmDskSub;
     MessageBus::SubscriptionGuard dongleSub;
     MessageBus::SubscriptionGuard keysSub;
     std::map<std::uint8_t, Session> sessions;  // per-node handshake progress
@@ -150,29 +154,18 @@ auto onKexReport(std::uint8_t nodeId, Session& session, std::span<const std::uin
                                                   .grantedKeys    = granted}));
 }
 
-auto onPublicKeyReport(std::uint8_t nodeId, Session& session, std::span<const std::uint8_t> ccData) -> void
+// Retract a pending DSK prompt (empty value = "nothing pending"), mirroring the
+// DaemonError "recovered" convention.
+auto clearDskPrompt() -> void
 {
-    const auto report = S2::PublicKey::decode(ccData);
-    if (!report.has_value())
-    {
-        return;
-    }
-    // Answer with our (controller, including-node) public key, un-obfuscated.
-    sendPlaintext(nodeId, S2::PublicKey::encode(true, session.keyPair.publicKey, S2::PublicKey::OBFUSCATE_NONE));
+    MessageBus::publish(MessageBus::DSKPendingConfirmation{.nodeId = 0, .dsk = {}});
+}
 
-    if ((session.grantedKeys & DSK_REQUIRED_KEYS) != 0)
-    {
-        // Authenticated / Access Control: the node obfuscated its leading key
-        // bytes. We need the operator's DSK PIN to restore them before ECDH —
-        // that ritual is the next #187 layer, so park the session here.
-        session.phase = Phase::AwaitDsk;
-        Logger::info("[s2-bootstrap] node " + std::to_string(nodeId) +
-                     " granted an authenticated class — DSK confirmation required (deferred)");
-        return;
-    }
-
-    // S2 Unauthenticated: no obfuscation, so we can finish key agreement now.
-    const auto shared = S2::Crypto::ecdh(session.keyPair.privateKey, report->key);
+// Final step shared by the Unauthenticated and DSK-confirmed paths: ECDH against
+// the node's (de-obfuscated) public key, derive the temp channel keys, advance.
+auto finishKeyAgreement(std::uint8_t nodeId, Session& session) -> void
+{
+    const auto shared = S2::Crypto::ecdh(session.keyPair.privateKey, session.nodePublicKey);
     if (!shared.has_value())
     {
         Logger::warn("[s2-bootstrap] ECDH failed for node " + std::to_string(nodeId) + " — KEX_FAIL");
@@ -180,11 +173,63 @@ auto onPublicKeyReport(std::uint8_t nodeId, Session& session, std::span<const st
         state().sessions.erase(nodeId);
         return;
     }
-    session.tempKeys = S2::KeyDerivation::deriveTempKeys(*shared, session.keyPair.publicKey, report->key);
+    session.tempKeys = S2::KeyDerivation::deriveTempKeys(*shared, session.keyPair.publicKey, session.nodePublicKey);
     session.phase    = Phase::AwaitTempChannel;
     Logger::info("[s2-bootstrap] node " + std::to_string(nodeId) +
                  " key agreement complete — temporary channel keys derived");
     MessageBus::publish(MessageBus::S2KeyAgreementComplete{.nodeId = nodeId});
+}
+
+auto onPublicKeyReport(std::uint8_t nodeId, Session& session, std::span<const std::uint8_t> ccData) -> void
+{
+    const auto report = S2::PublicKey::decode(ccData);
+    if (!report.has_value())
+    {
+        return;
+    }
+    session.nodePublicKey = report->key;
+    // Answer with our (controller, including-node) public key, un-obfuscated.
+    sendPlaintext(nodeId, S2::PublicKey::encode(true, session.keyPair.publicKey, S2::PublicKey::OBFUSCATE_NONE));
+
+    if ((session.grantedKeys & DSK_REQUIRED_KEYS) != 0)
+    {
+        // Authenticated / Access Control: the node obfuscated its leading key
+        // bytes (the DSK PIN). Park until the operator supplies it via
+        // ConfirmDSK; the partial DSK (first group shown as 00000) lets them
+        // match the prompt against the device label.
+        session.phase = Phase::AwaitDsk;
+        Logger::info("[s2-bootstrap] node " + std::to_string(nodeId) +
+                     " granted an authenticated class — awaiting operator DSK confirmation");
+        MessageBus::publish(
+            MessageBus::DSKPendingConfirmation{.nodeId = nodeId, .dsk = S2::PublicKey::dskString(report->key)});
+        return;
+    }
+
+    // S2 Unauthenticated: no obfuscation, so we can finish key agreement now.
+    finishKeyAgreement(nodeId, session);
+}
+
+auto onConfirmDsk(const MessageBus::ConfirmDsk& event) -> void
+{
+    const auto session = state().sessions.find(event.nodeId);
+    if (session == state().sessions.end() || session->second.phase != Phase::AwaitDsk)
+    {
+        return;  // no node is waiting on a DSK for this id
+    }
+    const auto pin = S2::PublicKey::parsePin(event.pin);
+    if (!pin.has_value())
+    {
+        Logger::warn("[s2-bootstrap] node " + std::to_string(event.nodeId) +
+                     " DSK confirmation ignored — PIN must be exactly 5 digits");
+        return;  // leave the prompt up for a retry
+    }
+    // Restore the obfuscated leading key bytes from the PIN, then agree keys. A
+    // wrong-but-well-formed PIN yields the wrong shared secret and only surfaces
+    // when the encrypted KEX echo fails to authenticate (a later #187 layer).
+    session->second.nodePublicKey = S2::PublicKey::applyPin(session->second.nodePublicKey, *pin);
+    Logger::info("[s2-bootstrap] node " + std::to_string(event.nodeId) + " DSK confirmed — resuming key agreement");
+    clearDskPrompt();
+    finishKeyAgreement(event.nodeId, session->second);
 }
 
 auto onApplicationCommand(const MessageBus::ApplicationCommand& event) -> void
@@ -227,9 +272,10 @@ __attribute__((constructor(CONFIG_ORCHESTRATOR_PRIO))) auto startSecurityS2Boots
         MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::NodeIncluded>(onNodeIncluded));
     state().appCmdSub =
         MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::ApplicationCommand>(onApplicationCommand));
-    state().dongleSub = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::DongleInfo>(
+    state().confirmDskSub = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::ConfirmDsk>(onConfirmDsk));
+    state().dongleSub     = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::DongleInfo>(
         [](const MessageBus::DongleInfo& info) -> void { state().controllerNodeId = info.controllerNodeId; }));
-    state().keysSub   = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::S2NetworkKeysReady>(
+    state().keysSub       = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::S2NetworkKeysReady>(
         [](const MessageBus::S2NetworkKeysReady& event) -> void { state().keysReady = event.ready; }));
 }
 }  // namespace

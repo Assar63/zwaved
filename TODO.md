@@ -125,8 +125,9 @@ Implementation order (each shippable independently):
   - [ ] [#187](https://github.com/Assar63/zwaved/issues/187) phase 9 — inclusion bootstrap wiring (in progress, built in layers):
     - [x] [#202](https://github.com/Assar63/zwaved/issues/202) CKDF key derivations (TempExtract/Expand + NetworkKeyExpand)
     - [x] plaintext key-agreement phase — `SecurityS2BootstrapOrchestrator` (KEX negotiation → public-key exchange → ECDH → temp-key derivation; Unauthenticated completes, DSK grants park at `AwaitDsk`)
-    - [ ] DSK operator ritual (PIN confirm) + KEX_FAIL-on-bad-PIN, with the `DSKPendingConfirmation` signal / `ConfirmDSK` D-Bus method + terminal prompt
-    - [ ] encrypted temp-channel phase — KEX echo verify + per-class `NETWORK_KEY_REPORT` install + `NETWORK_KEY_VERIFY` + `TRANSFER_END` over SPAN + AES-128-CCM (needs SPAN runtime sync, #199)
+    - [x] DSK operator ritual — `DSKPendingConfirmation` signal (retained, partial DSK) + `ConfirmDSK` D-Bus method → PIN applied → key agreement resumes (malformed PIN ignored; wrong-but-well-formed PIN surfaces later at the encrypted echo)
+    - [ ] terminal DSK prompt UX (zwave-terminal, under #73) — surface `DSKPendingConfirmation` + a PIN-entry binding calling `ConfirmDSK`
+    - [ ] encrypted temp-channel phase — KEX echo verify (KEX_FAIL on bad PIN here) + per-class `NETWORK_KEY_REPORT` install + `NETWORK_KEY_VERIFY` + `TRANSFER_END` over SPAN + AES-128-CCM (needs SPAN runtime sync, #199)
   - [ ] [#188](https://github.com/Assar63/zwaved/issues/188) phase 10 — MPAN (multicast, optional)
   - [ ] [#189](https://github.com/Assar63/zwaved/issues/189) phase 11 — on-bench acceptance (hardware)
 - [x] **CRC-16 Encapsulation (CC `0x56`)** — [#28](https://github.com/Assar63/zwaved/issues/28): transport-only integrity wrapper. `Crc16Encap` codec (CRC-16/AUG-CCITT `checksum` + `verifyAndUnwrap` + `encode`); a hand-written inbound unwrapper (`src/cc-translator/Encapsulation.cpp`) verifies the CRC and republishes the inner frame as an `ApplicationCommand` so the normal decoders fire (bad CRC → dropped + warned). No D-Bus/terminal surface. 6 codec tests. This establishes the inbound-unwrap seam that Transport Service (#25) and the Multi Channel reply-unwrap (#146) plug into.

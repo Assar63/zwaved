@@ -966,6 +966,33 @@ and typed forms above work unchanged — no client-side handling needed:
   (fetching a fresh nonce per message). The full S0 wire path is pending
   end-to-end verification on real hardware (#168).
 
+- **Security S2 (CC `0x9F`, #27)** — second-generation encrypted transport
+  (AES-128-CCM + Curve25519 ECDH inclusion + per-class network keys). Built in
+  layers; the inclusion **key-agreement** phase is wired today. When a
+  newly-included node advertises CC `0x9F`, the daemon runs the KEX handshake
+  (`KEX_GET → KEX_REPORT → KEX_SET`), exchanges public keys, and — once it has
+  the node's full public key — derives the temporary bootstrap-channel keys via
+  ECDH. For the **Authenticated / Access Control** classes the joining node
+  obfuscates the first group of its DSK (Device Specific Key), so the daemon
+  raises a **`DSKPendingConfirmation(nodeId, dsk)`** signal (retained, so a
+  client connecting after the prompt still sees it). `dsk` is the *partial* DSK
+  with the first group shown as `00000`; read the full DSK off the device label
+  and supply the missing 5-digit PIN:
+
+  ```bash
+  busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+      com.tiunda.ZWaved1 ConfirmDSK ys 12 "54321"
+  ```
+
+  The daemon restores the obfuscated key bytes from the PIN and resumes key
+  agreement (an `S2 Unauthenticated` node needs no PIN and proceeds straight
+  through). A malformed PIN is ignored and the prompt stays up; a
+  well-formed-but-wrong PIN only fails later, when the encrypted handshake can't
+  authenticate. The remaining S2 phases — the encrypted temp-channel key
+  install, live transport encapsulation, and on-bench acceptance — are in
+  progress (#187 / #199 / #189); the S2 wire path is unverified against real
+  hardware until #189.
+
 ## 13. Listing nodes
 
 `GetNodes` returns the daemon's in-memory list of currently-included

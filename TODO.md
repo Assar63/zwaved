@@ -62,6 +62,8 @@ Implementation order (each shippable independently):
 
 **The full inclusion + wake-up orchestration plan is now complete (steps 1–7).**
 
+- [ ] [Node interview (introspection) orchestrator](https://github.com/Assar63/zwaved/issues/203) — bus-only orchestrator (prio 204) that auto-drives the post-inclusion node interview (ManufacturerSpecific → Version → Multi Channel endpoints → Z-Wave+), since nothing does today. Closes the gap where `PolicyRegister`'s device-level defaults never match (the `(mfr, type, product)` triple is unknown at inclusion time) and `InclusionOrchestrator` applies policy before device identity is known. Emits `NodeInterviewComplete{nodeId}`, which becomes the correct trigger for the policy step — making the post-inclusion reactor order explicit: **SecurityBootstrap → Interview → InclusionPolicy**. Sleeping nodes interview via `PendingQueue` on next wake-up. Unit-testable like the other orchestrators; natural home for #45 (node info window) data.
+
 ### Closed-loop automation (epic)  _(role: responder)_
 
 - [x] [epic: daemon-side closed-loop automation](https://github.com/Assar63/zwaved/issues/101) — daemon *reacts* to node events by *driving* other nodes/CCs (PolicyRegister desired-state re-assertion, verify-after-set, event-triggered cross-node reactions, set/level coalescing, schedules). Orchestrators stay in `src/orchestrator/` (prio 204, bus-only). Full rationale in the issue; broader design context in `FUTURE.md`.
@@ -112,15 +114,19 @@ Implementation order (each shippable independently):
   - [x] [#175](https://github.com/Assar63/zwaved/issues/175) phase 5b — outbound encrypt-on-send
   - [ ] [#168](https://github.com/Assar63/zwaved/issues/168) phase 7 — on-bench acceptance (hardware) ⚠️ S0 wire path unverified against a real device until this
 - [ ] **epic: [Security S2 (CC 0x9F)](https://github.com/Assar63/zwaved/issues/27)** — encrypted transport, second generation (AES-128-CCM + Curve25519 ECDH inclusion + multi-class keys + SPAN/MPAN nonces). The biggest epic in the daemon; builds on S0. Eleven phases (MPAN may be deferred), each its own PR:
-  - [ ] [#179](https://github.com/Assar63/zwaved/issues/179) phase 1 — crypto primitives + spec vectors
-  - [ ] [#180](https://github.com/Assar63/zwaved/issues/180) phase 2 — multi-class network-key storage
-  - [ ] [#181](https://github.com/Assar63/zwaved/issues/181) phase 3 — SPAN (Singlecast Pre-Agreed Nonce) protocol
-  - [ ] [#182](https://github.com/Assar63/zwaved/issues/182) phase 4 — encapsulation codec
-  - [ ] [#183](https://github.com/Assar63/zwaved/issues/183) phase 5 — KEX handshake
-  - [ ] [#184](https://github.com/Assar63/zwaved/issues/184) phase 6 — public-key exchange + DSK confirmation UX
-  - [ ] [#185](https://github.com/Assar63/zwaved/issues/185) phase 7 — network key install per granted class
-  - [ ] [#186](https://github.com/Assar63/zwaved/issues/186) phase 8 — ProtocolThread integration
-  - [ ] [#187](https://github.com/Assar63/zwaved/issues/187) phase 9 — inclusion bootstrap wiring
+  - [x] [#179](https://github.com/Assar63/zwaved/issues/179) phase 1 — crypto primitives + spec vectors
+  - [x] [#180](https://github.com/Assar63/zwaved/issues/180) phase 2 — multi-class network-key storage
+  - [x] [#181](https://github.com/Assar63/zwaved/issues/181) phase 3 — SPAN (Singlecast Pre-Agreed Nonce) protocol
+  - [x] [#182](https://github.com/Assar63/zwaved/issues/182) phase 4 — encapsulation codec
+  - [x] [#183](https://github.com/Assar63/zwaved/issues/183) phase 5 — KEX handshake
+  - [x] [#184](https://github.com/Assar63/zwaved/issues/184) phase 6 — public-key exchange + DSK confirmation UX (codec + DSK helpers)
+  - [x] [#185](https://github.com/Assar63/zwaved/issues/185) phase 7 — network key install per granted class
+  - [x] [#186](https://github.com/Assar63/zwaved/issues/186) phase 8 — security data model (NodeRegistry SecurityScheme + NodeSecurityStatus)
+  - [ ] [#187](https://github.com/Assar63/zwaved/issues/187) phase 9 — inclusion bootstrap wiring (in progress, built in layers):
+    - [x] [#202](https://github.com/Assar63/zwaved/issues/202) CKDF key derivations (TempExtract/Expand + NetworkKeyExpand)
+    - [x] plaintext key-agreement phase — `SecurityS2BootstrapOrchestrator` (KEX negotiation → public-key exchange → ECDH → temp-key derivation; Unauthenticated completes, DSK grants park at `AwaitDsk`)
+    - [ ] DSK operator ritual (PIN confirm) + KEX_FAIL-on-bad-PIN, with the `DSKPendingConfirmation` signal / `ConfirmDSK` D-Bus method + terminal prompt
+    - [ ] encrypted temp-channel phase — KEX echo verify + per-class `NETWORK_KEY_REPORT` install + `NETWORK_KEY_VERIFY` + `TRANSFER_END` over SPAN + AES-128-CCM (needs SPAN runtime sync, #199)
   - [ ] [#188](https://github.com/Assar63/zwaved/issues/188) phase 10 — MPAN (multicast, optional)
   - [ ] [#189](https://github.com/Assar63/zwaved/issues/189) phase 11 — on-bench acceptance (hardware)
 - [x] **CRC-16 Encapsulation (CC `0x56`)** — [#28](https://github.com/Assar63/zwaved/issues/28): transport-only integrity wrapper. `Crc16Encap` codec (CRC-16/AUG-CCITT `checksum` + `verifyAndUnwrap` + `encode`); a hand-written inbound unwrapper (`src/cc-translator/Encapsulation.cpp`) verifies the CRC and republishes the inner frame as an `ApplicationCommand` so the normal decoders fire (bad CRC → dropped + warned). No D-Bus/terminal surface. 6 codec tests. This establishes the inbound-unwrap seam that Transport Service (#25) and the Multi Channel reply-unwrap (#146) plug into.

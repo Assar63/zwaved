@@ -636,6 +636,31 @@ target_link_libraries(s0_bootstrap_test PRIVATE
 zwaved_test_target(s0_bootstrap_test)
 gtest_discover_tests(s0_bootstrap_test)
 
+# ---- S2 inclusion bootstrap -----------------------------------------
+# Security S2 (CC 0x9F) phase 9 (#187): the bootstrap orchestrator's
+# plaintext key-agreement phase (KEX negotiation → public-key exchange →
+# ECDH → temp-key derivation). Links the orchestrator (armed by its
+# constructor attribute) + the S2 codecs it drives.
+add_executable(s2_bootstrap_test
+    s2_bootstrap_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/orchestrator/SecurityS2BootstrapOrchestrator.cpp"
+    "${SRC_DIR}/security/s2/Crypto.cpp"
+    "${SRC_DIR}/security/s2/Kex.cpp"
+    "${SRC_DIR}/security/s2/PublicKey.cpp"
+    "${SRC_DIR}/security/s2/KeyDerivation.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(s2_bootstrap_test PRIVATE
+    "${SRC_DIR}/security/s2"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(s2_bootstrap_test PRIVATE
+    GTest::gtest GTest::gtest_main PkgConfig::OPENSSL zwaved_bus)
+zwaved_test_target(s2_bootstrap_test)
+gtest_discover_tests(s2_bootstrap_test)
+
 # ---- S0 nonce responder ---------------------------------------------
 # Security S0 (CC 0x98) phase 3: bus-driven NONCE_GET -> NONCE_REPORT
 # reactor. Links the responder (armed by its constructor attribute), the

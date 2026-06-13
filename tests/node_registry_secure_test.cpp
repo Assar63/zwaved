@@ -19,7 +19,7 @@ auto useTempStateDir() -> void
 }
 }  // namespace
 
-TEST(NodeRegistrySecure, SetAndQuery)
+TEST(NodeRegistrySecure, SetAndQueryScheme)
 {
     useTempStateDir();
     NodeRegistry::setHomeId({0xDE, 0xAD, 0xBE, 0xEF});
@@ -27,10 +27,14 @@ TEST(NodeRegistrySecure, SetAndQuery)
     node.nodeId = 7;
     NodeRegistry::add(node);
 
-    EXPECT_FALSE(NodeRegistry::isSecure(7));  // default
-    NodeRegistry::setSecure(7, true);
+    EXPECT_EQ(NodeRegistry::securityScheme(7), NodeRegistry::SecurityScheme::None);  // default
+    EXPECT_FALSE(NodeRegistry::isSecure(7));
+
+    NodeRegistry::setSecurityScheme(7, NodeRegistry::SecurityScheme::S2AccessControl);
+    EXPECT_EQ(NodeRegistry::securityScheme(7), NodeRegistry::SecurityScheme::S2AccessControl);
     EXPECT_TRUE(NodeRegistry::isSecure(7));
-    NodeRegistry::setSecure(7, false);
+
+    NodeRegistry::setSecurityScheme(7, NodeRegistry::SecurityScheme::None);
     EXPECT_FALSE(NodeRegistry::isSecure(7));
 }
 
@@ -38,7 +42,7 @@ TEST(NodeRegistrySecure, UnknownNodeIsNeverSecure)
 {
     useTempStateDir();
     NodeRegistry::setHomeId({0xDE, 0xAD, 0xBE, 0xEF});
-    EXPECT_FALSE(NodeRegistry::isSecure(222));  // never added
-    NodeRegistry::setSecure(223, true);         // no-op on an unknown node
+    EXPECT_EQ(NodeRegistry::securityScheme(222), NodeRegistry::SecurityScheme::None);  // never added
+    NodeRegistry::setSecurityScheme(223, NodeRegistry::SecurityScheme::S0);            // no-op on an unknown node
     EXPECT_FALSE(NodeRegistry::isSecure(223));
 }

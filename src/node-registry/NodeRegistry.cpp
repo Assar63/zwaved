@@ -24,7 +24,7 @@ namespace
 constexpr const char* DEFAULT_STATE_DIR = "/var/lib/zwaved";
 constexpr const char* STATE_DIR_ENV     = "ZWAVED_STATE_DIR";
 constexpr const char* DB_FILENAME       = "nodes.db";
-constexpr int CURRENT_SCHEMA_VERSION    = 2;
+constexpr int CURRENT_SCHEMA_VERSION    = 3;
 
 constexpr const char* SCHEMA_SQL = R"(
 CREATE TABLE IF NOT EXISTS nodes (
@@ -34,13 +34,17 @@ CREATE TABLE IF NOT EXISTS nodes (
     generic_type    INTEGER NOT NULL,
     specific_type   INTEGER NOT NULL,
     command_classes BLOB,
-    secure          INTEGER NOT NULL DEFAULT 0,
+    security_scheme INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (home_id, node_id)
 )
 )";
 
-// v1 -> v2: add the Security S0 `secure` flag (#167) without dropping data.
-constexpr const char* MIGRATE_V1_TO_V2_SQL = "ALTER TABLE nodes ADD COLUMN secure INTEGER NOT NULL DEFAULT 0";
+// v1 -> v3: a v1 table never had the security column — add it.
+constexpr const char* MIGRATE_V1_ADD_SCHEME_SQL =
+    "ALTER TABLE nodes ADD COLUMN security_scheme INTEGER NOT NULL DEFAULT 0";
+// v2 -> v3: the v2 `secure` bool widens to the SecurityScheme enum; its 0/1
+// values already map to None/S0, so a rename preserves them.
+constexpr const char* MIGRATE_V2_RENAME_SQL = "ALTER TABLE nodes RENAME COLUMN secure TO security_scheme";
 
 constexpr const char* UPSERT_SQL =
     "INSERT INTO nodes (home_id, node_id, basic_type, generic_type, specific_type, command_classes) "
@@ -53,10 +57,10 @@ constexpr const char* UPSERT_SQL =
 
 constexpr const char* DELETE_SQL = "DELETE FROM nodes WHERE home_id = ? AND node_id = ?";
 
-constexpr const char* SELECT_FOR_HOME_SQL =
-    "SELECT node_id, basic_type, generic_type, specific_type, command_classes, secure FROM nodes WHERE home_id = ?";
+constexpr const char* SELECT_FOR_HOME_SQL = "SELECT node_id, basic_type, generic_type, specific_type, "
+                                            "command_classes, security_scheme FROM nodes WHERE home_id = ?";
 
-constexpr const char* SET_SECURE_SQL = "UPDATE nodes SET secure = ? WHERE home_id = ? AND node_id = ?";
+constexpr const char* SET_SCHEME_SQL = "UPDATE nodes SET security_scheme = ? WHERE home_id = ? AND node_id = ?";
 
 // Bind positions for UPSERT (1-based per sqlite3_bind_*).
 constexpr int BIND_HOME     = 1;
@@ -72,12 +76,12 @@ constexpr int COL_BASIC    = 1;
 constexpr int COL_GENERIC  = 2;
 constexpr int COL_SPECIFIC = 3;
 constexpr int COL_CCS      = 4;
-constexpr int COL_SECURE   = 5;
+constexpr int COL_SCHEME   = 5;
 
-// Bind positions for SET_SECURE (1-based).
-constexpr int BIND_SECURE_VALUE = 1;
-constexpr int BIND_SECURE_HOME  = 2;
-constexpr int BIND_SECURE_NODE  = 3;
+// Bind positions for SET_SCHEME (1-based).
+constexpr int BIND_SCHEME_VALUE = 1;
+constexpr int BIND_SCHEME_HOME  = 2;
+constexpr int BIND_SCHEME_NODE  = 3;
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct State
@@ -269,9 +273,17 @@ auto migrateSchema(sqlite3* database) -> bool
     }
     if (version == 1)
     {
-        // v1 -> v2: a correctly-keyed table that just lacks the `secure`
-        // column — add it in place, preserving the included-node data.
-        if (!execOrLog(database, MIGRATE_V1_TO_V2_SQL, "ALTER TABLE"))
+        // v1 -> v3: a correctly-keyed table that lacks the security column.
+        if (!execOrLog(database, MIGRATE_V1_ADD_SCHEME_SQL, "ALTER TABLE"))
+        {
+            return false;
+        }
+    }
+    else if (version == 2)
+    {
+        // v2 -> v3: rename the `secure` bool to `security_scheme`; its 0/1
+        // values already mean None/S0, so the data carries over intact.
+        if (!execOrLog(database, MIGRATE_V2_RENAME_SQL, "ALTER TABLE"))
         {
             return false;
         }
@@ -288,7 +300,7 @@ auto migrateSchema(sqlite3* database) -> bool
             return false;
         }
     }
-    if (!execOrLog(database, "PRAGMA user_version = 2", "PRAGMA user_version"))
+    if (!execOrLog(database, "PRAGMA user_version = 3", "PRAGMA user_version"))
     {
         return false;
     }
@@ -319,7 +331,7 @@ auto loadNodesForHome(sqlite3* database, const std::string& homeId) -> std::map<
         {
             info.commandClasses.assign(blob, blob + blobSize);
         }
-        info.secure = sqlite3_column_int(stmt.raw(), COL_SECURE) != 0;
+        info.securityScheme = static_cast<NodeRegistry::SecurityScheme>(sqlite3_column_int(stmt.raw(), COL_SCHEME));
         result.emplace(info.nodeId, info);
     }
     return result;
@@ -568,32 +580,40 @@ auto NodeRegistry::snapshot() -> std::vector<NodeInfo>
     return result;
 }
 
-auto NodeRegistry::setSecure(std::uint8_t nodeId, bool secure) -> void
+auto NodeRegistry::setSecurityScheme(std::uint8_t nodeId, SecurityScheme scheme) -> void
 {
     initIfNeeded();
     std::scoped_lock const lock(state().mutex);
     const auto iter = state().nodes.find(nodeId);
     if (iter == state().nodes.end())
     {
-        return;  // unknown node — nothing to flag
+        return;  // unknown node — nothing to record
     }
-    iter->second.secure = secure;
-    // `secure` isn't part of NodeListChanged, so no republish is needed; just
-    // persist. NodeSecurityStatus already carries the per-node signal.
+    iter->second.securityScheme = scheme;
+    // securityScheme isn't part of NodeListChanged, so no republish is needed;
+    // just persist. NodeSecurityStatus carries the per-node signal.
     const auto& home = state().currentHomeId;
     if (state().db == nullptr || !home.has_value())
     {
         return;
     }
-    Stmt stmt(state().db, SET_SECURE_SQL, "SET SECURE");
+    Stmt stmt(state().db, SET_SCHEME_SQL, "SET SCHEME");
     if (!stmt.valid())
     {
         return;
     }
-    stmt.bindInt(BIND_SECURE_VALUE, secure ? 1 : 0)
-        .bindText(BIND_SECURE_HOME, *home)
-        .bindInt(BIND_SECURE_NODE, nodeId)
+    stmt.bindInt(BIND_SCHEME_VALUE, static_cast<int>(scheme))
+        .bindText(BIND_SCHEME_HOME, *home)
+        .bindInt(BIND_SCHEME_NODE, nodeId)
         .execDone();
+}
+
+auto NodeRegistry::securityScheme(std::uint8_t nodeId) -> SecurityScheme
+{
+    initIfNeeded();
+    std::scoped_lock const lock(state().mutex);
+    const auto iter = state().nodes.find(nodeId);
+    return iter == state().nodes.end() ? SecurityScheme::None : iter->second.securityScheme;
 }
 
 auto NodeRegistry::isSecure(std::uint8_t nodeId) -> bool
@@ -601,5 +621,5 @@ auto NodeRegistry::isSecure(std::uint8_t nodeId) -> bool
     initIfNeeded();
     std::scoped_lock const lock(state().mutex);
     const auto iter = state().nodes.find(nodeId);
-    return iter != state().nodes.end() && iter->second.secure;
+    return iter != state().nodes.end() && iter->second.securityScheme != SecurityScheme::None;
 }

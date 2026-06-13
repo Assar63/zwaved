@@ -8,6 +8,7 @@ target_sources(zwaved PRIVATE
     NetworkKeys.cpp
     Span.cpp
     Encapsulation.cpp
+    Kex.cpp
     # Constructor-armed (CONFIG_SECURITY_PRIO) — must be a direct zwaved
     # source, never a passively-linked archive member, or its .init_array
     # entry is dropped and the keys are never loaded.

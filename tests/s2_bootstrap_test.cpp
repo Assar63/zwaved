@@ -35,8 +35,10 @@ struct Harness
 {
     std::vector<MessageBus::SendDataCommand> sent;
     std::optional<MessageBus::S2KeyAgreementComplete> agreed;
+    std::vector<MessageBus::DSKPendingConfirmation> dskPrompts;
     MessageBus::SubscriptionGuard sentGuard;
     MessageBus::SubscriptionGuard agreedGuard;
+    MessageBus::SubscriptionGuard dskGuard;
 
     Harness()
     {
@@ -46,6 +48,18 @@ struct Harness
             [this](const MessageBus::SendDataCommand& cmd) -> void { sent.push_back(cmd); }));
         agreedGuard = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::S2KeyAgreementComplete>(
             [this](const MessageBus::S2KeyAgreementComplete& event) -> void { agreed = event; }));
+        dskGuard    = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::DSKPendingConfirmation>(
+            [this](const MessageBus::DSKPendingConfirmation& event) -> void { dskPrompts.push_back(event); }));
+    }
+
+    // Drive a fresh session up to the DSK-pending park: inclusion, KEX_REPORT
+    // for `keys`, then the node's DSK-obfuscated PUBLIC_KEY_REPORT.
+    void driveToDskPending(std::uint8_t keys, const S2::Crypto::PublicKey& nodePublicKey)
+    {
+        MessageBus::publish(MessageBus::NodeIncluded{.nodeId = NODE, .commandClasses = {CC_S2}});
+        MessageBus::publish(MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = kexReport(keys)});
+        MessageBus::publish(MessageBus::ApplicationCommand{
+            .sourceNodeId = NODE, .ccData = S2::PublicKey::encode(false, nodePublicKey, S2::PublicKey::OBFUSCATE_DSK)});
     }
 };
 }  // namespace
@@ -89,18 +103,45 @@ TEST(S2Bootstrap, UnauthenticatedReachesKeyAgreement)
 TEST(S2Bootstrap, AuthenticatedGrantParksOnDsk)
 {
     Harness harness;
-    MessageBus::publish(MessageBus::NodeIncluded{.nodeId = NODE, .commandClasses = {CC_S2}});
-    MessageBus::publish(
-        MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = kexReport(S2::Kex::KEY_S2_AUTHENTICATED)});
+    const auto nodeKeys = S2::Crypto::generateKeyPair();
 
     // The node's PUBLIC_KEY_REPORT (DSK-obfuscated) → we answer, but key
-    // agreement does NOT complete (PIN required, deferred to the DSK layer).
-    const auto nodeKeys = S2::Crypto::generateKeyPair();
-    MessageBus::publish(MessageBus::ApplicationCommand{
-        .sourceNodeId = NODE,
-        .ccData       = S2::PublicKey::encode(false, nodeKeys.publicKey, S2::PublicKey::OBFUSCATE_DSK)});
+    // agreement does NOT complete; a DSK prompt is raised instead.
+    harness.driveToDskPending(S2::Kex::KEY_S2_AUTHENTICATED, nodeKeys.publicKey);
     ASSERT_EQ(harness.sent.size(), 3U);  // KEX_GET, KEX_SET, our PUBLIC_KEY_REPORT
     EXPECT_FALSE(harness.agreed.has_value());
+    ASSERT_FALSE(harness.dskPrompts.empty());
+    EXPECT_EQ(harness.dskPrompts.back().nodeId, NODE);
+    EXPECT_FALSE(harness.dskPrompts.back().dsk.empty());
+}
+
+TEST(S2Bootstrap, DskConfirmationCompletesKeyAgreement)
+{
+    Harness harness;
+    const auto nodeKeys = S2::Crypto::generateKeyPair();
+    harness.driveToDskPending(S2::Kex::KEY_S2_AUTHENTICATED, nodeKeys.publicKey);
+    ASSERT_FALSE(harness.agreed.has_value());
+
+    // Operator supplies the PIN (the first DSK group of the node's real key).
+    MessageBus::publish(MessageBus::ConfirmDsk{.nodeId = NODE, .pin = S2::PublicKey::dskPin(nodeKeys.publicKey)});
+
+    ASSERT_TRUE(harness.agreed.has_value());
+    EXPECT_EQ(harness.agreed->nodeId, NODE);
+    // The pending prompt is retracted (nodeId 0, empty dsk).
+    EXPECT_EQ(harness.dskPrompts.back().nodeId, 0);
+    EXPECT_TRUE(harness.dskPrompts.back().dsk.empty());
+}
+
+TEST(S2Bootstrap, MalformedPinKeepsPromptUp)
+{
+    Harness harness;
+    const auto nodeKeys = S2::Crypto::generateKeyPair();
+    harness.driveToDskPending(S2::Kex::KEY_S2_AUTHENTICATED, nodeKeys.publicKey);
+    const auto promptsBefore = harness.dskPrompts.size();
+
+    MessageBus::publish(MessageBus::ConfirmDsk{.nodeId = NODE, .pin = "12"});  // not 5 digits
+    EXPECT_FALSE(harness.agreed.has_value());
+    EXPECT_EQ(harness.dskPrompts.size(), promptsBefore);  // no retract published
 }
 
 TEST(S2Bootstrap, NoGrantableKeyFailsKex)

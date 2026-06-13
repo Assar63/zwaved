@@ -206,6 +206,38 @@ events:
     fields:
       - { name: nodeId, type: u8, default: 0 }
 
+  - name: DSKPendingConfirmation
+    category: state
+    direction: { publishers: [orchestrator], subscribers: [external-api] }
+    doc: |
+      SecurityS2BootstrapOrchestrator (#187) is waiting for the operator to
+      confirm a joining node's DSK (Device Specific Key) before it can finish
+      S2 key agreement for an Authenticated / Access Control grant. The joining
+      node obfuscated the first DSK group (the PIN) in its PUBLIC_KEY_REPORT, so
+      `dsk` is the *partial* DSK string with that first group shown as 00000 —
+      the operator reads the full DSK off the device label and supplies the
+      missing 5-digit PIN via ConfirmDSK. Retained so a client (terminal)
+      connecting after the prompt still sees the pending confirmation; the
+      orchestrator publishes a cleared value (nodeId 0, empty dsk) once the PIN
+      is supplied (or the session ends), mirroring the DaemonError convention.
+    fields:
+      - { name: nodeId, type: u8,     default: 0 }
+      - { name: dsk,    type: string }
+
+  - name: ConfirmDsk
+    category: command
+    direction: { publishers: [external-api], subscribers: [orchestrator] }
+    doc: |
+      The operator's answer to a DSKPendingConfirmation: the 5-digit DSK PIN
+      (first DSK group) for node `nodeId`, read off the device label. The
+      SecurityS2BootstrapOrchestrator restores the obfuscated public-key bytes
+      from it and resumes S2 key agreement. A malformed PIN is ignored (the
+      prompt stays up); a wrong-but-well-formed PIN only surfaces later, as the
+      encrypted KEX echo fails to authenticate (a later #187 layer).
+    fields:
+      - { name: nodeId, type: u8,     default: 0 }
+      - { name: pin,    type: string }
+
   - name: DaemonError
     category: state
     direction: { publishers: [zwave-protocol, zwave-dongle, external-api, config], subscribers: [external-api] }
@@ -2021,6 +2053,13 @@ dbus:
       action:
         publish: SendWakeUpNoMoreInformationCommand
 
+    - name: ConfirmDSK
+      params:
+        - { name: nodeId, dbus: y, cpp: u8 }
+        - { name: pin,    dbus: s, cpp: string, doc: "5-digit first DSK group read off the device label" }
+      action:
+        publish: ConfirmDsk
+
     - name: SetAssociation
       params:
         - { name: nodeId,     dbus: y,  cpp: u8 }
@@ -2434,6 +2473,12 @@ dbus:
         - { name: nodeId, dbus: y }
         - { name: scheme, dbus: y }
       triggered_by: { event: NodeSecurityStatus }
+
+    - name: DSKPendingConfirmation
+      params:
+        - { name: nodeId, dbus: y }
+        - { name: dsk,    dbus: s }
+      triggered_by: { event: DSKPendingConfirmation }
 
     - name: InitData
       params:

@@ -156,8 +156,9 @@ auto onApplicationCommand(const MessageBus::ApplicationCommand& event) -> void
     case Phase::AwaitVerify:
         if (*command == Security::SECURITY_NETWORK_KEY_VERIFY)
         {
-            NodeRegistry::setSecure(event.sourceNodeId, true);
-            MessageBus::publish(MessageBus::NodeSecurityStatus{.nodeId = event.sourceNodeId, .secure = true});
+            NodeRegistry::setSecurityScheme(event.sourceNodeId, NodeRegistry::SecurityScheme::S0);
+            MessageBus::publish(MessageBus::NodeSecurityStatus{
+                .nodeId = event.sourceNodeId, .scheme = static_cast<std::uint8_t>(NodeRegistry::SecurityScheme::S0)});
             Logger::info("[s0-bootstrap] node " + std::to_string(event.sourceNodeId) +
                          " verified — secure bootstrap complete");
             state().sessions.erase(session);

@@ -72,7 +72,7 @@ TEST(S0Bootstrap, FullSequenceMarksSecure)
     MessageBus::publish(MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = {CC_SEC, 0x07}});
     ASSERT_TRUE(status.has_value());
     EXPECT_EQ(status->nodeId, NODE);
-    EXPECT_TRUE(status->secure);
+    EXPECT_EQ(status->scheme, 1);  // SecurityScheme::S0
 }
 
 TEST(S0Bootstrap, NonSecureNodeIsIgnored)

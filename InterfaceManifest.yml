@@ -181,14 +181,15 @@ events:
     category: state
     direction: { publishers: [cc-translator, orchestrator], subscribers: [external-api] }
     doc: |
-      Per-node Security S0 (CC 0x98) status. Published when the daemon observes
-      a node communicating securely: the inbound decrypt seam (#166) emits
-      `secure = true` after it authenticates a MESSAGE_ENCAPSULATION frame, and
-      the inclusion bootstrap (#167) emits it on a verified NETWORK_KEY_VERIFY.
-      Retained so a late D-Bus subscriber learns which nodes are secure.
+      Per-node security status. Published when the daemon observes a node's
+      secure level: the S0 inbound seam (#166) / bootstrap (#167) emit S0, and
+      the S2 paths (#186) emit the granted S2 class. `scheme` is the numeric
+      NodeRegistry::SecurityScheme (0 None, 1 S0, 2 S2-Unauthenticated, 3
+      S2-Authenticated, 4 S2-Access-Control). Retained so a late D-Bus
+      subscriber learns each node's scheme.
     fields:
-      - { name: nodeId, type: u8,   default: 0 }
-      - { name: secure, type: bool, default: false }
+      - { name: nodeId, type: u8, default: 0 }
+      - { name: scheme, type: u8, default: 0 }
 
   - name: DaemonError
     category: state
@@ -2416,7 +2417,7 @@ dbus:
     - name: NodeSecurityStatus
       params:
         - { name: nodeId, dbus: y }
-        - { name: secure, dbus: b }
+        - { name: scheme, dbus: y }
       triggered_by: { event: NodeSecurityStatus }
 
     - name: InitData

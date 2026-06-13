@@ -13,6 +13,18 @@
 /// duplicated here.
 namespace NodeRegistry
 {
+/// The security level a node was bootstrapped at, highest-granted-class first.
+/// Numeric values are persisted (the `security_scheme` column) and carried in
+/// the NodeSecurityStatus bus event / D-Bus signal.
+enum class SecurityScheme : std::uint8_t
+{
+    None              = 0,  ///< non-secure
+    S0                = 1,  ///< Security S0 (CC 0x98)
+    S2Unauthenticated = 2,
+    S2Authenticated   = 3,
+    S2AccessControl   = 4,
+};
+
 struct NodeInfo
 {
     std::uint8_t nodeId       = 0;
@@ -20,7 +32,7 @@ struct NodeInfo
     std::uint8_t genericType  = 0;
     std::uint8_t specificType = 0;
     std::vector<std::uint8_t> commandClasses;
-    bool secure = false;  ///< Security S0 bootstrap verified (#167)
+    SecurityScheme securityScheme = SecurityScheme::None;  ///< highest secure class (#167 S0, #186 S2)
 };
 
 /// Bind the registry to a Z-Wave network identified by its 4-byte
@@ -60,14 +72,16 @@ auto updateDeviceClass(std::uint8_t nodeId,
 /// entry exists for `nodeId`.
 auto updateCommandClasses(std::uint8_t nodeId, std::vector<std::uint8_t> commandClasses) -> void;
 
-/// Mark a node's Security S0 status (set true on a verified inclusion
-/// bootstrap, #167). Updates the in-memory entry and persists the flag.
-/// No-op if no entry exists for `nodeId`.
-auto setSecure(std::uint8_t nodeId, bool secure) -> void;
+/// Record the security scheme a node was bootstrapped at (S0 #167 / S2 #186).
+/// Updates the in-memory entry and persists it. No-op if no entry exists.
+auto setSecurityScheme(std::uint8_t nodeId, SecurityScheme scheme) -> void;
 
-/// Whether `nodeId` completed a verified S0 bootstrap. False for unknown
-/// nodes. Used by the outbound send path (#175) to decide whether to
-/// encapsulate.
+/// The security scheme of `nodeId` (SecurityScheme::None for non-secure or
+/// unknown nodes).
+[[nodiscard]] auto securityScheme(std::uint8_t nodeId) -> SecurityScheme;
+
+/// Whether `nodeId` is secure at all (any scheme other than None). Used by the
+/// outbound send path to decide whether to encapsulate.
 [[nodiscard]] auto isSecure(std::uint8_t nodeId) -> bool;
 
 /// Thread-safe copy of the current registry, sorted ascending by nodeId.

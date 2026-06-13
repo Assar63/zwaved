@@ -14,6 +14,7 @@
 
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
+#include "../node-registry/NodeRegistry.hpp"  // SecurityScheme
 #include "../zwave-protocol/application/Crc16Encap.hpp"
 #include "../zwave-protocol/application/TransportService.hpp"
 #include "../zwave-protocol/security/s0/NetworkKey.hpp"
@@ -127,7 +128,8 @@ auto onApplicationCommand(const MessageBus::ApplicationCommand& event) -> void
                          " — dropping");
             return;
         }
-        MessageBus::publish(MessageBus::NodeSecurityStatus{.nodeId = event.sourceNodeId, .secure = true});
+        MessageBus::publish(MessageBus::NodeSecurityStatus{
+            .nodeId = event.sourceNodeId, .scheme = static_cast<std::uint8_t>(NodeRegistry::SecurityScheme::S0)});
         MessageBus::publish(MessageBus::ApplicationCommand{.sourceNodeId = event.sourceNodeId, .ccData = *inner});
     }
 }

@@ -56,7 +56,7 @@ TEST(S0InboundDecrypt, AuthenticatesDecryptsAndRepublishes)
     EXPECT_EQ(*innerSeen, INNER);
     ASSERT_TRUE(statusSeen.has_value());
     EXPECT_EQ(statusSeen->nodeId, peer);
-    EXPECT_TRUE(statusSeen->secure);
+    EXPECT_EQ(statusSeen->scheme, 1);  // SecurityScheme::S0
 }
 
 TEST(S0InboundDecrypt, UnknownNonceIsDropped)

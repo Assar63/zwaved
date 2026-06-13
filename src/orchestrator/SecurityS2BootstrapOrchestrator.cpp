@@ -34,14 +34,20 @@
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
 #include "../zwave-protocol/security/s2/Crypto.hpp"
+#include "../zwave-protocol/security/s2/Encapsulation.hpp"
 #include "../zwave-protocol/security/s2/Kex.hpp"
 #include "../zwave-protocol/security/s2/KeyDerivation.hpp"
+#include "../zwave-protocol/security/s2/NonceSync.hpp"
 #include "../zwave-protocol/security/s2/PublicKey.hpp"
+#include "../zwave-protocol/security/s2/SpanManager.hpp"
 #include "../zwaved.h"  // IWYU pragma: keep — CONFIG_ORCHESTRATOR_PRIO
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -61,12 +67,17 @@ constexpr std::uint8_t CONTROLLER_SUPPORTED_KEYS =
 // leading public-key bytes the operator must restore via the PIN).
 constexpr std::uint8_t DSK_REQUIRED_KEYS = S2::Kex::KEY_S2_AUTHENTICATED | S2::Kex::KEY_S2_ACCESS_CONTROL;
 
+constexpr std::uint8_t MESSAGE_ENCAPSULATION = 0x03;  // S2 command byte for the encrypted wrapper
+constexpr std::size_t ENCAP_SEQ_OFFSET       = 2;     // [CC][cmd][seq] — seq the AAD binds
+
 enum class Phase : std::uint8_t
 {
     AwaitKexReport,
     AwaitPublicKey,
-    AwaitDsk,          // grant needs a DSK PIN — parked until the DSK layer lands
-    AwaitTempChannel,  // temp keys derived; the encrypted phase takes over (later layer)
+    AwaitDsk,            // grant needs a DSK PIN — parked until the operator confirms
+    AwaitTempChannel,    // temp keys derived; awaiting the node's NONCE_GET (step 13)
+    AwaitKexSetEcho,     // temp SPAN up; awaiting the encrypted KEX_SET echo (step 16)
+    AwaitNetworkKeyGet,  // echoes verified; awaiting per-class NETWORK_KEY_GET (next layer, steps 20+)
 };
 
 struct Session
@@ -76,6 +87,8 @@ struct Session
     std::uint8_t grantedKeys = 0;
     S2::Crypto::PublicKey nodePublicKey{};  // the joining node's key (DSK-obfuscated until the PIN is applied)
     S2::KeyDerivation::TempKeys tempKeys{};
+    S2::Kex::Set sentKexSet{};            // step 5, kept to verify the echo in step 16
+    S2::Kex::Report receivedKexReport{};  // step 3, echoed back in step 18
 };
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
@@ -87,6 +100,8 @@ struct State
     MessageBus::SubscriptionGuard dongleSub;
     MessageBus::SubscriptionGuard keysSub;
     std::map<std::uint8_t, Session> sessions;  // per-node handshake progress
+    S2::SpanManager spanManager;               // per-peer temp-channel SPAN runtime
+    std::array<std::uint8_t, 4> homeId{};
     std::uint8_t controllerNodeId = 0;
     bool keysReady                = false;
 
@@ -144,14 +159,15 @@ auto onKexReport(std::uint8_t nodeId, Session& session, std::span<const std::uin
         state().sessions.erase(nodeId);
         return;
     }
-    session.grantedKeys = granted;
-    session.phase       = Phase::AwaitPublicKey;
-    sendPlaintext(nodeId,
-                  S2::Kex::encodeSet(S2::Kex::Set{.echo           = false,
-                                                  .requestCsa     = false,
-                                                  .selectedScheme = S2::Kex::KEX_SCHEME_1,
-                                                  .selectedCurve  = S2::Kex::ECDH_CURVE25519,
-                                                  .grantedKeys    = granted}));
+    session.grantedKeys       = granted;
+    session.receivedKexReport = *report;  // echoed back over the temp channel in step 18
+    session.sentKexSet        = S2::Kex::Set{.echo           = false,
+                                             .requestCsa     = false,
+                                             .selectedScheme = S2::Kex::KEX_SCHEME_1,
+                                             .selectedCurve  = S2::Kex::ECDH_CURVE25519,
+                                             .grantedKeys    = granted};
+    session.phase             = Phase::AwaitPublicKey;
+    sendPlaintext(nodeId, S2::Kex::encodeSet(session.sentKexSet));
 }
 
 // Retract a pending DSK prompt (empty value = "nothing pending"), mirroring the
@@ -175,6 +191,16 @@ auto finishKeyAgreement(std::uint8_t nodeId, Session& session) -> void
     }
     session.tempKeys = S2::KeyDerivation::deriveTempKeys(*shared, session.keyPair.publicKey, session.nodePublicKey);
     session.phase    = Phase::AwaitTempChannel;
+
+    // Arm the temp-channel SPAN runtime: the bootstrap's encrypted frames ride
+    // the TempKeyCCM + TempPersonalizationString until the real class keys land.
+    state().spanManager.configurePeer(nodeId,
+                                      S2::SpanManager::PeerConfig{.classKey        = session.tempKeys.keyCcm,
+                                                                  .personalization = session.tempKeys.personalization,
+                                                                  .homeId          = state().homeId,
+                                                                  .ourNodeId       = state().controllerNodeId,
+                                                                  .peerNodeId      = nodeId});
+
     Logger::info("[s2-bootstrap] node " + std::to_string(nodeId) +
                  " key agreement complete — temporary channel keys derived");
     MessageBus::publish(MessageBus::S2KeyAgreementComplete{.nodeId = nodeId});
@@ -232,6 +258,69 @@ auto onConfirmDsk(const MessageBus::ConfirmDsk& event) -> void
     finishKeyAgreement(event.nodeId, session->second);
 }
 
+// Wrap `inner` in a temp-key MESSAGE_ENCAPSULATION via the SPAN runtime and send
+// it raw (a 0x9F frame ProtocolThread forwards verbatim). Drops + logs if no
+// SPAN is established — shouldn't happen mid-handshake.
+auto sendEncrypted(std::uint8_t nodeId, std::span<const std::uint8_t> inner) -> void
+{
+    auto frame = state().spanManager.encrypt(nodeId, inner);
+    if (!frame.has_value())
+    {
+        Logger::warn("[s2-bootstrap] node " + std::to_string(nodeId) + " no temp SPAN to encrypt — dropping frame");
+        return;
+    }
+    sendPlaintext(nodeId, std::move(*frame));
+}
+
+// Decrypt an inbound temp-channel MESSAGE_ENCAPSULATION (instantiating the SPAN
+// from its SPAN extension on first use), returning the inner CC command.
+auto decryptInbound(std::uint8_t nodeId,
+                    const Session& session,
+                    std::span<const std::uint8_t> frame) -> std::optional<std::vector<std::uint8_t>>
+{
+    const auto nonce = state().spanManager.receiveNonce(nodeId, frame);
+    if (!nonce.has_value())
+    {
+        return std::nullopt;
+    }
+    const S2::Encapsulation::Context context{.senderNodeId   = nodeId,
+                                             .receiverNodeId = state().controllerNodeId,
+                                             .homeId         = state().homeId,
+                                             .sequenceNumber = frame[ENCAP_SEQ_OFFSET]};
+    return S2::Encapsulation::decrypt(frame, context, session.tempKeys.keyCcm, *nonce);
+}
+
+// Steps 16-18: verify the encrypted KEX_SET echo is identical to the KEX_SET we
+// sent in step 5 (MITM check, A3), then echo the node's KEX_REPORT back over the
+// temp channel (step 18). On mismatch, abort with an encrypted KEX_FAIL.
+auto onKexSetEcho(std::uint8_t nodeId, Session& session, std::span<const std::uint8_t> frame) -> void
+{
+    const auto inner = decryptInbound(nodeId, session, frame);
+    if (!inner.has_value())
+    {
+        Logger::warn("[s2-bootstrap] node " + std::to_string(nodeId) + " temp-channel decrypt failed");
+        return;  // a real impl resyncs the SPAN (SOS); the blind path just waits
+    }
+    const auto echoed = S2::Kex::decodeSet(std::span<const std::uint8_t>(*inner));
+    if (!echoed.has_value() || echoed->selectedScheme != session.sentKexSet.selectedScheme ||
+        echoed->selectedCurve != session.sentKexSet.selectedCurve ||
+        echoed->grantedKeys != session.sentKexSet.grantedKeys)
+    {
+        Logger::warn("[s2-bootstrap] node " + std::to_string(nodeId) + " KEX_SET echo mismatch — KEX_FAIL");
+        const auto fail = S2::Kex::encodeFail(S2::Kex::FAIL_AUTH);
+        sendEncrypted(nodeId, std::span<const std::uint8_t>(fail));
+        state().sessions.erase(nodeId);
+        return;
+    }
+    S2::Kex::Report reportEcho = session.receivedKexReport;
+    reportEcho.echo            = true;
+    const auto reportFrame     = S2::Kex::encodeReport(reportEcho);
+    sendEncrypted(nodeId, std::span<const std::uint8_t>(reportFrame));
+    session.phase = Phase::AwaitNetworkKeyGet;
+    Logger::info("[s2-bootstrap] node " + std::to_string(nodeId) +
+                 " KEX echoes verified — temporary secure channel authenticated");
+}
+
 auto onApplicationCommand(const MessageBus::ApplicationCommand& event) -> void
 {
     const auto session = state().sessions.find(event.sourceNodeId);
@@ -261,8 +350,24 @@ auto onApplicationCommand(const MessageBus::ApplicationCommand& event) -> void
         }
         break;
     case Phase::AwaitDsk:
+        break;  // waiting on the operator's ConfirmDSK
     case Phase::AwaitTempChannel:
-        break;  // handled by later #187 layers
+        if (*command == S2::NonceSync::NONCE_GET)
+        {
+            // Steps 13-14: the node asks for our nonce; reply in plaintext so it
+            // can establish its send SPAN over the temp channel.
+            sendPlaintext(event.sourceNodeId, state().spanManager.respondToNonceGet(event.sourceNodeId));
+            session->second.phase = Phase::AwaitKexSetEcho;
+        }
+        break;
+    case Phase::AwaitKexSetEcho:
+        if (*command == MESSAGE_ENCAPSULATION)
+        {
+            onKexSetEcho(event.sourceNodeId, session->second, ccData);
+        }
+        break;
+    case Phase::AwaitNetworkKeyGet:
+        break;  // per-class NETWORK_KEY_GET install — the next #187 layer
     }
 }
 
@@ -274,7 +379,12 @@ __attribute__((constructor(CONFIG_ORCHESTRATOR_PRIO))) auto startSecurityS2Boots
         MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::ApplicationCommand>(onApplicationCommand));
     state().confirmDskSub = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::ConfirmDsk>(onConfirmDsk));
     state().dongleSub     = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::DongleInfo>(
-        [](const MessageBus::DongleInfo& info) -> void { state().controllerNodeId = info.controllerNodeId; }));
+        [](const MessageBus::DongleInfo& info) -> void
+        {
+            state().controllerNodeId = info.controllerNodeId;
+            std::copy_n(
+                info.homeId.begin(), std::min(info.homeId.size(), state().homeId.size()), state().homeId.begin());
+        }));
     state().keysSub       = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::S2NetworkKeysReady>(
         [](const MessageBus::S2NetworkKeysReady& event) -> void { state().keysReady = event.ready; }));
 }

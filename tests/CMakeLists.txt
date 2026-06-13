@@ -385,6 +385,19 @@ target_link_libraries(s2_network_keys_test PRIVATE GTest::gtest GTest::gtest_mai
 zwaved_test_target(s2_network_keys_test)
 gtest_discover_tests(s2_network_keys_test)
 
+# ---- S2 KEX handshake -----------------------------------------------
+# Security S2 (CC 0x9F) phase 5: KEX_GET/REPORT/SET/FAIL codec + grant policy.
+add_executable(s2_kex_test
+    s2_kex_test.cpp
+    "${SRC_DIR}/security/s2/Kex.cpp"
+)
+target_include_directories(s2_kex_test PRIVATE
+    "${SRC_DIR}/security/s2"
+)
+target_link_libraries(s2_kex_test PRIVATE GTest::gtest GTest::gtest_main)
+zwaved_test_target(s2_kex_test)
+gtest_discover_tests(s2_kex_test)
+
 # ---- S2 encapsulation codec -----------------------------------------
 # Security S2 (CC 0x9F) phase 4: MESSAGE_ENCAPSULATION encrypt/decrypt.
 add_executable(s2_encapsulation_test

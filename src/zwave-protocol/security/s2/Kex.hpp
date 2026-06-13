@@ -33,13 +33,14 @@ constexpr std::uint8_t KEY_S2_ACCESS_CONTROL  = 0x04;  // bit2
 constexpr std::uint8_t KEY_S0                 = 0x80;  // bit7
 
 // KEX Fail types (Table 4.20).
-constexpr std::uint8_t FAIL_KEY     = 0x01;  // no requested/granted key match
-constexpr std::uint8_t FAIL_SCHEME  = 0x02;  // no supported scheme
-constexpr std::uint8_t FAIL_CURVES  = 0x03;  // no supported curve
-constexpr std::uint8_t FAIL_DECRYPT = 0x05;  // decryption failure
-constexpr std::uint8_t FAIL_CANCEL  = 0x06;  // user cancelled
-constexpr std::uint8_t FAIL_AUTH    = 0x07;  // echo mismatch / wrong security level
-constexpr std::uint8_t FAIL_KEY_GET = 0x08;  // ungranted key requested
+constexpr std::uint8_t FAIL_KEY        = 0x01;  // no requested/granted key match
+constexpr std::uint8_t FAIL_SCHEME     = 0x02;  // no supported scheme
+constexpr std::uint8_t FAIL_CURVES     = 0x03;  // no supported curve
+constexpr std::uint8_t FAIL_DECRYPT    = 0x05;  // decryption failure
+constexpr std::uint8_t FAIL_CANCEL     = 0x06;  // user cancelled
+constexpr std::uint8_t FAIL_AUTH       = 0x07;  // echo mismatch / wrong security level
+constexpr std::uint8_t FAIL_KEY_GET    = 0x08;  // ungranted key requested
+constexpr std::uint8_t FAIL_KEY_VERIFY = 0x09;  // including node couldn't decrypt NETWORK_KEY_VERIFY
 
 /// KEX_REPORT contents (the joining node's advertisement).
 struct Report

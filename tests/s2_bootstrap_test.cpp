@@ -7,7 +7,10 @@
 #include "Encapsulation.hpp"
 #include "Kex.hpp"  // S2::Kex::encode*/decode*
 #include "KeyDerivation.hpp"
+#include "KeyInstall.hpp"
 #include "MessageBus.hpp"
+#include "NetworkKeys.hpp"
+#include "NodeRegistry.hpp"
 #include "NonceSync.hpp"
 #include "PublicKey.hpp"  // S2::PublicKey::encode
 #include "Span.hpp"
@@ -15,6 +18,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <vector>
@@ -43,21 +47,25 @@ struct Harness
     std::vector<MessageBus::SendDataCommand> sent;
     std::optional<MessageBus::S2KeyAgreementComplete> agreed;
     std::vector<MessageBus::DSKPendingConfirmation> dskPrompts;
+    std::optional<MessageBus::NodeSecurityStatus> security;
     MessageBus::SubscriptionGuard sentGuard;
     MessageBus::SubscriptionGuard agreedGuard;
     MessageBus::SubscriptionGuard dskGuard;
+    MessageBus::SubscriptionGuard securityGuard;
 
     Harness()
     {
         MessageBus::publish(MessageBus::DongleInfo{.homeId = std::vector<std::uint8_t>(HOME.begin(), HOME.end()),
                                                    .controllerNodeId = CONTROLLER});
         MessageBus::publish(MessageBus::S2NetworkKeysReady{.ready = true});
-        sentGuard   = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::SendDataCommand>(
+        sentGuard     = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::SendDataCommand>(
             [this](const MessageBus::SendDataCommand& cmd) -> void { sent.push_back(cmd); }));
-        agreedGuard = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::S2KeyAgreementComplete>(
+        agreedGuard   = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::S2KeyAgreementComplete>(
             [this](const MessageBus::S2KeyAgreementComplete& event) -> void { agreed = event; }));
-        dskGuard    = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::DSKPendingConfirmation>(
+        dskGuard      = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::DSKPendingConfirmation>(
             [this](const MessageBus::DSKPendingConfirmation& event) -> void { dskPrompts.push_back(event); }));
+        securityGuard = MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::NodeSecurityStatus>(
+            [this](const MessageBus::NodeSecurityStatus& event) -> void { security = event; }));
     }
 
     // Drive a fresh session up to the DSK-pending park: inclusion, KEX_REPORT
@@ -100,6 +108,42 @@ auto receiverContext(std::uint8_t sender,
 {
     return S2::Encapsulation::Context{
         .senderNodeId = sender, .receiverNodeId = receiver, .homeId = HOME, .sequenceNumber = frame[2]};
+}
+
+// Drive controller + node-side SpanManager all the way through the encrypted KEX
+// echo (steps 1-18) for an Unauthenticated grant, leaving the node ready to
+// request its class key. Returns the node side (temp SPAN advanced in lockstep).
+auto establishTempChannel(Harness& harness, const S2::Crypto::KeyPair& nodeKeys) -> NodeSide
+{
+    MessageBus::publish(MessageBus::NodeIncluded{.nodeId = NODE, .commandClasses = {CC_S2}});
+    MessageBus::publish(
+        MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = kexReport(S2::Kex::KEY_S2_UNAUTHENTICATED)});
+    MessageBus::publish(MessageBus::ApplicationCommand{
+        .sourceNodeId = NODE,
+        .ccData       = S2::PublicKey::encode(false, nodeKeys.publicKey, S2::PublicKey::OBFUSCATE_NONE)});
+    const auto controllerPub = S2::PublicKey::decode(std::span<const std::uint8_t>(harness.sent.at(2).payload));
+    EXPECT_TRUE(controllerPub.has_value());
+    auto node = nodeSideTempChannel(nodeKeys, controllerPub->key);
+
+    // Steps 13-14: node → NONCE_GET, controller → NONCE_REPORT.
+    MessageBus::publish(
+        MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = node.manager.nonceGet(CONTROLLER)});
+    const auto report = S2::NonceSync::decodeNonceReport(std::span<const std::uint8_t>(harness.sent.at(3).payload));
+    EXPECT_TRUE(report.has_value());
+    node.manager.acceptNonceReport(CONTROLLER, *report);
+
+    // Step 16: node → encrypted KEX_SET echo; step 18: controller → KEX_REPORT echo.
+    const auto echoSet  = S2::Kex::encodeSet(S2::Kex::Set{.echo           = true,
+                                                          .requestCsa     = false,
+                                                          .selectedScheme = S2::Kex::KEX_SCHEME_1,
+                                                          .selectedCurve  = S2::Kex::ECDH_CURVE25519,
+                                                          .grantedKeys    = S2::Kex::KEY_S2_UNAUTHENTICATED});
+    const auto setFrame = node.manager.encrypt(CONTROLLER, std::span<const std::uint8_t>(echoSet));
+    EXPECT_TRUE(setFrame.has_value());
+    MessageBus::publish(MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = *setFrame});
+    // Advance the node's temp span by "receiving" the controller's KEX_REPORT echo.
+    static_cast<void>(node.manager.receiveNonce(CONTROLLER, std::span<const std::uint8_t>(harness.sent.at(4).payload)));
+    return node;
 }
 }  // namespace
 
@@ -257,4 +301,84 @@ TEST(S2Bootstrap, EncryptedChannelVerifiesKexEcho)
     ASSERT_TRUE(reportEcho.has_value());
     EXPECT_TRUE(reportEcho->echo);
     EXPECT_EQ(reportEcho->requestedKeys, S2::Kex::KEY_S2_UNAUTHENTICATED);
+}
+
+// Drive the per-class key install (steps 20-30) for a single Unauthenticated key
+// and assert the node ends up marked secure.
+TEST(S2Bootstrap, KeyInstallMarksNodeSecure)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "zwaved_s2_bootstrap_test";
+    std::filesystem::create_directories(dir);
+    MessageBus::publish(MessageBus::StorageConfig{.stateDir = dir.string()});
+    S2::NetworkKeys::KeySet keys{};
+    keys.at(static_cast<std::size_t>(S2::NetworkKeys::Class::Unauthenticated)).fill(0xAB);
+    S2::NetworkKeys::setCurrent(keys);
+
+    Harness harness;
+    const auto nodeKeys   = S2::Crypto::generateKeyPair();
+    auto node             = establishTempChannel(harness, nodeKeys);
+    const auto tempKeyCcm = node.tempKeyCcm;
+
+    // Step 20: node requests the Unauthenticated class key (encrypted under temp).
+    const auto keyGet   = S2::KeyInstall::encodeKeyGet(S2::Kex::KEY_S2_UNAUTHENTICATED);
+    const auto getFrame = node.manager.encrypt(CONTROLLER, std::span<const std::uint8_t>(keyGet));
+    ASSERT_TRUE(getFrame.has_value());
+    auto before = harness.sent.size();
+    MessageBus::publish(MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = *getFrame});
+
+    // Step 22: controller → NETWORK_KEY_REPORT (encrypted under temp); the node
+    // recovers the class key it asked for.
+    ASSERT_EQ(harness.sent.size(), before + 1);
+    const auto reportFrame = harness.sent.back().payload;
+    const auto reportNonce = node.manager.receiveNonce(CONTROLLER, std::span<const std::uint8_t>(reportFrame));
+    ASSERT_TRUE(reportNonce.has_value());
+    const auto reportInner = S2::Encapsulation::decrypt(std::span<const std::uint8_t>(reportFrame),
+                                                        receiverContext(CONTROLLER, NODE, reportFrame),
+                                                        tempKeyCcm,
+                                                        *reportNonce);
+    ASSERT_TRUE(reportInner.has_value());
+    const auto keyReport = S2::KeyInstall::decodeKeyReport(std::span<const std::uint8_t>(*reportInner));
+    ASSERT_TRUE(keyReport.has_value());
+    EXPECT_EQ(keyReport->key, keys.at(static_cast<std::size_t>(S2::NetworkKeys::Class::Unauthenticated)));
+
+    // Steps 25-26: node sets up a fresh class SPAN via another nonce exchange.
+    const auto classKeys = S2::KeyDerivation::networkKeyExpand(keyReport->key);
+    S2::SpanManager nodeClass;
+    nodeClass.configurePeer(CONTROLLER,
+                            S2::SpanManager::PeerConfig{.classKey        = classKeys.keyCcm,
+                                                        .personalization = classKeys.personalization,
+                                                        .homeId          = HOME,
+                                                        .ourNodeId       = NODE,
+                                                        .peerNodeId      = CONTROLLER});
+    before = harness.sent.size();
+    MessageBus::publish(MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = nodeClass.nonceGet(CONTROLLER)});
+    ASSERT_EQ(harness.sent.size(), before + 1);
+    const auto classReport =
+        S2::NonceSync::decodeNonceReport(std::span<const std::uint8_t>(harness.sent.back().payload));
+    ASSERT_TRUE(classReport.has_value());
+    nodeClass.acceptNonceReport(CONTROLLER, *classReport);
+
+    // Step 27: node → NETWORK_KEY_VERIFY (encrypted under the new class key).
+    const auto verify      = S2::KeyInstall::encodeKeyVerify();
+    const auto verifyFrame = nodeClass.encrypt(CONTROLLER, std::span<const std::uint8_t>(verify));
+    ASSERT_TRUE(verifyFrame.has_value());
+    before = harness.sent.size();
+    MessageBus::publish(MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = *verifyFrame});
+
+    // Step 29: controller → TRANSFER_END(Key Verified) under temp. Advance the
+    // node's temp span by "receiving" it.
+    ASSERT_EQ(harness.sent.size(), before + 1);
+    static_cast<void>(
+        node.manager.receiveNonce(CONTROLLER, std::span<const std::uint8_t>(harness.sent.back().payload)));
+
+    // Step 30: node → TRANSFER_END(Key Request Complete) → controller marks secure.
+    EXPECT_FALSE(harness.security.has_value());
+    const auto end      = S2::KeyInstall::encodeTransferEnd(false, true);
+    const auto endFrame = node.manager.encrypt(CONTROLLER, std::span<const std::uint8_t>(end));
+    ASSERT_TRUE(endFrame.has_value());
+    MessageBus::publish(MessageBus::ApplicationCommand{.sourceNodeId = NODE, .ccData = *endFrame});
+
+    ASSERT_TRUE(harness.security.has_value());
+    EXPECT_EQ(harness.security->nodeId, NODE);
+    EXPECT_EQ(harness.security->scheme, static_cast<std::uint8_t>(NodeRegistry::SecurityScheme::S2Unauthenticated));
 }

@@ -58,13 +58,19 @@ if "$fix" && "$called_from_git"; then
     fix=false
 fi
 
-if ! command -v clang-format >/dev/null 2>&1; then
-    echo "error: clang-format is not installed or not in PATH"
+# Pin to clang 18 — the version CI, the gnu-tidy preset, and the `check` CMake
+# target all use (clang-20 can't analyse GCC 15's libstdc++ <format>). Prefer
+# the versioned binary, fall back to the unversioned name, override via env.
+CLANG_FORMAT="${CLANG_FORMAT:-$(command -v clang-format-18 || command -v clang-format || true)}"
+CLANG_TIDY="${CLANG_TIDY:-$(command -v clang-tidy-18 || command -v clang-tidy || true)}"
+
+if [[ -z "${CLANG_FORMAT}" ]]; then
+    echo "error: clang-format (clang-format-18) is not installed or not in PATH"
     exit 1
 fi
 
-if ! command -v clang-tidy >/dev/null 2>&1; then
-    echo "error: clang-tidy is not installed or not in PATH"
+if [[ -z "${CLANG_TIDY}" ]]; then
+    echo "error: clang-tidy (clang-tidy-18) is not installed or not in PATH"
     exit 1
 fi
 
@@ -85,7 +91,7 @@ if "$fix"; then
     echo "Applying clang-format -i to staged files..."
     while IFS= read -r file; do
         [[ -f "${file}" ]] || continue
-        clang-format -i "${file}"
+        "${CLANG_FORMAT}" -i "${file}"
         git add -- "${file}"
     done <<<"${changed_files}"
 fi
@@ -98,7 +104,7 @@ echo "Running clang-format check..."
 while IFS= read -r file; do
     [[ -f "${file}" ]] || continue
 
-    if ! clang-format --dry-run --Werror "${file}" >/dev/null; then
+    if ! "${CLANG_FORMAT}" --dry-run --Werror "${file}" >/dev/null; then
         echo "clang-format failed: ${file}"
         format_failed=1
     fi
@@ -147,7 +153,7 @@ while IFS= read -r file; do
 
     case "${file}" in
         *.cpp | *.cxx | *.cc | *.c)
-            if ! clang-tidy "${file}" --quiet -p "${tidy_build_dir}" >/dev/null; then
+            if ! "${CLANG_TIDY}" "${file}" --quiet -p "${tidy_build_dir}" >/dev/null; then
                 echo "clang-tidy failed: ${file}"
                 tidy_failed=1
             fi

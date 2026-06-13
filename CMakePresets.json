@@ -38,7 +38,7 @@
       "inherits": "llvm",
       "binaryDir": "cmake-build-llvm-tidy",
       "cacheVariables": {
-        "CMAKE_CXX_CLANG_TIDY": "clang-tidy"
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy-18"
       }
     },
     {
@@ -48,7 +48,7 @@
       "inherits": "gnu",
       "binaryDir": "cmake-build-gnu-tidy",
       "cacheVariables": {
-        "CMAKE_CXX_CLANG_TIDY": "clang-tidy"
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy-18"
       }
     }
   ]

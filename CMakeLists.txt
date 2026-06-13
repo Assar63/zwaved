@@ -168,16 +168,24 @@ if(ZWAVED_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+# clang-tidy is pinned to v18: clang-20's analysis trips on GCC 15's libstdc++
+# <format> (see the llvm-tidy note in CLAUDE.md), and CI / the gnu-tidy preset
+# run 18. Prefer the versioned binary, fall back to the unversioned name.
+find_program(CLANG_TIDY_EXE NAMES clang-tidy-18 clang-tidy)
+if(NOT CLANG_TIDY_EXE)
+    set(CLANG_TIDY_EXE clang-tidy-18)  # let the target fail loudly if it's missing
+endif()
+
 # Target: fix-tidy - Fix issues with clang-tidy
 add_custom_target(fix-tidy
-    COMMAND clang-tidy --fix -p ${CMAKE_BINARY_DIR}
+    COMMAND ${CLANG_TIDY_EXE} --fix -p ${CMAKE_BINARY_DIR}
     COMMENT "Fixing issues with clang-tidy..."
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 # Target: check - Check code without fixing
 add_custom_target(check
-    COMMAND clang-tidy -p ${CMAKE_BINARY_DIR}
+    COMMAND ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
     COMMENT "Checking code analysis (no fixes)..."
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )

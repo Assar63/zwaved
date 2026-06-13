@@ -29,6 +29,14 @@ clang's "not a constant expression" during analysis. Run clang-tidy via
 (the pre-commit hook) only accepts a GCC build dir for this reason, and
 `scripts/bootstrap` sets one up even when `llvm` is the default build.
 
+**clang-tidy / clang-format are pinned to v18** — the `gnu-tidy`/`llvm-tidy`
+presets (`CMAKE_CXX_CLANG_TIDY`), the `check`/`fix-tidy` CMake targets
+(`find_program(... clang-tidy-18 clang-tidy)`), and `scripts/check-format` all
+prefer the `clang-tidy-18`/`clang-format-18` binary (falling back to the
+unversioned name). Override per-run with the `CLANG_TIDY` / `CLANG_FORMAT` env
+vars. The pin matters because clang-20's analysis can't parse GCC 15's
+`<format>` (above) and CI runs 18.
+
 Requires: GCC 15 (`g++-15`), LLVM/Clang 20 (`clang++-20`), CMake 3.20+, `libudev-dev`, `libsdbus-c++-dev` (pulls in `libsystemd-dev`), `libsqlite3-dev`, `libssl-dev` (libcrypto, for Security S0 AES), eventpp (header-only via `find_package`). C++26 standard.
 
 `scripts/bootstrap` does one-shot setup (prereq check / apt, `install-hooks`, configure a preset, build once, point `.clangd` at the build dir). Dual-mode: run standalone (downloaded) it clones into a target dir then prepares; run inside a checkout (`./scripts/bootstrap`) it just prepares. Idempotent; `--help` for flags. The manual steps below are the fallback.

@@ -7,6 +7,7 @@ target_sources(zwaved PRIVATE
     Crypto.cpp
     NetworkKeys.cpp
     Span.cpp
+    KeyDerivation.cpp
     Encapsulation.cpp
     Kex.cpp
     PublicKey.cpp

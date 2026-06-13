@@ -699,6 +699,34 @@ target_link_libraries(s2_bootstrap_test PRIVATE
 zwaved_test_target(s2_bootstrap_test)
 gtest_discover_tests(s2_bootstrap_test)
 
+# Security S2 (CC 0x9F) inbound decap seam (#199): decrypt secure commands from
+# already-bootstrapped nodes and republish the plaintext CC.
+add_executable(s2_inbound_test
+    s2_inbound_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/orchestrator/SecurityS2InboundOrchestrator.cpp"
+    "${SRC_DIR}/security/s2/Transport.cpp"
+    "${SRC_DIR}/security/s2/SpanManager.cpp"
+    "${SRC_DIR}/security/s2/NonceSync.cpp"
+    "${SRC_DIR}/security/s2/Span.cpp"
+    "${SRC_DIR}/security/s2/Encapsulation.cpp"
+    "${SRC_DIR}/security/s2/KeyDerivation.cpp"
+    "${SRC_DIR}/security/s2/NetworkKeys.cpp"
+    "${SRC_DIR}/security/s2/Crypto.cpp"
+    "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(s2_inbound_test PRIVATE
+    "${SRC_DIR}/security/s2"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${CMAKE_SOURCE_DIR}/src/node-registry"
+    "${ZWAVED_GENERATED_DIR}"
+    "${GENERATED_APPLICATION_DIR}"
+)
+target_link_libraries(s2_inbound_test PRIVATE
+    GTest::gtest GTest::gtest_main PkgConfig::OPENSSL PkgConfig::SQLITE3 zwaved_bus)
+zwaved_test_target(s2_inbound_test)
+gtest_discover_tests(s2_inbound_test)
+
 # ---- S0 nonce responder ---------------------------------------------
 # Security S0 (CC 0x98) phase 3: bus-driven NONCE_GET -> NONCE_REPORT
 # reactor. Links the responder (armed by its constructor attribute), the

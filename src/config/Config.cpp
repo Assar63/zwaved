@@ -236,6 +236,10 @@ auto loadSecuritySection(const ParsedFile& file, MessageBus::SecurityConfig& sec
     {
         security.s0KeyFile = *value;
     }
+    if (const auto value = firstValue(file, "security", "s2_key_dir"); value.has_value())
+    {
+        security.s2KeyDir = *value;
+    }
 }
 
 auto loadDonglesSection(const ParsedFile& file, MessageBus::DonglesConfig& dongles) -> void

@@ -5,6 +5,11 @@
 
 target_sources(zwaved PRIVATE
     Crypto.cpp
+    NetworkKeys.cpp
+    # Constructor-armed (CONFIG_SECURITY_PRIO) — must be a direct zwaved
+    # source, never a passively-linked archive member, or its .init_array
+    # entry is dropped and the keys are never loaded.
+    NetworkKeysService.cpp
 )
 
 # AES-128-CCM + CMAC + Curve25519 ECDH, all via OpenSSL libcrypto (no TLS,

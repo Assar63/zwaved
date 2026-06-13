@@ -122,7 +122,13 @@ Each component owns its thread and `running` flag inside an anonymous namespace,
 
 - **Outbound encrypt-on-send** (#175) — `ProtocolThread::pushSendData` diverts any non-`0x98` payload bound for a secure node (`NodeRegistry::isSecure`) into a `SecureSendRequest`; `src/orchestrator/SecurityOutboundOrchestrator.cpp` runs the `NONCE_GET → NONCE_REPORT → encrypt` dance and emits the wrapper back as a `SendDataCommand` (a `0x98` frame, so `pushSendData` sends it raw — no loop). Sends are serialised one-nonce-per-message (OFB keystream must not repeat).
 
-Remaining: **on-bench acceptance** (#168) — the whole S0 wire path is still pending end-to-end verification on a real device. The directory is a sibling slot for S2 (CC `0x9F`, #27).
+Remaining: **on-bench acceptance** (#168) — the whole S0 wire path is still pending end-to-end verification on a real device.
+
+`src/zwave-protocol/security/s2/` is the in-progress Security S2 (CC `0x9F`) stack (epic #27) — the daemon's largest, building beside `s0/`. Like S0 it's **OpenSSL `libcrypto` only** (no libsodium: it lacks AES-128/CCM/CMAC, and libcrypto does X25519). Built incrementally:
+- `Crypto.{hpp,cpp}` (#179) — `namespace S2::Crypto`: AES-128-CCM (`ccmEncrypt`/`ccmDecrypt`), AES-128-CMAC (`cmac`, via `EVP_MAC`), and Curve25519 ECDH (`generateKeyPair`/`ecdh`, via `EVP_PKEY_X25519`), behind a tight interface; KATs pinned to NIST SP800-38C/38B + RFC 7748.
+- `NetworkKeys.{hpp,cpp}` (#180) — the four per-class 16-byte keys (Unauthenticated / Authenticated / Access Control / S0-compat), load-or-generate at `[security] s2_key_dir` (default `<state_dir>/security/s2/`, each file `0600`). Constructor-armed `NetworkKeysService.cpp` (priority `CONFIG_SECURITY_PRIO`) resolves the dir from `SecurityConfig` + `StorageConfig`, loads/generates at startup, sets the in-process `current()` set, and publishes retained `S2NetworkKeysReady` (failure → `DaemonError CODE_S2_KEYS_FAILED`, degrades to "S2 unavailable").
+
+Remaining S2 phases — SPAN nonce protocol, encapsulation codec, KEX handshake, public-key/DSK exchange, key install, ProtocolThread integration, inclusion wiring, MPAN — are children of #27 (#181–#189).
 
 `src/external-api/` exposes the host API to clients. The transport-agnostic interface is `ExternalApi::IBackend` declared in `IExternalApi.hpp`, plus a `createBackend()` factory; `DBusBackend` is the only implementation today (system bus, name `com.tiunda.ZWaved`, object `/com/tiunda/ZWaved`, interface `com.tiunda.ZWaved1`). The system-bus policy XML is at `dbus/com.tiunda.ZWaved.conf` and must be installed under `/etc/dbus-1/system.d/` for non-root callers. Operator usage (classic vs SmartStart inclusion, signal payload layout, status table, troubleshooting) is in `MANUAL.md`.
 

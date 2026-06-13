@@ -165,6 +165,18 @@ events:
       - { name: ready,     type: bool, default: false }
       - { name: generated, type: bool, default: false }
 
+  - name: S2NetworkKeysReady
+    category: state
+    direction: { publishers: [zwave-protocol], subscribers: [orchestrator] }
+    doc: |
+      Security S2 (CC 0x9F) multi-class key lifecycle (#180). Published once the
+      four per-class keys have been loaded or generated, so the S2 inclusion /
+      transport phases can defer until keys exist. `generated` is true if any
+      class key was freshly created on this run. Retained.
+    fields:
+      - { name: ready,     type: bool, default: false }
+      - { name: generated, type: bool, default: false }
+
   - name: NodeSecurityStatus
     category: state
     direction: { publishers: [cc-translator, orchestrator], subscribers: [external-api] }
@@ -213,6 +225,7 @@ events:
       - { name: CODE_DONGLE_OPEN_FAILED,          value: 0x10, doc: "serial port open() / configure failed" }
       - { name: CODE_DONGLE_INTROSPECTION_FAILED, value: 0x11, doc: "GET_VERSION or MEMORY_GET_ID didn't answer" }
       - { name: CODE_S0_KEY_FAILED,               value: 0x12, doc: "S0 network key couldn't be loaded or generated" }
+      - { name: CODE_S2_KEYS_FAILED,              value: 0x13, doc: "S2 network keys couldn't be loaded or generated" }
       - { name: CODE_UDEV_INIT_FAILED,            value: 0x20, doc: "libudev context or monitor creation failed" }
       - { name: CODE_DBUS_BIND_FAILED,            value: 0x30, doc: "couldn't acquire the system-bus name" }
       - { name: CODE_EXTERNAL_API_NO_BACKEND,     value: 0x31, doc: "no external-API backend compiled in" }
@@ -288,10 +301,11 @@ events:
     direction: { publishers: [config], subscribers: [zwave-protocol] }
     doc: |
       Security key-file locations. An empty s0KeyFile means fall back to
-      <stateDir>/security/s0.key (StorageConfig). S2 (#27) will extend this
-      event with its multiple key files.
+      <stateDir>/security/s0.key; an empty s2KeyDir means fall back to
+      <stateDir>/security/s2/ (the four per-class S2 keys live there).
     fields:
       - { name: s0KeyFile, type: string }
+      - { name: s2KeyDir,  type: string }
 
   # ---- 2c. Transient protocol events ------------------------------
 

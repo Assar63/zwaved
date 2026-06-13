@@ -24,10 +24,12 @@
 namespace S2::Crypto
 {
 constexpr std::size_t KEY_SIZE            = 16;  // AES-128
+constexpr std::size_t BLOCK_SIZE          = 16;
 constexpr std::size_t CMAC_SIZE           = 16;
 constexpr std::size_t CURVE25519_KEY_SIZE = 32;
 
 using Key          = std::array<std::uint8_t, KEY_SIZE>;
+using Block        = std::array<std::uint8_t, BLOCK_SIZE>;
 using Mac          = std::array<std::uint8_t, CMAC_SIZE>;
 using PublicKey    = std::array<std::uint8_t, CURVE25519_KEY_SIZE>;
 using PrivateKey   = std::array<std::uint8_t, CURVE25519_KEY_SIZE>;
@@ -58,6 +60,11 @@ struct KeyPair
 
 /// AES-128-CMAC over `data`.
 [[nodiscard]] auto cmac(const Key& key, std::span<const std::uint8_t> data) -> Mac;
+
+/// AES-128-ECB encryption of a single block — the building block of the S2
+/// CTR_DRBG (SPAN nonce generation).
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): key vs data block are distinct roles
+[[nodiscard]] auto aesEcbEncrypt(const Key& key, const Block& input) -> Block;
 
 /// Generate a Curve25519 key pair.
 [[nodiscard]] auto generateKeyPair() -> KeyPair;

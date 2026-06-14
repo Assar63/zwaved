@@ -222,9 +222,20 @@ auto clearRequests() -> void
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): every call site passes (cmd.nodeId, cmd.callbackId, …)
 auto pushSendData(std::uint8_t nodeId, std::uint8_t callbackId, std::vector<std::uint8_t> data) -> void
 {
-    constexpr std::uint8_t ccSecurity = 0x98;
-    if (!data.empty() && data[0] != ccSecurity && NodeRegistry::isSecure(nodeId))
+    constexpr std::uint8_t ccSecurity  = 0x98;  // S0 — sent raw (its own nonce/encap layer)
+    constexpr std::uint8_t ccSecurity2 = 0x9F;  // S2 — sent raw (NONCE/SPAN/encap layer)
+    if (!data.empty() && data[0] != ccSecurity && data[0] != ccSecurity2 && NodeRegistry::isSecure(nodeId))
     {
+        // Route via the matching security class's outbound encrypt orchestrator.
+        const auto scheme = NodeRegistry::securityScheme(nodeId);
+        if (scheme == NodeRegistry::SecurityScheme::S2Unauthenticated ||
+            scheme == NodeRegistry::SecurityScheme::S2Authenticated ||
+            scheme == NodeRegistry::SecurityScheme::S2AccessControl)
+        {
+            MessageBus::publish(MessageBus::SecureS2SendRequest{
+                .nodeId = nodeId, .payload = std::move(data), .callbackId = callbackId});
+            return;
+        }
         MessageBus::publish(
             MessageBus::SecureSendRequest{.nodeId = nodeId, .payload = std::move(data), .callbackId = callbackId});
         return;

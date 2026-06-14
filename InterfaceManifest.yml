@@ -1558,6 +1558,23 @@ events:
       - { name: payload,    type: bytes }
       - { name: callbackId, type: u8,    default: 0 }
 
+  - name: SecureS2SendRequest
+    category: command
+    direction: { publishers: [zwave-protocol], subscribers: [orchestrator] }
+    doc: |
+      A non-Security application payload destined for an S2-secure node (#199) —
+      the S2 analog of SecureSendRequest. ProtocolThread's pushSendData diverts
+      here (instead of sending raw) when NodeRegistry::isSecure(nodeId) and the
+      node's scheme is an S2 class and the payload isn't itself a CC 0x9F frame.
+      SecurityS2OutboundOrchestrator establishes the transport SPAN if needed
+      (NONCE_GET -> NONCE_REPORT) and emits the MESSAGE_ENCAPSULATION wrapper as
+      a SendDataCommand (a 0x9F frame, sent raw). `callbackId` is preserved so
+      the eventual SendDataCallback still correlates.
+    fields:
+      - { name: nodeId,     type: u8,    default: 0 }
+      - { name: payload,    type: bytes }
+      - { name: callbackId, type: u8,    default: 0 }
+
   - name: SendDataCommand
     category: command
     direction: { publishers: [orchestrator, zwave-protocol], subscribers: [zwave-protocol] }

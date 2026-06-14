@@ -110,6 +110,26 @@ auto S2::SpanManager::encrypt(std::uint8_t peer,
         inner, context, state.config.classKey, nonce, std::span<const std::uint8_t>(spanExtension));
 }
 
+auto S2::SpanManager::exportSpan(std::uint8_t peer) const -> std::optional<SPAN::InnerState>
+{
+    const auto found = peers_.find(peer);
+    if (found == peers_.end())
+    {
+        return std::nullopt;
+    }
+    const auto& span = found->second.span;
+    if (!span.has_value())
+    {
+        return std::nullopt;
+    }
+    return span->serialize();
+}
+
+auto S2::SpanManager::importSpan(std::uint8_t peer, const SPAN::InnerState& state) -> void
+{
+    peerState(peer).span = SPAN::Span::deserialize(state);
+}
+
 auto S2::SpanManager::receiveNonce(std::uint8_t peer,
                                    std::span<const std::uint8_t> frame) -> std::optional<Encapsulation::CcmNonce>
 {

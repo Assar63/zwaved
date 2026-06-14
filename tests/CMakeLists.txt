@@ -484,6 +484,26 @@ target_link_libraries(s2_span_manager_test PRIVATE GTest::gtest GTest::gtest_mai
 zwaved_test_target(s2_span_manager_test)
 gtest_discover_tests(s2_span_manager_test)
 
+# SpanStore (#199): durable per-peer SPAN state (SQLite).
+add_executable(s2_span_store_test
+    s2_span_store_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/span-store/SpanStore.cpp"
+    "${SRC_DIR}/security/s2/Span.cpp"
+    "${SRC_DIR}/security/s2/Crypto.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(s2_span_store_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/span-store"
+    "${SRC_DIR}/security/s2"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(s2_span_store_test zwaved_codegen)
+target_link_libraries(s2_span_store_test PRIVATE
+    GTest::gtest GTest::gtest_main PkgConfig::OPENSSL PkgConfig::SQLITE3 zwaved_bus)
+zwaved_test_target(s2_span_store_test)
+gtest_discover_tests(s2_span_store_test)
+
 # ---- S2 SPAN --------------------------------------------------------
 # Security S2 (CC 0x9F) phase 3: CTR_DRBG SPAN nonce protocol.
 add_executable(s2_span_test

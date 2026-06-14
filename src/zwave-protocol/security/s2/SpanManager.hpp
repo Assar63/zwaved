@@ -91,6 +91,14 @@ class SpanManager
     [[nodiscard]] auto receiveNonce(std::uint8_t peer,
                                     std::span<const std::uint8_t> frame) -> std::optional<Encapsulation::CcmNonce>;
 
+    /// The peer's established SPAN inner state (Key‖V), for persisting across a
+    /// restart; std::nullopt if no SPAN is established for that peer.
+    [[nodiscard]] auto exportSpan(std::uint8_t peer) const -> std::optional<SPAN::InnerState>;
+
+    /// Restore a peer's SPAN from a previously exported inner state (e.g. loaded
+    /// from disk at startup), so traffic resumes in lockstep without a resync.
+    auto importSpan(std::uint8_t peer, const SPAN::InnerState& state) -> void;
+
   private:
     struct Peer
     {

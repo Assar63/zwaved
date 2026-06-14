@@ -137,7 +137,9 @@ Implementation order (each shippable independently):
     - [x] shared process-wide transport SPAN + class-key resolution — `S2::Transport` (`manager()` + `resolveClassKeys`)
     - [x] inbound decap seam — `SecurityS2InboundOrchestrator` (NONCE_GET responder, `MESSAGE_ENCAPSULATION` decrypt → republish plaintext, SOS resync), gated on `NodeRegistry::isSecure`
     - [x] outbound encrypt-on-send — `SecurityS2OutboundOrchestrator` + `SecureS2SendRequest` + scheme-aware `pushSendData` diversion (S2 → S2 path, S0 → S0 path); NONCE_GET round-trip when no SPAN, then drain
-    - [ ] SPAN persistence across restart (`Span::serialize`/`deserialize`) so a reboot doesn't desync
+    - [ ] SPAN persistence across restart (so a reboot doesn't desync):
+      - [x] persistence primitives — `SpanManager::exportSpan`/`importSpan` + `SpanStore` (SQLite `span_state` table, shares `nodes.db`, home-scoped)
+      - [ ] live wiring — load SPANs into `Transport::manager()` at startup; save on each advance/establish (the inbound/outbound seams)
   - [ ] [#188](https://github.com/Assar63/zwaved/issues/188) phase 10 — MPAN (multicast, optional)
   - [ ] [#189](https://github.com/Assar63/zwaved/issues/189) phase 11 — on-bench acceptance (hardware)
 - [x] **CRC-16 Encapsulation (CC `0x56`)** — [#28](https://github.com/Assar63/zwaved/issues/28): transport-only integrity wrapper. `Crc16Encap` codec (CRC-16/AUG-CCITT `checksum` + `verifyAndUnwrap` + `encode`); a hand-written inbound unwrapper (`src/cc-translator/Encapsulation.cpp`) verifies the CRC and republishes the inner frame as an `ApplicationCommand` so the normal decoders fire (bad CRC → dropped + warned). No D-Bus/terminal surface. 6 codec tests. This establishes the inbound-unwrap seam that Transport Service (#25) and the Multi Channel reply-unwrap (#146) plug into.

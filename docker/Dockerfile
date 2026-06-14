@@ -140,13 +140,16 @@ FROM toolchain AS build
 
 WORKDIR /src
 COPY . .
-# Uncapped `--parallel` (= nproc). The OOM stall that forced a temporary
-# `--parallel 2` cap (#138) is fixed at the root in #140: the ~25 MB
-# generated MessageBus.gen.cpp is now compiled ONCE into the zwaved_bus
-# static library instead of recompiled per GoogleTest executable, so nproc
-# concurrent g++ no longer multiply that peak past the runner's ~7 GB.
+# Capped `--parallel 2`. #140 removed the earlier #138 cap once the gtest
+# bloat was fixed, but the tree has since grown (the Security S2 epic, #27)
+# and nproc-concurrent g++-15 again peaks past the runner's ~7 GB — the gnu
+# `build-and-test` job was killed mid-compile (~94%, no error, just runner
+# teardown) on #210/#211. g++-15's C++26 / `<format>` footprint is heavier
+# than clang's, so this is gnu-specific: the llvm stage below stays uncapped
+# (it builds the same tree at nproc without OOM). Two jobs is the cost; a
+# green build is the benefit.
 RUN cmake --preset gnu \
-    && cmake --build cmake-build-gnu --parallel \
+    && cmake --build cmake-build-gnu --parallel 2 \
     && ctest --test-dir cmake-build-gnu --output-on-failure
 
 # ---------------------------------------------------------------------

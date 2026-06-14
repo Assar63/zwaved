@@ -204,7 +204,9 @@ Implementation order (each shippable independently):
 
 ## zwave-terminal client
 
-> [epic: bring zwave-terminal up to parity with the daemon](https://github.com/Assar63/zwaved/issues/73) — the terminal lags the daemon's grown surface (~11 CCs, error feed, pending queue, orchestrators). Children: #74–#77 below.
+> [epic: bring zwave-terminal up to parity with the daemon](https://github.com/Assar63/zwaved/issues/73) — **done** (#74–#77, #109, #111). The terminal now matches the daemon's surface but is still a flat menu+log screen.
+
+- [ ] **[Master/detail node-console redesign](https://github.com/Assar63/zwaved/issues/215)** — replace the flat `stdscr` redraw with real ncurses panes: status bar + node list (left, selectable) + node-detail (right, the #45 view) + activity log (bottom) + a scope-grouped key-hint bar. Actions split by scope — **contextual** (`[c]`ontrol/`[g]`et/`[i]`nfo/`[f]`ail/`[L]`ifeline on the selected node) vs **network** (`[a]`dd/`[x]`remove) vs **global** (`[m]`enu/`[q]`uit/`↑↓`). Modals (incl. the #187 DSK confirm prompt) draw over the panes. Build order: console shell (identity-only) now → live-value column once the value cache (#213) lands → DSK modal. Realises #45 as the detail pane.
 
 - [x] **Split main.cpp into modules (move-only refactor)** — [#111](https://github.com/Assar63/zwaved/issues/111): `main.cpp` went 2979 → 241 lines. Carved into a `zwt` namespace across `constants` / `activity` / `format` / `prompts` / `render` / `policy_blob` / `signal_handlers` / `handlers` TUs (header + cpp each), `main.cpp` keeping only `run()` + the input loop. Pure code move — no behaviour change; both compilers + clang-tidy (incl. `misc-include-cleaner`, IWYU-clean per file) green, 257 tests unchanged. The deliberately-duplicated policy BLOB codec is isolated in `policy_blob.{hpp,cpp}`. (`handlers.cpp` is still ~950 lines; a further get/set/policy sub-split is a future option if it grows.)
 

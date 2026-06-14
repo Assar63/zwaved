@@ -109,6 +109,41 @@ TEST(S2SpanManager, HandshakeEstablishesMatchingSpanAndRoundTrips)
     EXPECT_EQ(*inner2, payload2);
 }
 
+TEST(S2SpanManager, ExportedSpanRestoresInLockstep)
+{
+    auto controller = makeManager(0x01, CONTROLLER, NODE);
+    auto node       = makeManager(0x80, NODE, CONTROLLER);
+
+    // Establish the SPAN with one frame, as above.
+    controller.acceptNonceReport(
+        NODE, *S2::NonceSync::decodeNonceReport(std::span<const std::uint8_t>(node.respondToNonceGet(CONTROLLER))));
+    const std::vector<std::uint8_t> first{0x25, 0x01, 0xFF};
+    const auto firstFrame = controller.encrypt(NODE, std::span<const std::uint8_t>(first));
+    ASSERT_TRUE(firstFrame.has_value());
+    ASSERT_TRUE(node.receiveNonce(CONTROLLER, std::span<const std::uint8_t>(*firstFrame)).has_value());
+
+    // Snapshot the controller's SPAN, then "restart" it into a fresh manager.
+    const auto snapshot = controller.exportSpan(NODE);
+    ASSERT_TRUE(snapshot.has_value());
+    auto restarted = makeManager(0x02, CONTROLLER, NODE);
+    EXPECT_FALSE(restarted.hasSpan(NODE));
+    restarted.importSpan(NODE, *snapshot);
+    EXPECT_TRUE(restarted.hasSpan(NODE));
+
+    // The restored controller stays in lockstep with the node — no resync needed.
+    const std::vector<std::uint8_t> second{0x25, 0x01, 0x00};
+    const auto secondFrame = restarted.encrypt(NODE, std::span<const std::uint8_t>(second));
+    ASSERT_TRUE(secondFrame.has_value());
+    const auto nonce = node.receiveNonce(CONTROLLER, std::span<const std::uint8_t>(*secondFrame));
+    ASSERT_TRUE(nonce.has_value());
+    const auto inner = S2::Encapsulation::decrypt(std::span<const std::uint8_t>(*secondFrame),
+                                                  receiverContext(CONTROLLER, NODE, *secondFrame),
+                                                  CLASS_KEY,
+                                                  *nonce);
+    ASSERT_TRUE(inner.has_value());
+    EXPECT_EQ(*inner, second);
+}
+
 TEST(S2SpanManager, ReceiveWithoutSpanYieldsNoNonce)
 {
     auto node = makeManager(0x80, NODE, CONTROLLER);

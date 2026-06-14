@@ -118,15 +118,8 @@ auto onApplicationCommand(const MessageBus::ApplicationCommand& event) -> void
         sendPlaintext(nodeId, S2::Transport::manager().respondToNonceGet(nodeId));
         return;
     }
-    if (data[1] == S2::NonceSync::NONCE_REPORT)
-    {
-        const auto report = S2::NonceSync::decodeNonceReport(frame);
-        if (report.has_value())
-        {
-            S2::Transport::manager().acceptNonceReport(nodeId, *report);  // for the outbound path
-        }
-        return;
-    }
+    // NONCE_REPORT (the node's answer to a NONCE_GET *we* sent) belongs to the
+    // outbound path — SecurityS2OutboundOrchestrator handles it.
     if (data[1] != MESSAGE_ENCAPSULATION)
     {
         return;

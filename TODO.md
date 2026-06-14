@@ -136,7 +136,7 @@ Implementation order (each shippable independently):
   - [ ] [#199](https://github.com/Assar63/zwaved/issues/199) general post-bootstrap S2 transport (built in layers):
     - [x] shared process-wide transport SPAN + class-key resolution — `S2::Transport` (`manager()` + `resolveClassKeys`)
     - [x] inbound decap seam — `SecurityS2InboundOrchestrator` (NONCE_GET responder, `MESSAGE_ENCAPSULATION` decrypt → republish plaintext, SOS resync), gated on `NodeRegistry::isSecure`
-    - [ ] outbound encrypt-on-send — divert non-`0x9F` sends to S2-secure nodes through `Transport::manager().encrypt` (NONCE_GET round-trip when no SPAN), the S2 analog of `SecurityOutboundOrchestrator` (#175); needs a `SecureS2SendRequest` + `pushSendData` diversion
+    - [x] outbound encrypt-on-send — `SecurityS2OutboundOrchestrator` + `SecureS2SendRequest` + scheme-aware `pushSendData` diversion (S2 → S2 path, S0 → S0 path); NONCE_GET round-trip when no SPAN, then drain
     - [ ] SPAN persistence across restart (`Span::serialize`/`deserialize`) so a reboot doesn't desync
   - [ ] [#188](https://github.com/Assar63/zwaved/issues/188) phase 10 — MPAN (multicast, optional)
   - [ ] [#189](https://github.com/Assar63/zwaved/issues/189) phase 11 — on-bench acceptance (hardware)

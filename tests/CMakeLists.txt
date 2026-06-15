@@ -1037,6 +1037,29 @@ target_link_libraries(NodeMetadata_test PRIVATE
 zwaved_test_target(NodeMetadata_test)
 gtest_discover_tests(NodeMetadata_test)
 
+# ---- NodeValues -----------------------------------------------------
+# Per-node value cache (#213). Links sqlite3 (real file per fixture) and
+# the bus (the instance() singleton subscribes to StorageConfig).
+add_executable(node_values_test
+    node_values_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/node-values/NodeValues.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(node_values_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/node-values"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(node_values_test zwaved_codegen)
+target_link_libraries(node_values_test PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    PkgConfig::SQLITE3
+    zwaved_bus
+)
+zwaved_test_target(node_values_test)
+gtest_discover_tests(node_values_test)
+
 # ---- WakeUpOrchestrator ---------------------------------------------
 # Bus-driven: seeds the persistent queue, publishes a wake-up, asserts
 # on the emitted command sequence. Links the orchestrator (armed by its

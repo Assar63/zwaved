@@ -62,6 +62,10 @@ using DevicePolicyTuple = sdbus::Struct<std::uint16_t, std::uint16_t, std::uint1
 // One GetNodeMetadata row: (key, value). Matches the a(ss) return shape.
 using NodeMetadataTuple = sdbus::Struct<std::string, std::string>;
 
+// One GetNodeValues row: (valueId, value, updatedAt-unix-seconds). Matches the
+// a(sst) return shape — the node's last-known value cache (#213).
+using NodeValueTuple = sdbus::Struct<std::string, std::string, std::uint64_t>;
+
 // One scene action: (targetNodeId, ccPayload). The wire element of the
 // a(yay) scene shape — used both inbound (SetScene param) and outbound
 // (GetScene return). Custom handlers convert to/from SceneStore::Action.

@@ -1310,6 +1310,35 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 # → ay  2  7 12     (nodes 7 and 12 are tagged room="Living room")
 ```
 
+## 16d. Node values (last-known cache)
+
+The daemon caches each node's **last-known dynamic values** (on/off, level,
+battery %, sensor readings, config params, thermostat setpoints, …) as they
+report them, each with the unix-seconds time it was recorded. This lets a UI
+show "last known value + when" without a live read — essential for **sleeping**
+nodes that can't be polled on demand. Stored in `nodes.db`, scoped per network;
+distinct from the human labels of §16c.
+
+A bus recorder maps the typed CC reports into a `value_id` string (with a
+discriminator for multi-instance CCs — `binary_switch`, `battery`,
+`multilevel_switch`, `sensor:<type>`, `config:<param>`, `setpoint:<type>`,
+`thermostat_mode`) and the rendered display value.
+
+| Method / Signal | Signature | Notes |
+|-----------------|-----------|-------|
+| `GetNodeValues` | `(y) → (a(sst))` | all `(valueId, value, updatedAt)` for a node, ordered by valueId |
+| `NodeValueChanged` | signal `(y s s)` | nodeId, valueId, value — emitted on each fresh value so a UI live-updates |
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetNodeValues y 5
+# → a(sst)  2  "battery" "92%" 1750000000   "binary_switch" "On" 1750000050
+```
+
+`updatedAt` is wall-clock unix seconds. The cache is best-effort and reflects
+only what the node has reported (or what an explicit Get has fetched); a node
+the daemon has never heard a given value from simply has no row for it.
+
 ## 16d. Scene control (daemon-side scenes)
 
 The daemon runs **scenes** in response to physical button presses. A *scene*

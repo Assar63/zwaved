@@ -2340,6 +2340,18 @@ dbus:
       action:
         custom: emitGetNodeMetadata
 
+    # The node's last-known value cache (#213): each (valueId, value,
+    # updatedAt-unix-seconds). The node-info view (#45) reads this for "last
+    # known + when"; live updates arrive via the NodeValueChanged signal.
+    - name: GetNodeValues
+      params:
+        - { name: nodeId, dbus: y, cpp: u8 }
+      returns:
+        type: list<NodeValueEntry>
+        dbus: a(sst)
+      action:
+        custom: emitGetNodeValues
+
     - name: DeleteNodeMetadata
       params:
         - { name: nodeId, dbus: y, cpp: u8 }
@@ -2894,6 +2906,14 @@ dbus:
         - { name: nodeId, dbus: y }
       triggered_by:
         event: NodeMetadataChanged
+
+    - name: NodeValueChanged
+      params:
+        - { name: nodeId,  dbus: y }
+        - { name: valueId, dbus: s }
+        - { name: value,   dbus: s }
+      triggered_by:
+        event: NodeValueChanged
 
     - name: SceneActivated
       params:

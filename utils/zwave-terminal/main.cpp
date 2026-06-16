@@ -1,6 +1,7 @@
 #include "activity.hpp"
 #include "constants.hpp"
 #include "handlers.hpp"
+#include "nodes.hpp"
 #include "render.hpp"
 #include "signal_handlers.hpp"
 
@@ -80,9 +81,21 @@ auto run() -> int
         logLine(std::string{"GetDaemonError failed: "} + err.what());
     }
 
+    // Initial node-console load + a periodic poll for the selected node's live
+    // values (the list itself refreshes on [r] / after add/remove).
+    refreshNodes(*proxy);
+    refreshSelectedValues(*proxy);
+    constexpr int valuePollTicks = 20;  // ~2s at UI_REFRESH_MS
+    int pollTick                 = 0;
+
     while (running)
     {
         draw(lastSession);
+        if (++pollTick >= valuePollTicks)
+        {
+            pollTick = 0;
+            refreshSelectedValues(*proxy);
+        }
         const int key = getch();
         if (key == ERR)
         {
@@ -95,7 +108,22 @@ auto run() -> int
             {
                 running = false;
             }
-            else if (key == '1')
+            else if (key == KEY_UP)
+            {
+                moveSelection(-1);
+                refreshSelectedValues(*proxy);
+            }
+            else if (key == KEY_DOWN)
+            {
+                moveSelection(1);
+                refreshSelectedValues(*proxy);
+            }
+            else if (key == 'r' || key == 'R')
+            {
+                refreshNodes(*proxy);
+                refreshSelectedValues(*proxy);
+            }
+            else if (key == '1' || key == 'a' || key == 'A')
             {
                 ++sessionCounter;
                 const std::vector<std::uint8_t> empty;
@@ -107,7 +135,7 @@ auto run() -> int
                 logLine("AddNode (classic, session " + std::to_string(static_cast<unsigned>(sessionCounter)) +
                         ") issued");
             }
-            else if (key == '2')
+            else if (key == '2' || key == 'x' || key == 'X')
             {
                 ++sessionCounter;
                 proxy->callMethod("RemoveNode")

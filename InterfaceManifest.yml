@@ -311,6 +311,20 @@ events:
     fields:
       - { name: nodeId, type: u8, default: 0 }
 
+  - name: NodeValueChanged
+    category: transient
+    direction: { publishers: [node-values], subscribers: [external-api] }
+    doc: |
+      The NodeValues cache (#213) recorded a fresh value for `nodeId`: the
+      recorder mapped a typed CC report into `valueId` (e.g. `binary_switch`,
+      `battery`, `config:3`, `sensor:1`) carrying the rendered `value`. Re-emitted
+      as a D-Bus signal so a UI (the node-info view #45) can live-update without
+      polling; the full set is read back via GetNodeValues.
+    fields:
+      - { name: nodeId,  type: u8,     default: 0 }
+      - { name: valueId, type: string }
+      - { name: value,   type: string }
+
   # ---- 2b. Configuration (retained, set once at startup) -----------
   # Published once by Config (priority 102) after parsing zwaved.conf;
   # consumers subscribe from their own constructor and pick up the

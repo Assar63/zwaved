@@ -7,6 +7,7 @@
 
 target_sources(zwaved PRIVATE
     NodeValues.cpp
+    Recorder.cpp
 )
 
 target_link_libraries(zwaved PRIVATE PkgConfig::SQLITE3)

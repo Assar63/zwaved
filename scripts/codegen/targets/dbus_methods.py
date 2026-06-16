@@ -130,6 +130,7 @@ RETURN_TUPLE_ALIASES: dict[str, str] = {
     "GetDaemonError":     "DaemonErrorTuple",
     "ListDevicePolicies": "DevicePolicyTuple",
     "GetNodeMetadata":    "NodeMetadataTuple",
+    "GetNodeValues":      "NodeValueTuple",
     "GetScene":           "SceneActionEntry",
     "ListSceneTriggers":  "SceneTriggerEntry",
     "GetLogicalThermostatState": "LogicalThermostatStateTuple",

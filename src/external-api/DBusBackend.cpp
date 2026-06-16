@@ -3,6 +3,7 @@
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
 #include "../node-metadata/NodeMetadata.hpp"
+#include "../node-values/NodeValues.hpp"
 #include "../policy-register/PolicyRegister.hpp"
 #include "../scene-store/SceneStore.hpp"
 #include "DBusBackendInternal.hpp"
@@ -462,6 +463,17 @@ auto emitGetNodeMetadata(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) -> st
     for (const auto& entry : NodeMetadata::instance().getAll(nodeId))
     {
         out.emplace_back(entry.key, entry.value);
+    }
+    return out;
+}
+
+// The node's last-known value cache (#213): each (valueId, value, updatedAt).
+auto emitGetNodeValues(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) -> std::vector<NodeValueTuple>
+{
+    std::vector<NodeValueTuple> out;
+    for (const auto& entry : NodeValues::instance().getAll(nodeId))
+    {
+        out.emplace_back(entry.valueId, entry.value, static_cast<std::uint64_t>(entry.updatedAt));
     }
     return out;
 }

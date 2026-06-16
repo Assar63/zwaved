@@ -1060,6 +1060,26 @@ target_link_libraries(node_values_test PRIVATE
 zwaved_test_target(node_values_test)
 gtest_discover_tests(node_values_test)
 
+# ---- NodeValues recorder --------------------------------------------
+# Bus-driven: typed CC reports → value cache + NodeValueChanged. Links the
+# recorder (armed by its constructor) + the store + the bus.
+add_executable(node_values_recorder_test
+    node_values_recorder_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/node-values/Recorder.cpp"
+    "${CMAKE_SOURCE_DIR}/src/node-values/NodeValues.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(node_values_recorder_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/node-values"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(node_values_recorder_test zwaved_codegen)
+target_link_libraries(node_values_recorder_test PRIVATE
+    GTest::gtest GTest::gtest_main PkgConfig::SQLITE3 zwaved_bus)
+zwaved_test_target(node_values_recorder_test)
+gtest_discover_tests(node_values_recorder_test)
+
 # ---- WakeUpOrchestrator ---------------------------------------------
 # Bus-driven: seeds the persistent queue, publishes a wake-up, asserts
 # on the emitted command sequence. Links the orchestrator (armed by its

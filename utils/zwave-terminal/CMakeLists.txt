@@ -5,6 +5,7 @@ add_executable(zwave-terminal
     main.cpp
     activity.cpp
     format.cpp
+    nodes.cpp
     prompts.cpp
     render.cpp
     signal_handlers.cpp

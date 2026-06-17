@@ -211,7 +211,7 @@ Implementation order (each shippable independently):
 
 - [ ] **[Master/detail node-console redesign](https://github.com/Assar63/zwaved/issues/215)** — replace the flat `stdscr` redraw with real ncurses panes. Built in steps:
   - [x] console shell — status bar + selectable node list + detail pane (identity + CC list + **live values** from #213, with age) + activity log + scope-grouped hint bar; `nodes.{hpp,cpp}` model, arrow-key selection, periodic value poll, `[a]`/`[x]` add/remove, `[r]` refresh. Realises #45 as the detail pane.
-  - [ ] contextual actions on the selected node — make `[c]`/`[g]`/`[f]`/`[L]` operate on the highlighted node (skip the node-id prompt) instead of always prompting
+  - [x] contextual actions on the selected node — `promptNodeId` now defaults to the highlighted node (label shows `[5]`, Enter accepts, type to override); every node-targeted action (incl. `[f]`/`[L]`, switched off `promptByte`) is contextual through that one choke point
   - [ ] auto-refresh the list on `NodeListChanged` / `NodeValueChanged` signals (today the list refreshes on `[r]` / add-remove; values poll every ~2s)
   - [ ] DSK confirm modal — surface `DSKPendingConfirmation` + a PIN entry calling `ConfirmDSK` (#187), drawn over the panes
 

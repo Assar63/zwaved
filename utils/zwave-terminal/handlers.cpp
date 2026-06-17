@@ -819,7 +819,7 @@ auto handleGetAssociation(sdbus::IProxy& proxy, std::uint8_t& callbackCounter) -
 
 auto handleSetLifeline(sdbus::IProxy& proxy, std::uint8_t& callbackCounter) -> void
 {
-    auto nodeId = promptByte("Node ID (1-232):", NODE_ID_MIN, NODE_ID_MAX);
+    auto nodeId = promptNodeId("Node ID (1-232):");
     if (!nodeId.has_value())
     {
         logLine("SetAssociation (lifeline): cancelled or invalid node id");
@@ -851,7 +851,7 @@ auto handleSetLifeline(sdbus::IProxy& proxy, std::uint8_t& callbackCounter) -> v
 
 auto handleRemoveFailedNode(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void
 {
-    auto nodeId = promptByte("Failed node ID (1-232):", NODE_ID_MIN, NODE_ID_MAX);
+    auto nodeId = promptNodeId("Failed node ID (1-232):");
     if (!nodeId.has_value())
     {
         logLine("RemoveFailedNode: cancelled or invalid node id");

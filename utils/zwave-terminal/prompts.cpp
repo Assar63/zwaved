@@ -1,6 +1,7 @@
 #include "prompts.hpp"
 
 #include "constants.hpp"
+#include "nodes.hpp"
 
 #include <array>
 #include <charconv>
@@ -61,7 +62,45 @@ auto promptByte(const char* label, int minVal, int maxVal) -> std::optional<std:
 
 auto promptNodeId(const char* label) -> std::optional<std::uint8_t>
 {
-    return promptByte(label, NODE_ID_MIN, NODE_ID_MAX);
+    // Default to the node selected in the console (#215): the label shows it as
+    // "[5]" and an empty Enter accepts it, so node-targeted actions operate on
+    // the selection without retyping — while still allowing an explicit id. With
+    // no selection this is the plain prompt.
+    const auto selected = selectedNodeId();
+
+    const int rows = getmaxy(stdscr);
+    move(rows - 1, 0);
+    clrtoeol();
+    if (selected.has_value())
+    {
+        mvprintw(rows - 1, 0, "%s [%u] ", label, static_cast<unsigned>(*selected));
+    }
+    else
+    {
+        mvprintw(rows - 1, 0, "%s ", label);
+    }
+    refresh();
+
+    echo();
+    curs_set(1);
+    timeout(-1);  // blocking
+    std::array<char, NODE_ID_INPUT_BUFFER> buffer{};
+    int const got = getnstr(buffer.data(), static_cast<int>(buffer.size()) - 1);
+    noecho();
+    curs_set(0);
+    timeout(UI_REFRESH_MS);
+
+    const std::string text(got == OK ? buffer.data() : "");
+    if (text.empty())
+    {
+        return selected;  // Enter accepts the selection (nullopt cancels if none)
+    }
+    const auto parsed = parseUint(text, NODE_ID_MAX);
+    if (!parsed.has_value() || *parsed < NODE_ID_MIN)
+    {
+        return std::nullopt;
+    }
+    return static_cast<std::uint8_t>(*parsed);
 }
 
 /// Like promptByte but for a signed 32-bit integer (Configuration values

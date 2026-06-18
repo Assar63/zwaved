@@ -30,7 +30,13 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                std::uint8_t /*generic*/,
                std::uint8_t /*specific*/,
                const std::vector<std::uint8_t>& /*ccs*/) -> void
-            { logLine(formatStatusEntry("Inclusion", sessionId, status, nodeId)); });
+            {
+                logLine(formatStatusEntry("Inclusion", sessionId, status, nodeId));
+                if (status == STATUS_COMPLETED)
+                {
+                    activity().nodesDirty.store(true);  // a node joined — refresh the list
+                }
+            });
 
     proxy.uponSignal("NodeExclusionStatus")
         .onInterface(IFACE_NAME)
@@ -43,7 +49,13 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                std::uint8_t /*generic*/,
                std::uint8_t /*specific*/,
                const std::vector<std::uint8_t>& /*ccs*/) -> void
-            { logLine(formatStatusEntry("Exclusion", sessionId, status, nodeId)); });
+            {
+                logLine(formatStatusEntry("Exclusion", sessionId, status, nodeId));
+                if (status == STATUS_COMPLETED)
+                {
+                    activity().nodesDirty.store(true);  // a node left — refresh the list
+                }
+            });
 
     proxy.uponSignal("DongleStatus")
         .onInterface(IFACE_NAME)
@@ -77,6 +89,20 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                        << " session=" << static_cast<unsigned>(sessionId) << (phase == 0 ? " response=" : " result=")
                        << "0x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(status);
                 logLine(stream.str());
+                if (phase != 0)
+                {
+                    activity().nodesDirty.store(true);  // result phase — the node may be gone, refresh
+                }
+            });
+
+    proxy.uponSignal("NodeValueChanged")
+        .onInterface(IFACE_NAME)
+        .call(
+            // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): wire signature is fixed by the D-Bus signal
+            [](std::uint8_t nodeId, const std::string& valueId, const std::string& value) -> void
+            {
+                activity().valuesDirty.store(true);  // refresh the selected node's cached values
+                logLine("value node=" + std::to_string(static_cast<unsigned>(nodeId)) + " " + valueId + "=" + value);
             });
 
     proxy.uponSignal("SwitchBinaryReport")

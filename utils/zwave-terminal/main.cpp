@@ -81,19 +81,23 @@ auto run() -> int
         logLine(std::string{"GetDaemonError failed: "} + err.what());
     }
 
-    // Initial node-console load + a periodic poll for the selected node's live
-    // values (the list itself refreshes on [r] / after add/remove).
+    // Initial node-console load. Thereafter the model refreshes signal-driven:
+    // the D-Bus signal handlers set activity().nodesDirty / valuesDirty on the
+    // event-loop thread, and we act on them here (D-Bus calls stay on this
+    // thread). [r] still forces a manual refresh.
     refreshNodes(*proxy);
     refreshSelectedValues(*proxy);
-    constexpr int valuePollTicks = 20;  // ~2s at UI_REFRESH_MS
-    int pollTick                 = 0;
 
     while (running)
     {
         draw(lastSession);
-        if (++pollTick >= valuePollTicks)
+        if (activity().nodesDirty.exchange(false))
         {
-            pollTick = 0;
+            refreshNodes(*proxy);
+            refreshSelectedValues(*proxy);
+        }
+        else if (activity().valuesDirty.exchange(false))
+        {
             refreshSelectedValues(*proxy);
         }
         const int key = getch();

@@ -105,6 +105,19 @@ auto registerSignalHandlers(sdbus::IProxy& proxy) -> void
                 logLine("value node=" + std::to_string(static_cast<unsigned>(nodeId)) + " " + valueId + "=" + value);
             });
 
+    proxy.uponSignal("DSKPendingConfirmation")
+        .onInterface(IFACE_NAME)
+        .call(
+            [](std::uint8_t nodeId, const std::string& dsk) -> void
+            {
+                setDskPending(nodeId, dsk);
+                if (!dsk.empty())
+                {
+                    logLine("DSK confirm needed: node " + std::to_string(static_cast<unsigned>(nodeId)) + " DSK " +
+                            dsk + " - press [k] to enter PIN");
+                }
+            });
+
     proxy.uponSignal("SwitchBinaryReport")
         .onInterface(IFACE_NAME)
         .call(

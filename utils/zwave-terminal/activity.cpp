@@ -57,4 +57,10 @@ auto setDongleStatus(bool connected, const std::string& path) -> void
     activity().dongleConnected = connected;
     activity().donglePath      = path;
 }
+
+auto setDskPending(std::uint8_t nodeId, const std::string& dsk) -> void
+{
+    std::scoped_lock const lock(activity().mutex);
+    activity().dskPending = DskPendingState{.nodeId = nodeId, .dsk = dsk, .active = !dsk.empty()};
+}
 }  // namespace zwt

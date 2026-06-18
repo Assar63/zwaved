@@ -150,6 +150,26 @@ auto drawHeader() -> int
                 attroff(COLOR_PAIR(colorPair) | A_BOLD);
             }
         }
+
+        // Pending S2 DSK confirmation (#187): prompt the operator to enter the PIN.
+        const auto& dsk = activity().dskPending;
+        if (dsk.active)
+        {
+            const bool coloured = has_colors();
+            if (coloured)
+            {
+                attron(COLOR_PAIR(CP_WARN) | A_BOLD);
+            }
+            mvprintw(row++,
+                     0,
+                     " DSK confirm: node %u  %s  -> press [k] to enter PIN",
+                     static_cast<unsigned>(dsk.nodeId),
+                     dsk.dsk.c_str());
+            if (coloured)
+            {
+                attroff(COLOR_PAIR(CP_WARN) | A_BOLD);
+            }
+        }
     }
     mvhline(row++, 0, '-', getmaxx(stdscr));
     return row;

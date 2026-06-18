@@ -209,11 +209,11 @@ Implementation order (each shippable independently):
 
 > [epic: bring zwave-terminal up to parity with the daemon](https://github.com/Assar63/zwaved/issues/73) — **done** (#74–#77, #109, #111). The terminal now matches the daemon's surface but is still a flat menu+log screen.
 
-- [ ] **[Master/detail node-console redesign](https://github.com/Assar63/zwaved/issues/215)** — replace the flat `stdscr` redraw with real ncurses panes. Built in steps:
+- [x] **[Master/detail node-console redesign](https://github.com/Assar63/zwaved/issues/215)** — **done**. Replaced the flat `stdscr` redraw with real ncurses panes. Built in steps:
   - [x] console shell — status bar + selectable node list + detail pane (identity + CC list + **live values** from #213, with age) + activity log + scope-grouped hint bar; `nodes.{hpp,cpp}` model, arrow-key selection, periodic value poll, `[a]`/`[x]` add/remove, `[r]` refresh. Realises #45 as the detail pane.
   - [x] contextual actions on the selected node — `promptNodeId` now defaults to the highlighted node (label shows `[5]`, Enter accepts, type to override); every node-targeted action (incl. `[f]`/`[L]`, switched off `promptByte`) is contextual through that one choke point
   - [x] signal-driven auto-refresh — D-Bus signal handlers set `nodesDirty` (on inclusion/exclusion `COMPLETED` + remove-failed result) / `valuesDirty` (on `NodeValueChanged`); the UI loop acts on the flags (replaces the ~2s value poll). `[r]` still forces a manual refresh. (A dedicated `NodeListChanged` D-Bus signal could replace the status-driven list refresh — follow-up.)
-  - [ ] DSK confirm modal — surface `DSKPendingConfirmation` + a PIN entry calling `ConfirmDSK` (#187), drawn over the panes
+  - [x] DSK confirm flow — the `DSKPendingConfirmation` signal raises a header banner ("node N · DSK · press [k]"); `[k]` prompts the 5-digit PIN and calls `ConfirmDSK` (#187). The daemon's empty `DSKPendingConfirmation` clears the banner. Completes the operator-facing S2 inclusion UX.
 
 - [x] **Split main.cpp into modules (move-only refactor)** — [#111](https://github.com/Assar63/zwaved/issues/111): `main.cpp` went 2979 → 241 lines. Carved into a `zwt` namespace across `constants` / `activity` / `format` / `prompts` / `render` / `policy_blob` / `signal_handlers` / `handlers` TUs (header + cpp each), `main.cpp` keeping only `run()` + the input loop. Pure code move — no behaviour change; both compilers + clang-tidy (incl. `misc-include-cleaner`, IWYU-clean per file) green, 257 tests unchanged. The deliberately-duplicated policy BLOB codec is isolated in `policy_blob.{hpp,cpp}`. (`handlers.cpp` is still ~950 lines; a further get/set/policy sub-split is a future option if it grows.)
 

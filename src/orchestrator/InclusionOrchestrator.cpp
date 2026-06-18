@@ -11,6 +11,13 @@
 // and leaves a clean seam for a future SecurityOrchestrator (#26/#27) to
 // gate on before the policy step.
 //
+// Ordering (#203): the lifeline runs on NodeIncluded (the node needs the
+// controller in group 1 early), but the *policy* step waits for
+// NodeInterviewComplete — the device identity PolicyRegister keys device-level
+// defaults on is only learned during the interview, so the post-inclusion order
+// is SecurityBootstrap → Interview → Policy. The supported-CC set is cached
+// between the two events.
+//
 // Loose-coupling rule: bus only. It consumes the high-level NodeIncluded
 // event (ProtocolThread already knows which raw status codes mean "done")
 // and the effective policy from PolicyRegister (#66), and emits
@@ -26,6 +33,7 @@
 #include "../zwaved.h"  // IWYU pragma: keep — CONFIG_ORCHESTRATOR_PRIO
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -83,6 +91,7 @@ auto scanSupported(const std::vector<std::uint8_t>& commandClasses) -> Supported
 struct State
 {
     MessageBus::SubscriptionGuard includedSub;
+    MessageBus::SubscriptionGuard interviewSub;
     MessageBus::SubscriptionGuard dongleInfoSub;
     MessageBus::SubscriptionGuard behaviorSub;
 
@@ -91,6 +100,10 @@ struct State
     // atomics are needed.
     std::optional<std::uint8_t> controllerNodeId;
     bool autoLifeline = true;
+
+    // Supported-CC set captured at NodeIncluded, consumed at
+    // NodeInterviewComplete (the policy step waits for device identity).
+    std::map<std::uint8_t, SupportedCcs> pendingPolicy;
 
     State() = default;
     ~State()
@@ -210,8 +223,27 @@ auto onNodeIncluded(const MessageBus::NodeIncluded& event) -> void
         }
     }
 
-    // Then the effective policy (device default merged with per-node
-    // override). Each entry is gated on the node supporting its CC.
+    // The policy step waits for NodeInterviewComplete (#203): the device
+    // identity PolicyRegister keys device-level defaults on is learned during
+    // the interview, so applying here (at NodeIncluded) would miss them. Cache
+    // the supported CCs for the policy step to gate on.
+    state().pendingPolicy[nodeId] = supported;
+}
+
+// Apply the effective policy once the interview has run (device identity known).
+auto onNodeInterviewComplete(const MessageBus::NodeInterviewComplete& event) -> void
+{
+    const std::uint8_t nodeId = event.nodeId;
+    SupportedCcs supported;
+    const auto cached = state().pendingPolicy.find(nodeId);
+    if (cached != state().pendingPolicy.end())
+    {
+        supported = cached->second;
+        state().pendingPolicy.erase(cached);
+    }
+
+    // Effective policy = device default (now matchable — identity is known)
+    // merged with the per-node override. Each entry gated on the supported CC.
     const PolicyRegister::Policy policy = PolicyRegister::instance().effectivePolicy(nodeId);
     std::uint32_t entriesApplied        = 0;
     for (const auto& entry : policy)
@@ -236,6 +268,8 @@ __attribute__((constructor(CONFIG_ORCHESTRATOR_PRIO))) auto startInclusionOrches
         [](const MessageBus::BehaviorConfig& cfg) -> void { state().autoLifeline = cfg.autoLifeline; }));
     state().includedSub =
         MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::NodeIncluded>(onNodeIncluded));
+    state().interviewSub = MessageBus::SubscriptionGuard(
+        MessageBus::subscribe<MessageBus::NodeInterviewComplete>(onNodeInterviewComplete));
     Logger::info("[InclusionOrchestrator] watching for inclusions");
 }
 }  // namespace

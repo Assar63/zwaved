@@ -113,11 +113,12 @@ TEST_F(InclusionOrchestratorTest, SetsLifelineForAssociationNodeWithNoPolicy)
 
     Recorder rec;
     MessageBus::publish(MessageBus::NodeIncluded{.nodeId = node, .commandClasses = {CC_ASSOCIATION}});
+    MessageBus::publish(MessageBus::NodeInterviewComplete{.nodeId = node});  // policy step waits for this
 
     ASSERT_EQ(rec.log.size(), 4U);
-    EXPECT_EQ(rec.log[0], "assoc:9:g1:1,");  // lifeline → group 1, member = controller
+    EXPECT_EQ(rec.log[0], "assoc:9:g1:1,");  // lifeline → group 1, member = controller (on NodeIncluded)
     EXPECT_EQ(rec.log[1], "lifeline:9");
-    EXPECT_EQ(rec.log[2], "applied:9:0");  // no policy entries
+    EXPECT_EQ(rec.log[2], "applied:9:0");  // no policy entries (on NodeInterviewComplete)
     EXPECT_EQ(rec.log[3], "complete:9");
 }
 
@@ -128,6 +129,7 @@ TEST_F(InclusionOrchestratorTest, NoLifelineWhenNodeLacksAssociation)
 
     Recorder rec;
     MessageBus::publish(MessageBus::NodeIncluded{.nodeId = node, .commandClasses = {CC_MULTILEVEL}});
+    MessageBus::publish(MessageBus::NodeInterviewComplete{.nodeId = node});
 
     ASSERT_EQ(rec.log.size(), 2U);
     EXPECT_EQ(rec.log[0], "applied:10:0");
@@ -141,6 +143,7 @@ TEST_F(InclusionOrchestratorTest, NoLifelineWhenAutoLifelineDisabled)
 
     Recorder rec;
     MessageBus::publish(MessageBus::NodeIncluded{.nodeId = node, .commandClasses = {CC_ASSOCIATION}});
+    MessageBus::publish(MessageBus::NodeInterviewComplete{.nodeId = node});
 
     ASSERT_EQ(rec.log.size(), 2U);
     EXPECT_EQ(rec.log[0], "applied:11:0");
@@ -164,6 +167,7 @@ TEST_F(InclusionOrchestratorTest, AppliesPolicyGatedBySupportedCcs)
 
     Recorder rec;
     MessageBus::publish(MessageBus::NodeIncluded{.nodeId = node, .commandClasses = {CC_ASSOCIATION, CC_CONFIGURATION}});
+    MessageBus::publish(MessageBus::NodeInterviewComplete{.nodeId = node});
 
     ASSERT_EQ(rec.log.size(), 6U);
     EXPECT_EQ(rec.log[0], "assoc:12:g1:1,");  // lifeline first
@@ -186,6 +190,7 @@ TEST_F(InclusionOrchestratorTest, WakeUpPolicyFallsBackToControllerNotifyNode)
 
     Recorder rec;
     MessageBus::publish(MessageBus::NodeIncluded{.nodeId = node, .commandClasses = {CC_WAKE_UP}});
+    MessageBus::publish(MessageBus::NodeInterviewComplete{.nodeId = node});
 
     // No association CC → no lifeline. Wake-up applied with notify node
     // falling back to the controller id (1).

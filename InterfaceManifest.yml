@@ -841,6 +841,19 @@ events:
     fields:
       - { name: nodeId, type: u8, default: 0 }
 
+  - name: NodeInterviewComplete
+    category: transient
+    direction: { publishers: [orchestrator], subscribers: [orchestrator] }
+    doc: |
+      InterviewOrchestrator (#203) finished the post-inclusion node interview
+      for `nodeId` — ManufacturerSpecific, Version, (Multi Channel endpoints),
+      (Z-Wave+ Info) gathered, so the device identity PolicyRegister keys its
+      device-level defaults on is now known. The correct trigger for the
+      InclusionOrchestrator policy step (a later #203 layer), making the
+      post-inclusion order SecurityBootstrap → Interview → Policy explicit.
+    fields:
+      - { name: nodeId, type: u8, default: 0 }
+
   - name: SceneActivated
     category: transient
     direction: { publishers: [orchestrator], subscribers: [external-api] }
@@ -1204,7 +1217,7 @@ events:
 
   - name: GetMultiChannelEndpointsCommand
     category: command
-    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    direction: { publishers: [external-api, orchestrator], subscribers: [zwave-protocol] }
     doc: Query how many Multi Channel endpoints a node presents (CC 0x60 END_POINT_GET).
     fields:
       - { name: nodeId,     type: u8, default: 0 }
@@ -1467,7 +1480,7 @@ events:
 
   - name: GetManufacturerSpecificCommand
     category: command
-    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    direction: { publishers: [external-api, orchestrator], subscribers: [zwave-protocol] }
     doc: Query a node's manufacturer / product identifiers.
     fields:
       - { name: nodeId,     type: u8, default: 0 }
@@ -1475,7 +1488,7 @@ events:
 
   - name: GetZWavePlusInfoCommand
     category: command
-    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    direction: { publishers: [external-api, orchestrator], subscribers: [zwave-protocol] }
     doc: Query a node's Z-Wave Plus role / node type and icon advertisements.
     fields:
       - { name: nodeId,     type: u8, default: 0 }
@@ -1483,7 +1496,7 @@ events:
 
   - name: GetNodeVersionCommand
     category: command
-    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    direction: { publishers: [external-api, orchestrator], subscribers: [zwave-protocol] }
     doc: |
       Query a node's Version CC (0x86) Report — node firmware versions.
       Distinct from the daemon's GetVersion D-Bus method (which

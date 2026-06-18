@@ -1176,6 +1176,24 @@ target_link_libraries(InclusionOrchestrator_test PRIVATE
 zwaved_test_target(InclusionOrchestrator_test)
 gtest_discover_tests(InclusionOrchestrator_test)
 
+# ---- InterviewOrchestrator ------------------------------------------
+# Bus-driven: NodeIncluded + typed reports → the Get sequence + completion.
+# Bus-only orchestrator (no stores), so it links just the bus + Logger.
+add_executable(InterviewOrchestrator_test
+    InterviewOrchestrator_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/orchestrator/InterviewOrchestrator.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(InterviewOrchestrator_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(InterviewOrchestrator_test zwaved_codegen)
+target_link_libraries(InterviewOrchestrator_test PRIVATE
+    GTest::gtest GTest::gtest_main zwaved_bus)
+zwaved_test_target(InterviewOrchestrator_test)
+gtest_discover_tests(InterviewOrchestrator_test)
+
 # ---- FrameTransport -------------------------------------------------
 # Exercises the real poll() / read() / write() syscalls — drives the
 # transport over one end of a socketpair via SerialPort::adoptFd from

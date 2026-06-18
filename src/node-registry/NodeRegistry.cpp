@@ -24,7 +24,7 @@ namespace
 constexpr const char* DEFAULT_STATE_DIR = "/var/lib/zwaved";
 constexpr const char* STATE_DIR_ENV     = "ZWAVED_STATE_DIR";
 constexpr const char* DB_FILENAME       = "nodes.db";
-constexpr int CURRENT_SCHEMA_VERSION    = 3;
+constexpr int CURRENT_SCHEMA_VERSION    = 4;
 
 constexpr const char* SCHEMA_SQL = R"(
 CREATE TABLE IF NOT EXISTS nodes (
@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     specific_type   INTEGER NOT NULL,
     command_classes BLOB,
     security_scheme INTEGER NOT NULL DEFAULT 0,
+    manufacturer_id INTEGER NOT NULL DEFAULT 0,
+    product_type_id INTEGER NOT NULL DEFAULT 0,
+    product_id      INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (home_id, node_id)
 )
 )";
@@ -45,6 +48,11 @@ constexpr const char* MIGRATE_V1_ADD_SCHEME_SQL =
 // v2 -> v3: the v2 `secure` bool widens to the SecurityScheme enum; its 0/1
 // values already map to None/S0, so a rename preserves them.
 constexpr const char* MIGRATE_V2_RENAME_SQL = "ALTER TABLE nodes RENAME COLUMN secure TO security_scheme";
+// v3 -> v4: add the device-identity triple from the interview (#203).
+constexpr const char* MIGRATE_V3_ADD_IDENTITY_SQL =
+    "ALTER TABLE nodes ADD COLUMN manufacturer_id INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN product_type_id INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN product_id INTEGER NOT NULL DEFAULT 0";
 
 constexpr const char* UPSERT_SQL =
     "INSERT INTO nodes (home_id, node_id, basic_type, generic_type, specific_type, command_classes) "
@@ -57,10 +65,14 @@ constexpr const char* UPSERT_SQL =
 
 constexpr const char* DELETE_SQL = "DELETE FROM nodes WHERE home_id = ? AND node_id = ?";
 
-constexpr const char* SELECT_FOR_HOME_SQL = "SELECT node_id, basic_type, generic_type, specific_type, "
-                                            "command_classes, security_scheme FROM nodes WHERE home_id = ?";
+constexpr const char* SELECT_FOR_HOME_SQL =
+    "SELECT node_id, basic_type, generic_type, specific_type, command_classes, security_scheme, "
+    "manufacturer_id, product_type_id, product_id FROM nodes WHERE home_id = ?";
 
 constexpr const char* SET_SCHEME_SQL = "UPDATE nodes SET security_scheme = ? WHERE home_id = ? AND node_id = ?";
+
+constexpr const char* SET_IDENTITY_SQL =
+    "UPDATE nodes SET manufacturer_id = ?, product_type_id = ?, product_id = ? WHERE home_id = ? AND node_id = ?";
 
 // Bind positions for UPSERT (1-based per sqlite3_bind_*).
 constexpr int BIND_HOME     = 1;
@@ -77,11 +89,21 @@ constexpr int COL_GENERIC  = 2;
 constexpr int COL_SPECIFIC = 3;
 constexpr int COL_CCS      = 4;
 constexpr int COL_SCHEME   = 5;
+constexpr int COL_MFR      = 6;
+constexpr int COL_TYPE     = 7;
+constexpr int COL_PRODUCT  = 8;
 
 // Bind positions for SET_SCHEME (1-based).
 constexpr int BIND_SCHEME_VALUE = 1;
 constexpr int BIND_SCHEME_HOME  = 2;
 constexpr int BIND_SCHEME_NODE  = 3;
+
+// Bind positions for SET_IDENTITY (1-based).
+constexpr int BIND_ID_MFR     = 1;
+constexpr int BIND_ID_TYPE    = 2;
+constexpr int BIND_ID_PRODUCT = 3;
+constexpr int BIND_ID_HOME    = 4;
+constexpr int BIND_ID_NODE    = 5;
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct State
@@ -98,6 +120,9 @@ struct State
     // open the database. Empty means "fall back to env / built-in".
     std::string configuredStateDir;
     MessageBus::SubscriptionId storageSub{0};
+    // Records the interview's ManufacturerSpecificReport into the device-identity
+    // columns (#203). Subscribed during initIfNeeded().
+    MessageBus::SubscriptionId mfrSub{0};
 
     ~State()
     {
@@ -105,6 +130,11 @@ struct State
         {
             MessageBus::unsubscribe(storageSub);
             storageSub = 0;
+        }
+        if (mfrSub != 0)
+        {
+            MessageBus::unsubscribe(mfrSub);
+            mfrSub = 0;
         }
         if (db != nullptr)
         {
@@ -271,36 +301,36 @@ auto migrateSchema(sqlite3* database) -> bool
     {
         return true;
     }
-    if (version == 1)
-    {
-        // v1 -> v3: a correctly-keyed table that lacks the security column.
-        if (!execOrLog(database, MIGRATE_V1_ADD_SCHEME_SQL, "ALTER TABLE"))
-        {
-            return false;
-        }
-    }
-    else if (version == 2)
-    {
-        // v2 -> v3: rename the `secure` bool to `security_scheme`; its 0/1
-        // values already mean None/S0, so the data carries over intact.
-        if (!execOrLog(database, MIGRATE_V2_RENAME_SQL, "ALTER TABLE"))
-        {
-            return false;
-        }
-    }
-    else
+    if (version == 0)
     {
         // version 0: a fresh database, or a pre-v1 one keyed by node_id only
         // (unsafe under a different dongle). Drop and recreate at the current
-        // schema; GET_INIT_DATA on the next connect re-seeds from the dongle's
-        // bitmap.
+        // schema (which already has every column); GET_INIT_DATA on the next
+        // connect re-seeds from the dongle's bitmap.
         if (!execOrLog(database, "DROP TABLE IF EXISTS nodes", "DROP TABLE") ||
             !execOrLog(database, SCHEMA_SQL, "CREATE TABLE"))
         {
             return false;
         }
     }
-    if (!execOrLog(database, "PRAGMA user_version = 3", "PRAGMA user_version"))
+    else
+    {
+        // Cumulative upgrades from an existing table (v1/v2/v3) up to v4.
+        if (version == 1 && !execOrLog(database, MIGRATE_V1_ADD_SCHEME_SQL, "ALTER TABLE"))
+        {
+            return false;  // v1: lacks the security column — add it
+        }
+        if (version == 2 && !execOrLog(database, MIGRATE_V2_RENAME_SQL, "ALTER TABLE"))
+        {
+            return false;  // v2: rename `secure` bool to `security_scheme` (0/1 = None/S0)
+        }
+        // v1/v2/v3 all reach the "v3 shape" above; now add the v4 identity triple.
+        if (!execOrLog(database, MIGRATE_V3_ADD_IDENTITY_SQL, "ALTER TABLE"))
+        {
+            return false;
+        }
+    }
+    if (!execOrLog(database, "PRAGMA user_version = 4", "PRAGMA user_version"))
     {
         return false;
     }
@@ -332,6 +362,9 @@ auto loadNodesForHome(sqlite3* database, const std::string& homeId) -> std::map<
             info.commandClasses.assign(blob, blob + blobSize);
         }
         info.securityScheme = static_cast<NodeRegistry::SecurityScheme>(sqlite3_column_int(stmt.raw(), COL_SCHEME));
+        info.manufacturerId = static_cast<std::uint16_t>(sqlite3_column_int(stmt.raw(), COL_MFR));
+        info.productTypeId  = static_cast<std::uint16_t>(sqlite3_column_int(stmt.raw(), COL_TYPE));
+        info.productId      = static_cast<std::uint16_t>(sqlite3_column_int(stmt.raw(), COL_PRODUCT));
         result.emplace(info.nodeId, info);
     }
     return result;
@@ -350,6 +383,15 @@ auto initIfNeeded() -> void
             // database below.
             state().storageSub = MessageBus::subscribe<MessageBus::StorageConfig>(
                 [](const MessageBus::StorageConfig& cfg) -> void { state().configuredStateDir = cfg.stateDir; });
+
+            // Record the interview's device-identity triple (#203). Transient
+            // event, so this never fires during init's call_once.
+            state().mfrSub = MessageBus::subscribe<MessageBus::ManufacturerSpecificReport>(
+                [](const MessageBus::ManufacturerSpecificReport& report) -> void
+                {
+                    NodeRegistry::setDeviceIdentity(
+                        report.sourceNodeId, report.manufacturerId, report.productTypeId, report.productId);
+                });
 
             const auto path = resolveDbPath();
             std::error_code errorCode;
@@ -605,6 +647,39 @@ auto NodeRegistry::setSecurityScheme(std::uint8_t nodeId, SecurityScheme scheme)
     stmt.bindInt(BIND_SCHEME_VALUE, static_cast<int>(scheme))
         .bindText(BIND_SCHEME_HOME, *home)
         .bindInt(BIND_SCHEME_NODE, nodeId)
+        .execDone();
+}
+
+auto NodeRegistry::setDeviceIdentity(std::uint8_t nodeId,
+                                     std::uint16_t manufacturerId,
+                                     std::uint16_t productTypeId,
+                                     std::uint16_t productId) -> void
+{
+    initIfNeeded();
+    std::scoped_lock const lock(state().mutex);
+    const auto iter = state().nodes.find(nodeId);
+    if (iter == state().nodes.end())
+    {
+        return;  // unknown node — nothing to record
+    }
+    iter->second.manufacturerId = manufacturerId;
+    iter->second.productTypeId  = productTypeId;
+    iter->second.productId      = productId;
+    const auto& home            = state().currentHomeId;
+    if (state().db == nullptr || !home.has_value())
+    {
+        return;
+    }
+    Stmt stmt(state().db, SET_IDENTITY_SQL, "SET IDENTITY");
+    if (!stmt.valid())
+    {
+        return;
+    }
+    stmt.bindInt(BIND_ID_MFR, manufacturerId)
+        .bindInt(BIND_ID_TYPE, productTypeId)
+        .bindInt(BIND_ID_PRODUCT, productId)
+        .bindText(BIND_ID_HOME, *home)
+        .bindInt(BIND_ID_NODE, nodeId)
         .execDone();
 }
 

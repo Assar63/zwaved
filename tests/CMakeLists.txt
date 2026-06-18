@@ -637,6 +637,24 @@ target_link_libraries(node_registry_secure_test PRIVATE
 zwaved_test_target(node_registry_secure_test)
 gtest_discover_tests(node_registry_secure_test)
 
+# ---- NodeRegistry device identity -----------------------------------
+# #203: the interview's ManufacturerSpecificReport persists into the
+# device-identity columns (schema v4).
+add_executable(node_registry_identity_test
+    node_registry_identity_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(node_registry_identity_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/node-registry"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+target_link_libraries(node_registry_identity_test PRIVATE
+    GTest::gtest GTest::gtest_main PkgConfig::SQLITE3 zwaved_bus)
+zwaved_test_target(node_registry_identity_test)
+gtest_discover_tests(node_registry_identity_test)
+
 # ---- S0 outbound encrypt-on-send ------------------------------------
 # Security S0 (CC 0x98) phase 5b (#175): the outbound nonce->encrypt flow.
 add_executable(s0_outbound_test

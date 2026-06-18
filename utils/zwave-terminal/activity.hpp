@@ -1,6 +1,7 @@
 #ifndef ZWAVE_TERMINAL_ACTIVITY_HPP
 #define ZWAVE_TERMINAL_ACTIVITY_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <deque>
 #include <mutex>
@@ -27,6 +28,10 @@ struct ActivityState
     bool dongleConnected{false};
     std::string donglePath;
     DaemonErrorState daemonError;
+    // Set by D-Bus signal handlers (event-loop thread), consumed by the UI loop
+    // (main thread) to refresh the node model — atomic so no lock is needed.
+    std::atomic<bool> nodesDirty{false};   // list changed (incl/excl/remove-failed)
+    std::atomic<bool> valuesDirty{false};  // a node value changed (NodeValueChanged)
 };
 
 [[nodiscard]] auto activity() -> ActivityState&;

@@ -9,6 +9,7 @@
 target_sources(zwaved PRIVATE
     WakeUpOrchestrator.cpp
     InclusionOrchestrator.cpp
+    InterviewOrchestrator.cpp
     SceneOrchestrator.cpp
     ThermostatOrchestrator.cpp
     SecurityBootstrapOrchestrator.cpp

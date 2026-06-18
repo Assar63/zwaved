@@ -2,12 +2,14 @@
 #include "constants.hpp"
 #include "handlers.hpp"
 #include "nodes.hpp"
+#include "prompts.hpp"
 #include "render.hpp"
 #include "signal_handlers.hpp"
 
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -126,6 +128,31 @@ auto run() -> int
             {
                 refreshNodes(*proxy);
                 refreshSelectedValues(*proxy);
+            }
+            else if (key == 'k' || key == 'K')
+            {
+                std::uint8_t dskNode = 0;
+                bool dskActive       = false;
+                {
+                    std::scoped_lock const lock(activity().mutex);
+                    dskActive = activity().dskPending.active;
+                    dskNode   = activity().dskPending.nodeId;
+                }
+                if (!dskActive)
+                {
+                    logLine("No DSK confirmation pending");
+                }
+                else
+                {
+                    const auto pin = promptLine(
+                        ("DSK PIN for node " + std::to_string(static_cast<unsigned>(dskNode)) + " (5 digits):")
+                            .c_str());
+                    if (pin.has_value())
+                    {
+                        proxy->callMethod("ConfirmDSK").onInterface(IFACE_NAME).withArguments(dskNode, *pin);
+                        logLine("ConfirmDSK node=" + std::to_string(static_cast<unsigned>(dskNode)) + " issued");
+                    }
+                }
             }
             else if (key == '1' || key == 'a' || key == 'A')
             {

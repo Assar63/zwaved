@@ -95,6 +95,7 @@ or wait for the next hot-plug to determine current state.
 | `SetMultilevelSwitch`                 | `y y y y` (nodeId, value, duration, callbackId)                                                                                                    | Send a Multilevel Switch SET (CC 0x26) — `value=0` off, `value=1..99` (`0x01..0x63`) dimmer level, `value=0xFF` restore-last. `duration=0` instant, `0xFF` factory default   |
 | `GetMultilevelSwitch`                 | `y y` (nodeId, callbackId)                                                                                                                         | Send a Multilevel Switch GET; the node's reply lands as a typed `SwitchMultilevelReport(sourceNodeId, currentValue, targetValue, duration)` signal alongside the raw `ApplicationCommand` |
 | `GetNodes`                            | `→ a(yyyyay)` (array of nodeId, basic, generic, specific, ccBytes)                                                                                 | Return the in-memory list of currently-included nodes                                                                                                                        |
+| `GetNodeInfo`                         | `(y) → (yyyy ay y qqq yyyyy ybb yyyqq)` (full per-node record — see §16f)                                                                          | Return the complete node-registry record for one node: identity (class triple + manufacturer/product ids) + interview capabilities (Version, endpoints, Z-Wave+) + security scheme. Powers the `[i]` node-info drill-down |
 | `GetDongleInfo`                       | `→ (s y ay y)` (libraryVersion, libraryType, homeId, controllerNodeId)                                                                             | Return the dongle introspection captured when the serial port opened                                                                                                         |
 | `GetInitData`                         | `→ (y y ay y y)` (serialApiVersion, capabilities, nodeIds, chipType, chipVersion)                                                                  | Return the SERIAL_API_GET_INIT_DATA response captured at startup; `nodeIds` is the expanded node bitmap                                                                      |
 | `SetAssociation`                      | `y y ay y` (nodeId, groupId, members, callbackId)                                                                                                  | Add `members` to `groupId` on `nodeId`'s association table (CC 0x85 cmd 0x01)                                                                                                |
@@ -1470,6 +1471,41 @@ set group mode, `[s]` set group setpoint, `[g]` read the aggregated group state
 (all prompt the group key + value first). `LogicalThermostatStateChanged` lands
 in the activity pane as `LogicalThermostat room=Living room members=2 mode=heat
 op=1 fan=… setpoint=215` (mode/fan render as `mixed` when members disagree).
+
+## 16f. Node info window (per-node drill-down)
+
+`GetNodeInfo(nodeId)` returns the **complete** node-registry record for one
+node — everything the daemon has persisted about it, composed in a single
+call. It reads `NodeRegistry::snapshot()` directly (the authoritative,
+SQLite-backed record), so unlike the lean `GetNodes` list it carries the
+identity triple (schema v4) and the interview-gathered capabilities (schema
+v5) the interview orchestrator records (§ node interview / #203). All-zero
+fields mean "not learned yet"; an unknown node returns a zeroed record whose
+`nodeId` echoes the query.
+
+The return struct `(yyyy ay y qqq yyyyy ybb yyyqq)`, in order:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `nodeId` | y | the node |
+| `basicType` / `genericType` / `specificType` | y y y | device-class triple |
+| `commandClasses` | ay | supported + controlled CC list (split at `0xEF`) |
+| `securityScheme` | y | 0 none, 1 S0, 2 S2 Unauth, 3 S2 Auth, 4 S2 Access Control |
+| `manufacturerId` / `productTypeId` / `productId` | q q q | Manufacturer Specific identity (CC 0x72) |
+| `libraryType` / `protocolVersion` / `protocolSubVersion` / `applicationVersion` / `applicationSubVersion` | y ×5 | Version (CC 0x86) firmware triple |
+| `endpointCount` / `endpointsDynamic` / `endpointsIdentical` | y b b | Multi Channel (CC 0x60) endpoint summary |
+| `zwavePlusVersion` / `roleType` / `nodeType` / `installerIconType` / `userIconType` | y y y q q | Z-Wave Plus Info (CC 0x5E) role + icons |
+
+```bash
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 GetNodeInfo y 5
+```
+
+In `zwave-terminal`, `[i]` opens the **node-info drill-down** for the selected
+node: a full-screen modal composing this record with the node's name (§16c)
+and last-known values + age (§16d). Press any key to return. (Dongle
+introspection, formerly on `[i]`, now rides along with the `[n]` network-status
+view.)
 
 ## 17. Future: ubus
 

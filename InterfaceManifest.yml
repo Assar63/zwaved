@@ -2191,6 +2191,47 @@ dbus:
       action:
         custom: emitGetNodes
 
+    - name: GetNodeInfo
+      doc: |
+        Full per-node record for the #45 node-info drill-down: the
+        node-registry identity (device-class triple + manufacturer /
+        product-type / product ids), the interview-gathered capabilities
+        (Version firmware triple, Multi Channel endpoint summary, Z-Wave+
+        role / node-type / icons), the supported Command Classes, and the
+        security scheme. Read straight from NodeRegistry::snapshot() — the
+        authoritative, persisted record — rather than the lean GetNodes
+        list cache, so it carries the schema-v4/v5 fields GetNodes omits.
+        All-zero fields mean "not learned yet". An unknown node returns a
+        zeroed record whose nodeId echoes the query.
+      params:
+        - { name: nodeId, dbus: y, cpp: u8 }
+      returns:
+        struct:
+          - { name: nodeId,                dbus: y }
+          - { name: basicType,             dbus: y }
+          - { name: genericType,           dbus: y }
+          - { name: specificType,          dbus: y }
+          - { name: commandClasses,        dbus: ay }
+          - { name: securityScheme,        dbus: y }
+          - { name: manufacturerId,        dbus: q }
+          - { name: productTypeId,         dbus: q }
+          - { name: productId,             dbus: q }
+          - { name: libraryType,           dbus: y }
+          - { name: protocolVersion,       dbus: y }
+          - { name: protocolSubVersion,    dbus: y }
+          - { name: applicationVersion,    dbus: y }
+          - { name: applicationSubVersion, dbus: y }
+          - { name: endpointCount,         dbus: y }
+          - { name: endpointsDynamic,      dbus: b }
+          - { name: endpointsIdentical,    dbus: b }
+          - { name: zwavePlusVersion,      dbus: y }
+          - { name: roleType,              dbus: y }
+          - { name: nodeType,              dbus: y }
+          - { name: installerIconType,     dbus: q }
+          - { name: userIconType,          dbus: q }
+      action:
+        custom: emitGetNodeInfo
+
     - name: GetDongleInfo
       params: []
       returns:

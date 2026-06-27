@@ -72,7 +72,7 @@ Implementation order (each shippable independently):
   - [x] store — `src/node-values/NodeValues` (`Store` + `instance()`, SQLite `node_values`, injectable clock; 4 tests)
   - [x] recorder — `src/node-values/Recorder.cpp` maps the typed report events (BinarySwitch/Multilevel/Battery/SensorMultilevel/SensorBinary/Configuration/ThermostatMode/ThermostatSetpoint) → `record(node, value_id, rendered)`; publishes `NodeValueChanged`; binds home from `DongleInfo`. 2 bus-driven tests.
   - [x] D-Bus read accessor — `GetNodeValues(y) → a(sst)` + the `NodeValueChanged(y s s)` signal (MANUAL §16d) so the terminal can show + live-update them
-- [ ] [Node info window](https://github.com/Assar63/zwaved/issues/45) — a **composed view** over node-registry (identity + interview), the value cache (#213), and node-metadata (labels); on-request refresh, no auto-polling.
+- [x] [Node info window](https://github.com/Assar63/zwaved/issues/45) — **done**. A **composed view** over node-registry (identity + interview capabilities), the value cache (#213), and node-metadata (labels); on-request, no auto-polling. Daemon exposes the full per-node record via `GetNodeInfo(y)` (reads `NodeRegistry::snapshot()`, carries the schema-v4/v5 fields `GetNodes` omits + the security scheme); `zwave-terminal` `[i]` opens a full-screen modal composing it with the node's name + last-known values/age (MANUAL §16f). Dongle introspection moved onto the `[n]` network view.
 
 ### Closed-loop automation (epic)  _(role: responder)_
 
@@ -233,7 +233,7 @@ Implementation order (each shippable independently):
 - [ ] [Settings window (zwave-terminal)](https://github.com/Assar63/zwaved/issues/43)
 - [x] **Node list** — `[l]` fetches `GetNodes` and renders each node into the activity pane.
 - [ ] [Node list (rich)](https://github.com/Assar63/zwaved/issues/44)
-- [ ] [Node info window](https://github.com/Assar63/zwaved/issues/45)
+- [x] [Node info window](https://github.com/Assar63/zwaved/issues/45) — `[i]` opens a per-node drill-down modal over `GetNodeInfo` (full record) + name + cached values. See above.
 - [ ] [Network info window](https://github.com/Assar63/zwaved/issues/46)
 - [x] **Network status** — `[n]` calls `GetNetworkStatus` and renders the aggregate (dongle, home ID, node count, active session, uptime).
 

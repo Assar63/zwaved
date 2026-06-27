@@ -25,6 +25,12 @@ struct MenuItem
 // appending an item — no more single-key exhaustion (#109).
 auto runActionMenu(const char* title, const std::vector<MenuItem>& items) -> void;
 
+// Render a full-screen modal showing `title` + each line of `lines`, then
+// block until a key is pressed. The read-only counterpart to runActionMenu —
+// used by the per-node info drill-down (#45). Long lines are clipped to the
+// screen width; lines past the bottom are dropped.
+auto runInfoModal(const std::string& title, const std::vector<std::string>& lines) -> void;
+
 auto draw(std::uint8_t lastSession) -> void;
 }  // namespace zwt
 

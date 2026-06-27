@@ -3,11 +3,14 @@
 #include "activity.hpp"
 #include "constants.hpp"
 #include "format.hpp"
+#include "nodes.hpp"
 #include "policy_blob.hpp"
 #include "prompts.hpp"
+#include "render.hpp"
 
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <iomanip>
 #include <ios>
 #include <optional>
@@ -721,6 +724,198 @@ auto handleDongleInfo(sdbus::IProxy& proxy) -> void
     }
     stream << std::dec << " controllerNode=" << static_cast<unsigned>(controllerNodeId);
     logLine(stream.str());
+}
+
+namespace
+{
+constexpr std::int64_t SECONDS_PER_MINUTE = 60;
+constexpr std::int64_t SECONDS_PER_HOUR   = SECONDS_PER_MINUTE * 60;
+constexpr std::int64_t SECONDS_PER_DAY    = SECONDS_PER_HOUR * 24;
+
+auto securitySchemeName(std::uint8_t scheme) -> const char*
+{
+    switch (scheme)
+    {
+    case 1:
+        return "S0";
+    case 2:
+        return "S2 Unauthenticated";
+    case 3:
+        return "S2 Authenticated";
+    case 4:
+        return "S2 Access Control";
+    default:
+        return "none";
+    }
+}
+
+// "3s ago" / "5m ago" / "2h ago" / "4d ago" from a unix-seconds timestamp.
+auto valueAge(std::uint64_t updatedAt) -> std::string
+{
+    const auto now   = static_cast<std::int64_t>(std::time(nullptr));
+    std::int64_t age = now - static_cast<std::int64_t>(updatedAt);
+    if (age < 0)
+    {
+        age = 0;
+    }
+    if (age < SECONDS_PER_MINUTE)
+    {
+        return std::to_string(age) + "s ago";
+    }
+    if (age < SECONDS_PER_HOUR)
+    {
+        return std::to_string(age / SECONDS_PER_MINUTE) + "m ago";
+    }
+    if (age < SECONDS_PER_DAY)
+    {
+        return std::to_string(age / SECONDS_PER_HOUR) + "h ago";
+    }
+    return std::to_string(age / SECONDS_PER_DAY) + "d ago";
+}
+
+auto hexWord(std::uint16_t value) -> std::string
+{
+    std::ostringstream stream;
+    stream << "0x" << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << value;
+    return stream.str();
+}
+}  // namespace
+
+auto handleNodeInfo(sdbus::IProxy& proxy, std::uint8_t nodeId) -> void
+{
+    using NodeInfoTuple = sdbus::Struct<std::uint8_t,
+                                        std::uint8_t,
+                                        std::uint8_t,
+                                        std::uint8_t,
+                                        std::vector<std::uint8_t>,
+                                        std::uint8_t,
+                                        std::uint16_t,
+                                        std::uint16_t,
+                                        std::uint16_t,
+                                        std::uint8_t,
+                                        std::uint8_t,
+                                        std::uint8_t,
+                                        std::uint8_t,
+                                        std::uint8_t,
+                                        std::uint8_t,
+                                        bool,
+                                        bool,
+                                        std::uint8_t,
+                                        std::uint8_t,
+                                        std::uint8_t,
+                                        std::uint16_t,
+                                        std::uint16_t>;
+    NodeInfoTuple info;
+    try
+    {
+        proxy.callMethod("GetNodeInfo").onInterface(IFACE_NAME).withArguments(nodeId).storeResultsTo(info);
+    }
+    catch (const sdbus::Error& err)
+    {
+        logLine(std::string{"GetNodeInfo failed: "} + err.what());
+        return;
+    }
+
+    const auto basicType     = std::get<1>(info);
+    const auto genericType   = std::get<2>(info);
+    const auto specificType  = std::get<3>(info);
+    const auto& ccs          = std::get<4>(info);
+    const auto scheme        = std::get<5>(info);
+    const auto manufacturer  = std::get<6>(info);
+    const auto productType   = std::get<7>(info);
+    const auto product       = std::get<8>(info);
+    const auto libraryType   = std::get<9>(info);
+    const auto protoVersion  = std::get<10>(info);
+    const auto protoSub      = std::get<11>(info);
+    const auto appVersion    = std::get<12>(info);
+    const auto appSub        = std::get<13>(info);
+    const auto endpointCount = std::get<14>(info);
+    const auto epDynamic     = std::get<15>(info);
+    const auto epIdentical   = std::get<16>(info);
+    const auto zwpVersion    = std::get<17>(info);
+    const auto roleType      = std::get<18>(info);
+    const auto nodeType      = std::get<19>(info);
+    const auto installerIcon = std::get<20>(info);
+    const auto userIcon      = std::get<21>(info);
+
+    // Name + cached values come from the UI model (already fetched for the
+    // selected node) — both are UI-thread state, same as this handler.
+    std::string name;
+    std::vector<NodeValueRow> values;
+    for (const auto& row : nodeModel().rows)
+    {
+        if (row.id == nodeId)
+        {
+            name   = row.name;
+            values = row.values;
+            break;
+        }
+    }
+
+    std::vector<std::string> lines;
+    {
+        std::ostringstream stream;
+        stream << "device class: " << hexWord(basicType).substr(2) << " / " << hexWord(genericType).substr(2) << " / "
+               << hexWord(specificType).substr(2);
+        lines.push_back(stream.str());
+    }
+    lines.push_back(std::string("security: ") + securitySchemeName(scheme));
+    if (manufacturer != 0 || productType != 0 || product != 0)
+    {
+        lines.push_back("identity: mfr " + hexWord(manufacturer) + "  type " + hexWord(productType) + "  product " +
+                        hexWord(product));
+    }
+    else
+    {
+        lines.emplace_back("identity: (not interviewed yet)");
+    }
+    if (libraryType != 0 || protoVersion != 0 || appVersion != 0)
+    {
+        std::ostringstream stream;
+        stream << "firmware: lib " << static_cast<unsigned>(libraryType) << " (" << libraryTypeName(libraryType)
+               << ")  proto " << static_cast<unsigned>(protoVersion) << "." << static_cast<unsigned>(protoSub)
+               << "  app " << static_cast<unsigned>(appVersion) << "." << static_cast<unsigned>(appSub);
+        lines.push_back(stream.str());
+    }
+    if (endpointCount != 0)
+    {
+        std::string flags;
+        if (epDynamic)
+        {
+            flags += "dynamic";
+        }
+        if (epIdentical)
+        {
+            flags += flags.empty() ? "identical" : ", identical";
+        }
+        lines.push_back("endpoints: " + std::to_string(static_cast<unsigned>(endpointCount)) +
+                        (flags.empty() ? "" : " (" + flags + ")"));
+    }
+    if (zwpVersion != 0 || roleType != 0 || nodeType != 0)
+    {
+        std::ostringstream stream;
+        stream << "z-wave+: v" << static_cast<unsigned>(zwpVersion) << "  role " << hexWord(roleType).substr(2)
+               << "  nodeType " << hexWord(nodeType).substr(2) << "  icons " << hexWord(installerIcon) << "/"
+               << hexWord(userIcon);
+        lines.push_back(stream.str());
+    }
+    lines.emplace_back("");
+    lines.emplace_back("command classes:");
+    lines.push_back("  " + formatCcList(ccs));
+    lines.emplace_back("");
+    lines.emplace_back("last-known values:");
+    if (values.empty())
+    {
+        lines.emplace_back("  (none reported yet)");
+    }
+    for (const auto& value : values)
+    {
+        lines.push_back("  " + value.valueId + " = " + value.value + "  (" + valueAge(value.updatedAt) + ")");
+    }
+
+    const std::string title =
+        "Node " + std::to_string(static_cast<unsigned>(nodeId)) + (name.empty() ? "" : "  \"" + name + "\"");
+    runInfoModal(title, lines);
 }
 
 /// True if `targetCc` appears in `ccs` *before* COMMAND_CLASS_MARK,

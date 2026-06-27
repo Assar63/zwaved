@@ -48,6 +48,33 @@ using EndpointPair = sdbus::Struct<std::uint8_t, std::uint8_t>;
 
 using NodeTuple = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t, std::vector<std::uint8_t>>;
 
+// Full per-node record for the #45 node-info drill-down (GetNodeInfo): the
+// node-registry identity + the interview-gathered capabilities + security
+// scheme. Field order matches the manifest's GetNodeInfo struct return and
+// NodeRegistry::NodeInfo. See the manifest for the wire signature.
+using NodeInfoTuple = sdbus::Struct<std::uint8_t,               // nodeId
+                                    std::uint8_t,               // basicType
+                                    std::uint8_t,               // genericType
+                                    std::uint8_t,               // specificType
+                                    std::vector<std::uint8_t>,  // commandClasses
+                                    std::uint8_t,               // securityScheme
+                                    std::uint16_t,              // manufacturerId
+                                    std::uint16_t,              // productTypeId
+                                    std::uint16_t,              // productId
+                                    std::uint8_t,               // libraryType
+                                    std::uint8_t,               // protocolVersion
+                                    std::uint8_t,               // protocolSubVersion
+                                    std::uint8_t,               // applicationVersion
+                                    std::uint8_t,               // applicationSubVersion
+                                    std::uint8_t,               // endpointCount
+                                    bool,                       // endpointsDynamic
+                                    bool,                       // endpointsIdentical
+                                    std::uint8_t,               // zwavePlusVersion
+                                    std::uint8_t,               // roleType
+                                    std::uint8_t,               // nodeType
+                                    std::uint16_t,              // installerIconType
+                                    std::uint16_t>;             // userIconType
+
 using DongleInfoTuple = sdbus::Struct<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>;
 
 using InitDataTuple = sdbus::Struct<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t, std::uint8_t>;

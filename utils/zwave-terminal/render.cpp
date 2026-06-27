@@ -293,6 +293,30 @@ auto runActionMenu(const char* title, const std::vector<MenuItem>& items) -> voi
     }
 }
 
+auto runInfoModal(const std::string& title, const std::vector<std::string>& lines) -> void
+{
+    erase();
+    const int maxX = getmaxx(stdscr);
+    const int maxY = getmaxy(stdscr);
+    int row        = 0;
+    mvprintw(row++, 0, " %s", fit(title, maxX - 1).c_str());
+    mvhline(row++, 0, '-', maxX);
+    for (const auto& line : lines)
+    {
+        if (row >= maxY - 1)
+        {
+            break;
+        }
+        mvprintw(row++, 0, " %s", fit(line, maxX - 1).c_str());
+    }
+    mvprintw(maxY - 1, 0, "%s", fit(" press any key to return", maxX).c_str());
+    refresh();
+
+    timeout(-1);  // blocking
+    getch();
+    timeout(UI_REFRESH_MS);
+}
+
 auto draw(std::uint8_t lastSession) -> void
 {
     erase();

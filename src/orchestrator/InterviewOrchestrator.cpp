@@ -13,13 +13,22 @@
 // Gets ride the encrypted channel; a non-secure node is interviewed straight
 // off NodeIncluded.
 //
+// Sleeping nodes (#203): a battery node advertises Wake Up (CC 0x84) in its
+// NIF and is awake only briefly after a WAKE_UP_NOTIFICATION. Sending the Gets
+// live would race the node back to sleep, so for such a node the whole Get
+// sequence is enqueued into PendingQueue up front; WakeUpOrchestrator drains it
+// on the next wake-up and the reports flow back during that window, driving
+// advance()/completion exactly as for an always-on node.
+//
 // MVP limits (like the other orchestrators): no inactivity timeout — a node
-// that never answers a Get leaves its session parked; sleeping-node interview
-// via PendingQueue and the InclusionOrchestrator policy-step re-trigger on
-// NodeInterviewComplete are later #203 layers. Hardware-verified in #189.
+// that never answers a Get leaves its session parked. For a sleeping node the
+// Gets are all drained in one wake window (PendingQueue::drain pops the lot);
+// any Get the node doesn't answer before sleeping again is not retried.
+// Hardware-verified in #189.
 
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
+#include "../pending-queue/PendingQueue.hpp"
 #include "../zwaved.h"  // IWYU pragma: keep — CONFIG_ORCHESTRATOR_PRIO
 
 #include <algorithm>
@@ -30,10 +39,20 @@
 #include <utility>
 #include <vector>
 
+// Generated CC constants — the interview Gets are the trivial
+// {COMMAND_CLASS, *_GET} byte pairs each codec's encodeGet() produces; we
+// build them from the same manifest constants so a sleeping node's queued
+// payloads match exactly what ProtocolThread would have sent live.
+#include <application/ManufacturerSpecific.gen.hpp>  // IWYU pragma: keep
+#include <application/MultiChannel.gen.hpp>          // IWYU pragma: keep
+#include <application/NodeVersion.gen.hpp>           // IWYU pragma: keep
+#include <application/ZWavePlusInfo.gen.hpp>         // IWYU pragma: keep
+
 namespace
 {
 constexpr std::uint8_t CC_MULTI_CHANNEL  = 0x60;
 constexpr std::uint8_t CC_ZWAVEPLUS_INFO = 0x5E;
+constexpr std::uint8_t CC_WAKE_UP        = 0x84;  // sleeping/battery node marker
 constexpr std::uint8_t CC_SECURITY_0     = 0x98;
 constexpr std::uint8_t CC_SECURITY_2     = 0x9F;
 constexpr std::uint8_t NO_CALLBACK       = 0x00;
@@ -52,7 +71,27 @@ struct Session
     std::vector<Step> steps;
     std::size_t index = 0;
     bool started      = false;  // false while deferred awaiting security bootstrap
+    bool viaQueue     = false;  // sleeping node: Gets enqueued to PendingQueue, drained on wake-up
 };
+
+// The byte payload for a step's Get — the {COMMAND_CLASS, *_GET} pair each
+// codec's encodeGet() produces. Used only for the sleeping-node queue path;
+// the live path goes through the Get*Command events (ProtocolThread encodes).
+auto payloadForStep(Step step) -> std::vector<std::uint8_t>
+{
+    switch (step)
+    {
+    case Step::ManufacturerSpecific:
+        return {ManufacturerSpecific::COMMAND_CLASS, ManufacturerSpecific::MANUFACTURER_SPECIFIC_GET};
+    case Step::Version:
+        return {NodeVersion::COMMAND_CLASS, NodeVersion::VERSION_GET};
+    case Step::Endpoints:
+        return {MultiChannel::COMMAND_CLASS, MultiChannel::MULTI_CHANNEL_ENDPOINT_GET};
+    case Step::ZWavePlus:
+        return {ZWavePlusInfo::COMMAND_CLASS, ZWavePlusInfo::ZWAVEPLUS_INFO_GET};
+    }
+    return {};
+}
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct State
@@ -103,6 +142,19 @@ auto beginInterview(std::uint8_t nodeId, Session& session) -> void
 {
     session.started = true;
     session.index   = 0;
+    if (session.viaQueue)
+    {
+        // Sleeping node: enqueue every Get instead of sending live.
+        // WakeUpOrchestrator drains them on the next WAKE_UP_NOTIFICATION;
+        // the reports drive advance()/completion as usual.
+        Logger::info("[interview] node " + std::to_string(nodeId) + " — sleeping; queueing " +
+                     std::to_string(session.steps.size()) + " interview Get(s) for next wake-up");
+        for (const auto step : session.steps)
+        {
+            PendingQueue::instance().enqueue(nodeId, payloadForStep(step), PendingQueue::PRIORITY_NORMAL);
+        }
+        return;
+    }
     Logger::info("[interview] node " + std::to_string(nodeId) + " — starting interview");
     sendStep(nodeId, session.steps.at(0));
 }
@@ -128,7 +180,12 @@ auto advance(std::uint8_t nodeId, Step completed) -> void
         state().sessions.erase(iter);
         return;
     }
-    sendStep(nodeId, session.steps.at(session.index));
+    // A sleeping node's Gets were all enqueued up front; only the live path
+    // sends the next Get on each report.
+    if (!session.viaQueue)
+    {
+        sendStep(nodeId, session.steps.at(session.index));
+    }
 }
 
 auto onNodeIncluded(const MessageBus::NodeIncluded& event) -> void
@@ -146,6 +203,10 @@ auto onNodeIncluded(const MessageBus::NodeIncluded& event) -> void
     {
         session.steps.push_back(Step::ZWavePlus);
     }
+
+    // A node advertising Wake Up (0x84) is a battery node, awake only briefly
+    // after a wake-up — interview it through the queue rather than live.
+    session.viaQueue = has(CC_WAKE_UP);
 
     const bool secure              = has(CC_SECURITY_0) || has(CC_SECURITY_2);
     state().sessions[event.nodeId] = std::move(session);

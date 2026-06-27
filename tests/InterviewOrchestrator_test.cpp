@@ -2,8 +2,10 @@
 // the typed reports and assert the Get sequence and the NodeInterviewComplete.
 
 #include "MessageBus.hpp"
+#include "PendingQueue.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <vector>
 
@@ -13,6 +15,7 @@ namespace
 {
 constexpr std::uint8_t CC_MULTI_CHANNEL  = 0x60;
 constexpr std::uint8_t CC_ZWAVEPLUS_INFO = 0x5E;
+constexpr std::uint8_t CC_WAKE_UP        = 0x84;
 constexpr std::uint8_t CC_SECURITY_2     = 0x9F;
 
 struct Capture
@@ -76,6 +79,47 @@ TEST(InterviewOrchestrator, MinimalNodeSkipsOptionalSteps)
 
     EXPECT_TRUE(cap.endpoints.empty());
     EXPECT_TRUE(cap.zwavePlus.empty());
+    ASSERT_TRUE(cap.completed.has_value());
+    EXPECT_EQ(*cap.completed, node);
+}
+
+TEST(InterviewOrchestrator, SleepingNodeQueuesGetsForWakeUp)
+{
+    // Configure the pending-queue singleton against a temp db + bind a home,
+    // so the orchestrator's enqueue lands somewhere we can inspect.
+    const auto dir = std::filesystem::temp_directory_path() / "zwaved_interview_sleeping_test";
+    std::filesystem::create_directories(dir);
+    MessageBus::publish(MessageBus::StorageConfig{.stateDir = dir.string()});
+    PendingQueue::instance().setHomeId({0xCA, 0xFE, 0xF0, 0x0D});
+
+    constexpr std::uint8_t node = 30;
+    PendingQueue::instance().clearForNode(node);  // clean slate across reruns
+    Capture cap;
+
+    // NIF advertises Wake Up (0x84): a sleeping node. The Gets are enqueued for
+    // the next wake-up rather than sent live.
+    MessageBus::publish(MessageBus::NodeIncluded{
+        .nodeId = node, .commandClasses = {0x25, CC_WAKE_UP, CC_MULTI_CHANNEL, CC_ZWAVEPLUS_INFO}});
+
+    EXPECT_TRUE(cap.mfr.empty());  // nothing sent live
+
+    // All four Gets are queued in sequence order, each the {CC, GET} pair.
+    const auto pending = PendingQueue::instance().peek(node);
+    ASSERT_EQ(pending.size(), 4U);
+    EXPECT_EQ(pending[0].payload, (std::vector<std::uint8_t>{0x72, 0x04}));  // ManufacturerSpecific Get
+    EXPECT_EQ(pending[1].payload, (std::vector<std::uint8_t>{0x86, 0x11}));  // Version Get
+    EXPECT_EQ(pending[2].payload, (std::vector<std::uint8_t>{0x60, 0x07}));  // Multi Channel endpoint Get
+    EXPECT_EQ(pending[3].payload, (std::vector<std::uint8_t>{0x5E, 0x01}));  // Z-Wave+ Get
+
+    // The reports (as they'd arrive after WakeUpOrchestrator drains the queue)
+    // drive completion; still nothing is sent live.
+    MessageBus::publish(MessageBus::ManufacturerSpecificReport{.sourceNodeId = node});
+    MessageBus::publish(MessageBus::NodeVersionReport{.sourceNodeId = node});
+    MessageBus::publish(MessageBus::MultiChannelEndPointReport{.sourceNodeId = node});
+    EXPECT_FALSE(cap.completed.has_value());
+    MessageBus::publish(MessageBus::ZWavePlusInfoReport{.sourceNodeId = node});
+
+    EXPECT_TRUE(cap.mfr.empty());
     ASSERT_TRUE(cap.completed.has_value());
     EXPECT_EQ(*cap.completed, node);
 }

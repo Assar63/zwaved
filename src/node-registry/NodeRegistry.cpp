@@ -24,7 +24,7 @@ namespace
 constexpr const char* DEFAULT_STATE_DIR = "/var/lib/zwaved";
 constexpr const char* STATE_DIR_ENV     = "ZWAVED_STATE_DIR";
 constexpr const char* DB_FILENAME       = "nodes.db";
-constexpr int CURRENT_SCHEMA_VERSION    = 4;
+constexpr int CURRENT_SCHEMA_VERSION    = 5;
 
 constexpr const char* SCHEMA_SQL = R"(
 CREATE TABLE IF NOT EXISTS nodes (
@@ -38,6 +38,19 @@ CREATE TABLE IF NOT EXISTS nodes (
     manufacturer_id INTEGER NOT NULL DEFAULT 0,
     product_type_id INTEGER NOT NULL DEFAULT 0,
     product_id      INTEGER NOT NULL DEFAULT 0,
+    library_type            INTEGER NOT NULL DEFAULT 0,
+    protocol_version        INTEGER NOT NULL DEFAULT 0,
+    protocol_sub_version    INTEGER NOT NULL DEFAULT 0,
+    application_version     INTEGER NOT NULL DEFAULT 0,
+    application_sub_version INTEGER NOT NULL DEFAULT 0,
+    endpoint_count          INTEGER NOT NULL DEFAULT 0,
+    endpoints_dynamic       INTEGER NOT NULL DEFAULT 0,
+    endpoints_identical     INTEGER NOT NULL DEFAULT 0,
+    zwaveplus_version       INTEGER NOT NULL DEFAULT 0,
+    role_type               INTEGER NOT NULL DEFAULT 0,
+    node_type               INTEGER NOT NULL DEFAULT 0,
+    installer_icon_type     INTEGER NOT NULL DEFAULT 0,
+    user_icon_type          INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (home_id, node_id)
 )
 )";
@@ -53,6 +66,23 @@ constexpr const char* MIGRATE_V3_ADD_IDENTITY_SQL =
     "ALTER TABLE nodes ADD COLUMN manufacturer_id INTEGER NOT NULL DEFAULT 0;"
     "ALTER TABLE nodes ADD COLUMN product_type_id INTEGER NOT NULL DEFAULT 0;"
     "ALTER TABLE nodes ADD COLUMN product_id INTEGER NOT NULL DEFAULT 0";
+// v4 -> v5: add the remaining interview-gathered capabilities (#203) — the
+// Version (0x86) firmware triple, Multi Channel (0x60) endpoint summary, and
+// Z-Wave Plus (0x5E) role/icon info.
+constexpr const char* MIGRATE_V4_ADD_CAPS_SQL =
+    "ALTER TABLE nodes ADD COLUMN library_type INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN protocol_version INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN protocol_sub_version INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN application_version INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN application_sub_version INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN endpoint_count INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN endpoints_dynamic INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN endpoints_identical INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN zwaveplus_version INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN role_type INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN node_type INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN installer_icon_type INTEGER NOT NULL DEFAULT 0;"
+    "ALTER TABLE nodes ADD COLUMN user_icon_type INTEGER NOT NULL DEFAULT 0";
 
 constexpr const char* UPSERT_SQL =
     "INSERT INTO nodes (home_id, node_id, basic_type, generic_type, specific_type, command_classes) "
@@ -67,12 +97,28 @@ constexpr const char* DELETE_SQL = "DELETE FROM nodes WHERE home_id = ? AND node
 
 constexpr const char* SELECT_FOR_HOME_SQL =
     "SELECT node_id, basic_type, generic_type, specific_type, command_classes, security_scheme, "
-    "manufacturer_id, product_type_id, product_id FROM nodes WHERE home_id = ?";
+    "manufacturer_id, product_type_id, product_id, "
+    "library_type, protocol_version, protocol_sub_version, application_version, application_sub_version, "
+    "endpoint_count, endpoints_dynamic, endpoints_identical, "
+    "zwaveplus_version, role_type, node_type, installer_icon_type, user_icon_type "
+    "FROM nodes WHERE home_id = ?";
 
 constexpr const char* SET_SCHEME_SQL = "UPDATE nodes SET security_scheme = ? WHERE home_id = ? AND node_id = ?";
 
 constexpr const char* SET_IDENTITY_SQL =
     "UPDATE nodes SET manufacturer_id = ?, product_type_id = ?, product_id = ? WHERE home_id = ? AND node_id = ?";
+
+constexpr const char* SET_VERSION_SQL =
+    "UPDATE nodes SET library_type = ?, protocol_version = ?, protocol_sub_version = ?, "
+    "application_version = ?, application_sub_version = ? WHERE home_id = ? AND node_id = ?";
+
+constexpr const char* SET_ENDPOINTS_SQL =
+    "UPDATE nodes SET endpoint_count = ?, endpoints_dynamic = ?, endpoints_identical = ? "
+    "WHERE home_id = ? AND node_id = ?";
+
+constexpr const char* SET_ZWAVEPLUS_SQL =
+    "UPDATE nodes SET zwaveplus_version = ?, role_type = ?, node_type = ?, "
+    "installer_icon_type = ?, user_icon_type = ? WHERE home_id = ? AND node_id = ?";
 
 // Bind positions for UPSERT (1-based per sqlite3_bind_*).
 constexpr int BIND_HOME     = 1;
@@ -83,15 +129,28 @@ constexpr int BIND_SPECIFIC = 5;
 constexpr int BIND_CCS      = 6;
 
 // SELECT column indices (0-based).
-constexpr int COL_NODE_ID  = 0;
-constexpr int COL_BASIC    = 1;
-constexpr int COL_GENERIC  = 2;
-constexpr int COL_SPECIFIC = 3;
-constexpr int COL_CCS      = 4;
-constexpr int COL_SCHEME   = 5;
-constexpr int COL_MFR      = 6;
-constexpr int COL_TYPE     = 7;
-constexpr int COL_PRODUCT  = 8;
+constexpr int COL_NODE_ID   = 0;
+constexpr int COL_BASIC     = 1;
+constexpr int COL_GENERIC   = 2;
+constexpr int COL_SPECIFIC  = 3;
+constexpr int COL_CCS       = 4;
+constexpr int COL_SCHEME    = 5;
+constexpr int COL_MFR       = 6;
+constexpr int COL_TYPE      = 7;
+constexpr int COL_PRODUCT   = 8;
+constexpr int COL_LIBRARY   = 9;
+constexpr int COL_PROTO     = 10;
+constexpr int COL_PROTO_SUB = 11;
+constexpr int COL_APP       = 12;
+constexpr int COL_APP_SUB   = 13;
+constexpr int COL_EP_COUNT  = 14;
+constexpr int COL_EP_DYN    = 15;
+constexpr int COL_EP_IDENT  = 16;
+constexpr int COL_ZWP_VER   = 17;
+constexpr int COL_ROLE      = 18;
+constexpr int COL_NODE_TYPE = 19;
+constexpr int COL_INST_ICON = 20;
+constexpr int COL_USER_ICON = 21;
 
 // Bind positions for SET_SCHEME (1-based).
 constexpr int BIND_SCHEME_VALUE = 1;
@@ -104,6 +163,31 @@ constexpr int BIND_ID_TYPE    = 2;
 constexpr int BIND_ID_PRODUCT = 3;
 constexpr int BIND_ID_HOME    = 4;
 constexpr int BIND_ID_NODE    = 5;
+
+// Bind positions for SET_VERSION (1-based).
+constexpr int BIND_VER_LIBRARY   = 1;
+constexpr int BIND_VER_PROTO     = 2;
+constexpr int BIND_VER_PROTO_SUB = 3;
+constexpr int BIND_VER_APP       = 4;
+constexpr int BIND_VER_APP_SUB   = 5;
+constexpr int BIND_VER_HOME      = 6;
+constexpr int BIND_VER_NODE      = 7;
+
+// Bind positions for SET_ENDPOINTS (1-based).
+constexpr int BIND_EP_COUNT = 1;
+constexpr int BIND_EP_DYN   = 2;
+constexpr int BIND_EP_IDENT = 3;
+constexpr int BIND_EP_HOME  = 4;
+constexpr int BIND_EP_NODE  = 5;
+
+// Bind positions for SET_ZWAVEPLUS (1-based).
+constexpr int BIND_ZWP_VER       = 1;
+constexpr int BIND_ZWP_ROLE      = 2;
+constexpr int BIND_ZWP_NODE_TYPE = 3;
+constexpr int BIND_ZWP_INST_ICON = 4;
+constexpr int BIND_ZWP_USER_ICON = 5;
+constexpr int BIND_ZWP_HOME      = 6;
+constexpr int BIND_ZWP_NODE      = 7;
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct State
@@ -120,9 +204,13 @@ struct State
     // open the database. Empty means "fall back to env / built-in".
     std::string configuredStateDir;
     MessageBus::SubscriptionId storageSub{0};
-    // Records the interview's ManufacturerSpecificReport into the device-identity
-    // columns (#203). Subscribed during initIfNeeded().
+    // Records the interview's typed reports into the per-node identity (#203,
+    // schema v4) and capability (schema v5) columns. Subscribed during
+    // initIfNeeded().
     MessageBus::SubscriptionId mfrSub{0};
+    MessageBus::SubscriptionId versionSub{0};
+    MessageBus::SubscriptionId endpointsSub{0};
+    MessageBus::SubscriptionId zwavePlusSub{0};
 
     ~State()
     {
@@ -131,10 +219,13 @@ struct State
             MessageBus::unsubscribe(storageSub);
             storageSub = 0;
         }
-        if (mfrSub != 0)
+        for (auto* sub : {&mfrSub, &versionSub, &endpointsSub, &zwavePlusSub})
         {
-            MessageBus::unsubscribe(mfrSub);
-            mfrSub = 0;
+            if (*sub != 0)
+            {
+                MessageBus::unsubscribe(*sub);
+                *sub = 0;
+            }
         }
         if (db != nullptr)
         {
@@ -315,7 +406,7 @@ auto migrateSchema(sqlite3* database) -> bool
     }
     else
     {
-        // Cumulative upgrades from an existing table (v1/v2/v3) up to v4.
+        // Cumulative upgrades from an existing table (v1/v2/v3/v4) up to v5.
         if (version == 1 && !execOrLog(database, MIGRATE_V1_ADD_SCHEME_SQL, "ALTER TABLE"))
         {
             return false;  // v1: lacks the security column — add it
@@ -324,13 +415,19 @@ auto migrateSchema(sqlite3* database) -> bool
         {
             return false;  // v2: rename `secure` bool to `security_scheme` (0/1 = None/S0)
         }
-        // v1/v2/v3 all reach the "v3 shape" above; now add the v4 identity triple.
-        if (!execOrLog(database, MIGRATE_V3_ADD_IDENTITY_SQL, "ALTER TABLE"))
+        // v1/v2/v3 reach the "v3 shape" above and still lack the v4 identity
+        // triple; a v4 db already has it, so guard on the version.
+        if (version <= 3 && !execOrLog(database, MIGRATE_V3_ADD_IDENTITY_SQL, "ALTER TABLE"))
+        {
+            return false;
+        }
+        // v1..v4 all lack the v5 interview-capability columns.
+        if (!execOrLog(database, MIGRATE_V4_ADD_CAPS_SQL, "ALTER TABLE"))
         {
             return false;
         }
     }
-    if (!execOrLog(database, "PRAGMA user_version = 4", "PRAGMA user_version"))
+    if (!execOrLog(database, "PRAGMA user_version = 5", "PRAGMA user_version"))
     {
         return false;
     }
@@ -365,6 +462,22 @@ auto loadNodesForHome(sqlite3* database, const std::string& homeId) -> std::map<
         info.manufacturerId = static_cast<std::uint16_t>(sqlite3_column_int(stmt.raw(), COL_MFR));
         info.productTypeId  = static_cast<std::uint16_t>(sqlite3_column_int(stmt.raw(), COL_TYPE));
         info.productId      = static_cast<std::uint16_t>(sqlite3_column_int(stmt.raw(), COL_PRODUCT));
+
+        info.libraryType           = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_LIBRARY));
+        info.protocolVersion       = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_PROTO));
+        info.protocolSubVersion    = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_PROTO_SUB));
+        info.applicationVersion    = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_APP));
+        info.applicationSubVersion = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_APP_SUB));
+
+        info.endpointCount      = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_EP_COUNT));
+        info.endpointsDynamic   = sqlite3_column_int(stmt.raw(), COL_EP_DYN) != 0;
+        info.endpointsIdentical = sqlite3_column_int(stmt.raw(), COL_EP_IDENT) != 0;
+
+        info.zwavePlusVersion  = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_ZWP_VER));
+        info.roleType          = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_ROLE));
+        info.nodeType          = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_NODE_TYPE));
+        info.installerIconType = static_cast<std::uint16_t>(sqlite3_column_int(stmt.raw(), COL_INST_ICON));
+        info.userIconType      = static_cast<std::uint16_t>(sqlite3_column_int(stmt.raw(), COL_USER_ICON));
         result.emplace(info.nodeId, info);
     }
     return result;
@@ -384,13 +497,39 @@ auto initIfNeeded() -> void
             state().storageSub = MessageBus::subscribe<MessageBus::StorageConfig>(
                 [](const MessageBus::StorageConfig& cfg) -> void { state().configuredStateDir = cfg.stateDir; });
 
-            // Record the interview's device-identity triple (#203). Transient
-            // event, so this never fires during init's call_once.
+            // Record the interview's typed reports into the per-node identity
+            // (#203) + capability columns. Transient events, so these never
+            // fire during init's call_once.
             state().mfrSub = MessageBus::subscribe<MessageBus::ManufacturerSpecificReport>(
                 [](const MessageBus::ManufacturerSpecificReport& report) -> void
                 {
                     NodeRegistry::setDeviceIdentity(
                         report.sourceNodeId, report.manufacturerId, report.productTypeId, report.productId);
+                });
+            state().versionSub = MessageBus::subscribe<MessageBus::NodeVersionReport>(
+                [](const MessageBus::NodeVersionReport& report) -> void
+                {
+                    NodeRegistry::setVersionInfo(report.sourceNodeId,
+                                                 report.libraryType,
+                                                 report.protocolVersion,
+                                                 report.protocolSubVersion,
+                                                 report.applicationVersion,
+                                                 report.applicationSubVersion);
+                });
+            state().endpointsSub = MessageBus::subscribe<MessageBus::MultiChannelEndPointReport>(
+                [](const MessageBus::MultiChannelEndPointReport& report) -> void {
+                    NodeRegistry::setEndpointInfo(
+                        report.sourceNodeId, report.endpointCount, report.dynamic, report.identical);
+                });
+            state().zwavePlusSub = MessageBus::subscribe<MessageBus::ZWavePlusInfoReport>(
+                [](const MessageBus::ZWavePlusInfoReport& report) -> void
+                {
+                    NodeRegistry::setZWavePlusInfo(report.sourceNodeId,
+                                                   report.zwavePlusVersion,
+                                                   report.roleType,
+                                                   report.nodeType,
+                                                   report.installerIconType,
+                                                   report.userIconType);
                 });
 
             const auto path = resolveDbPath();
@@ -680,6 +819,117 @@ auto NodeRegistry::setDeviceIdentity(std::uint8_t nodeId,
         .bindInt(BIND_ID_PRODUCT, productId)
         .bindText(BIND_ID_HOME, *home)
         .bindInt(BIND_ID_NODE, nodeId)
+        .execDone();
+}
+
+auto NodeRegistry::setVersionInfo(std::uint8_t nodeId,
+                                  std::uint8_t libraryType,
+                                  std::uint8_t protocolVersion,
+                                  std::uint8_t protocolSubVersion,
+                                  std::uint8_t applicationVersion,
+                                  std::uint8_t applicationSubVersion) -> void
+{
+    initIfNeeded();
+    std::scoped_lock const lock(state().mutex);
+    const auto iter = state().nodes.find(nodeId);
+    if (iter == state().nodes.end())
+    {
+        return;  // unknown node — nothing to record
+    }
+    iter->second.libraryType           = libraryType;
+    iter->second.protocolVersion       = protocolVersion;
+    iter->second.protocolSubVersion    = protocolSubVersion;
+    iter->second.applicationVersion    = applicationVersion;
+    iter->second.applicationSubVersion = applicationSubVersion;
+    const auto& home                   = state().currentHomeId;
+    if (state().db == nullptr || !home.has_value())
+    {
+        return;
+    }
+    Stmt stmt(state().db, SET_VERSION_SQL, "SET VERSION");
+    if (!stmt.valid())
+    {
+        return;
+    }
+    stmt.bindInt(BIND_VER_LIBRARY, libraryType)
+        .bindInt(BIND_VER_PROTO, protocolVersion)
+        .bindInt(BIND_VER_PROTO_SUB, protocolSubVersion)
+        .bindInt(BIND_VER_APP, applicationVersion)
+        .bindInt(BIND_VER_APP_SUB, applicationSubVersion)
+        .bindText(BIND_VER_HOME, *home)
+        .bindInt(BIND_VER_NODE, nodeId)
+        .execDone();
+}
+
+auto NodeRegistry::setEndpointInfo(std::uint8_t nodeId,
+                                   std::uint8_t endpointCount,
+                                   bool dynamic,
+                                   bool identical) -> void
+{
+    initIfNeeded();
+    std::scoped_lock const lock(state().mutex);
+    const auto iter = state().nodes.find(nodeId);
+    if (iter == state().nodes.end())
+    {
+        return;  // unknown node — nothing to record
+    }
+    iter->second.endpointCount      = endpointCount;
+    iter->second.endpointsDynamic   = dynamic;
+    iter->second.endpointsIdentical = identical;
+    const auto& home                = state().currentHomeId;
+    if (state().db == nullptr || !home.has_value())
+    {
+        return;
+    }
+    Stmt stmt(state().db, SET_ENDPOINTS_SQL, "SET ENDPOINTS");
+    if (!stmt.valid())
+    {
+        return;
+    }
+    stmt.bindInt(BIND_EP_COUNT, endpointCount)
+        .bindInt(BIND_EP_DYN, dynamic ? 1 : 0)
+        .bindInt(BIND_EP_IDENT, identical ? 1 : 0)
+        .bindText(BIND_EP_HOME, *home)
+        .bindInt(BIND_EP_NODE, nodeId)
+        .execDone();
+}
+
+auto NodeRegistry::setZWavePlusInfo(std::uint8_t nodeId,
+                                    std::uint8_t zwavePlusVersion,
+                                    std::uint8_t roleType,
+                                    std::uint8_t nodeType,
+                                    std::uint16_t installerIconType,
+                                    std::uint16_t userIconType) -> void
+{
+    initIfNeeded();
+    std::scoped_lock const lock(state().mutex);
+    const auto iter = state().nodes.find(nodeId);
+    if (iter == state().nodes.end())
+    {
+        return;  // unknown node — nothing to record
+    }
+    iter->second.zwavePlusVersion  = zwavePlusVersion;
+    iter->second.roleType          = roleType;
+    iter->second.nodeType          = nodeType;
+    iter->second.installerIconType = installerIconType;
+    iter->second.userIconType      = userIconType;
+    const auto& home               = state().currentHomeId;
+    if (state().db == nullptr || !home.has_value())
+    {
+        return;
+    }
+    Stmt stmt(state().db, SET_ZWAVEPLUS_SQL, "SET ZWAVEPLUS");
+    if (!stmt.valid())
+    {
+        return;
+    }
+    stmt.bindInt(BIND_ZWP_VER, zwavePlusVersion)
+        .bindInt(BIND_ZWP_ROLE, roleType)
+        .bindInt(BIND_ZWP_NODE_TYPE, nodeType)
+        .bindInt(BIND_ZWP_INST_ICON, installerIconType)
+        .bindInt(BIND_ZWP_USER_ICON, userIconType)
+        .bindText(BIND_ZWP_HOME, *home)
+        .bindInt(BIND_ZWP_NODE, nodeId)
         .execDone();
 }
 

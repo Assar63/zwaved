@@ -33,6 +33,10 @@ struct NodeInfo
     std::uint8_t specificType = 0;
     std::vector<std::uint8_t> commandClasses;
     SecurityScheme securityScheme = SecurityScheme::None;  ///< highest secure class (#167 S0, #186 S2)
+    // Device identity from the post-inclusion interview (#203), 0 until gathered.
+    std::uint16_t manufacturerId = 0;
+    std::uint16_t productTypeId  = 0;
+    std::uint16_t productId      = 0;
 };
 
 /// Bind the registry to a Z-Wave network identified by its 4-byte
@@ -79,6 +83,15 @@ auto setSecurityScheme(std::uint8_t nodeId, SecurityScheme scheme) -> void;
 /// The security scheme of `nodeId` (SecurityScheme::None for non-secure or
 /// unknown nodes).
 [[nodiscard]] auto securityScheme(std::uint8_t nodeId) -> SecurityScheme;
+
+/// Record a node's device-identity triple, learned from the post-inclusion
+/// interview's ManufacturerSpecificReport (#203). Updates the in-memory entry
+/// and persists it. No-op if no entry exists.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the triple's wire order is fixed
+auto setDeviceIdentity(std::uint8_t nodeId,
+                       std::uint16_t manufacturerId,
+                       std::uint16_t productTypeId,
+                       std::uint16_t productId) -> void;
 
 /// Whether `nodeId` is secure at all (any scheme other than None). Used by the
 /// outbound send path to decide whether to encapsulate.

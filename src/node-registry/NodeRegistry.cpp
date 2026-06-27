@@ -212,14 +212,14 @@ class Stmt
         return *this;
     }
 
-    auto step() -> int
+    [[nodiscard]] auto step() const -> int
     {
         return sqlite3_step(stmt_);
     }
 
     /// Execute a statement expected to terminate with SQLITE_DONE.
     /// Logs the SQLite error message if it doesn't.
-    auto execDone() -> void
+    auto execDone() const -> void
     {
         if (sqlite3_step(stmt_) != SQLITE_DONE)
         {
@@ -269,7 +269,7 @@ auto formatHomeId(const std::vector<std::uint8_t>& bytes) -> std::string
 
 auto readSchemaVersion(sqlite3* database) -> int
 {
-    Stmt stmt(database, "PRAGMA user_version", "PRAGMA user_version");
+    const Stmt stmt(database, "PRAGMA user_version", "PRAGMA user_version");
     if (!stmt.valid())
     {
         return 0;
@@ -374,7 +374,7 @@ auto initIfNeeded() -> void
 {
     std::call_once(
         state().initFlag,
-        []
+        []() -> void
         {
             // Subscribe synchronously so the bus's retained
             // StorageConfig (published by Config at priority 102,
@@ -551,7 +551,7 @@ auto NodeRegistry::seed(std::uint8_t nodeId) -> void
     withBoundHome(
         [&](const std::string& home) -> bool
         {
-            if (state().nodes.find(nodeId) != state().nodes.end())
+            if (state().nodes.contains(nodeId))
             {
                 return false;
             }

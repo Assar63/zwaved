@@ -42,6 +42,10 @@ auto handleSetWakeUpInterval(sdbus::IProxy& proxy, std::uint8_t& sessionCounter)
 auto handleAssociationEdit(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, const char* method) -> void;
 auto handleNetworkStatus(sdbus::IProxy& proxy) -> void;
 auto handleDongleInfo(sdbus::IProxy& proxy) -> void;
+// Per-node info drill-down (#45): a full-screen modal composing the node's
+// identity + interview capabilities (GetNodeInfo) with its name + cached
+// values from the UI model.
+auto handleNodeInfo(sdbus::IProxy& proxy, std::uint8_t nodeId) -> void;
 [[nodiscard]] auto nodeSupportsCc(const std::vector<std::uint8_t>& ccs, std::uint8_t targetCc) -> bool;
 [[nodiscard]] auto fetchControllerNodeId(sdbus::IProxy& proxy) -> std::optional<std::uint8_t>;
 auto handleGetAssociationGroupings(sdbus::IProxy& proxy, std::uint8_t& callbackCounter) -> void;

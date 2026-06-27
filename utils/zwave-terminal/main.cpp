@@ -286,6 +286,7 @@ auto run() -> int
             else if (key == 'n' || key == 'N')
             {
                 handleNetworkStatus(*proxy);
+                handleDongleInfo(*proxy);
             }
             else if (key == 'f' || key == 'F')
             {
@@ -293,7 +294,15 @@ auto run() -> int
             }
             else if (key == 'i' || key == 'I')
             {
-                handleDongleInfo(*proxy);
+                // Per-node info drill-down (#45) for the selected node.
+                if (const auto nodeId = selectedNodeId())
+                {
+                    handleNodeInfo(*proxy, *nodeId);
+                }
+                else
+                {
+                    logLine("No node selected");
+                }
             }
             else if (key == 'L')
             {

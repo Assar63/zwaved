@@ -3,6 +3,7 @@
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
 #include "../node-metadata/NodeMetadata.hpp"
+#include "../node-registry/NodeRegistry.hpp"
 #include "../node-values/NodeValues.hpp"
 #include "../policy-register/PolicyRegister.hpp"
 #include "../scene-store/SceneStore.hpp"
@@ -291,6 +292,45 @@ auto emitGetNodes(DBusBackend::Impl& impl) -> std::vector<NodeTuple>
         result.emplace_back(info.nodeId, info.basicType, info.genericType, info.specificType, info.commandClasses);
     }
     return result;
+}
+
+auto emitGetNodeInfo(DBusBackend::Impl& /*impl*/, std::uint8_t nodeId) -> NodeInfoTuple
+{
+    // Read the authoritative, persisted record (identity + capabilities) from
+    // NodeRegistry rather than the lean GetNodes cache, which omits the
+    // schema-v4/v5 fields the drill-down shows.
+    for (const auto& info : NodeRegistry::snapshot())
+    {
+        if (info.nodeId == nodeId)
+        {
+            return NodeInfoTuple{info.nodeId,
+                                 info.basicType,
+                                 info.genericType,
+                                 info.specificType,
+                                 info.commandClasses,
+                                 static_cast<std::uint8_t>(info.securityScheme),
+                                 info.manufacturerId,
+                                 info.productTypeId,
+                                 info.productId,
+                                 info.libraryType,
+                                 info.protocolVersion,
+                                 info.protocolSubVersion,
+                                 info.applicationVersion,
+                                 info.applicationSubVersion,
+                                 info.endpointCount,
+                                 info.endpointsDynamic,
+                                 info.endpointsIdentical,
+                                 info.zwavePlusVersion,
+                                 info.roleType,
+                                 info.nodeType,
+                                 info.installerIconType,
+                                 info.userIconType};
+        }
+    }
+    // Unknown node: a zeroed record whose nodeId echoes the query.
+    NodeInfoTuple empty{};
+    std::get<0>(empty) = nodeId;
+    return empty;
 }
 
 auto emitGetDongleInfo(DBusBackend::Impl& impl) -> DongleInfoTuple

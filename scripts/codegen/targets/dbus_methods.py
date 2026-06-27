@@ -123,6 +123,7 @@ def _dbus_to_cpp(dbus_sig: str) -> str:
 # read_cached: lands.
 RETURN_TUPLE_ALIASES: dict[str, str] = {
     "GetNodes":           "NodeTuple",
+    "GetNodeInfo":        "NodeInfoTuple",
     "GetDongleInfo":      "DongleInfoTuple",
     "GetInitData":        "InitDataTuple",
     "GetVersion":         "DaemonVersionTuple",

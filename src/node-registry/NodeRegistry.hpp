@@ -37,6 +37,22 @@ struct NodeInfo
     std::uint16_t manufacturerId = 0;
     std::uint16_t productTypeId  = 0;
     std::uint16_t productId      = 0;
+    // Version (CC 0x86) info from the interview (#203), 0 until gathered.
+    std::uint8_t libraryType           = 0;
+    std::uint8_t protocolVersion       = 0;
+    std::uint8_t protocolSubVersion    = 0;
+    std::uint8_t applicationVersion    = 0;
+    std::uint8_t applicationSubVersion = 0;
+    // Multi Channel (CC 0x60) endpoint info from the interview (#203).
+    std::uint8_t endpointCount = 0;
+    bool endpointsDynamic      = false;
+    bool endpointsIdentical    = false;
+    // Z-Wave Plus (CC 0x5E) info from the interview (#203).
+    std::uint8_t zwavePlusVersion   = 0;
+    std::uint8_t roleType           = 0;
+    std::uint8_t nodeType           = 0;
+    std::uint16_t installerIconType = 0;
+    std::uint16_t userIconType      = 0;
 };
 
 /// Bind the registry to a Z-Wave network identified by its 4-byte
@@ -92,6 +108,35 @@ auto setDeviceIdentity(std::uint8_t nodeId,
                        std::uint16_t manufacturerId,
                        std::uint16_t productTypeId,
                        std::uint16_t productId) -> void;
+
+/// Record a node's Version (CC 0x86) report from the post-inclusion interview
+/// (#203): Z-Wave library type + protocol/application firmware versions.
+/// Updates the in-memory entry and persists it. No-op if no entry exists.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the report's wire order is fixed
+auto setVersionInfo(std::uint8_t nodeId,
+                    std::uint8_t libraryType,
+                    std::uint8_t protocolVersion,
+                    std::uint8_t protocolSubVersion,
+                    std::uint8_t applicationVersion,
+                    std::uint8_t applicationSubVersion) -> void;
+
+/// Record a node's Multi Channel (CC 0x60) End Point report from the interview
+/// (#203): how many endpoints it presents and whether they are dynamic /
+/// identical. Updates the in-memory entry and persists it. No-op if no entry
+/// exists.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the report's wire order is fixed
+auto setEndpointInfo(std::uint8_t nodeId, std::uint8_t endpointCount, bool dynamic, bool identical) -> void;
+
+/// Record a node's Z-Wave Plus Info (CC 0x5E) report from the interview (#203):
+/// the Z-Wave Plus version, role/node type, and device-database icons.
+/// Updates the in-memory entry and persists it. No-op if no entry exists.
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): the report's wire order is fixed
+auto setZWavePlusInfo(std::uint8_t nodeId,
+                      std::uint8_t zwavePlusVersion,
+                      std::uint8_t roleType,
+                      std::uint8_t nodeType,
+                      std::uint16_t installerIconType,
+                      std::uint16_t userIconType) -> void;
 
 /// Whether `nodeId` is secure at all (any scheme other than None). Used by the
 /// outbound send path to decide whether to encapsulate.

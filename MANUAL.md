@@ -1503,9 +1503,23 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 
 In `zwave-terminal`, `[i]` opens the **node-info drill-down** for the selected
 node: a full-screen modal composing this record with the node's name (§16c)
-and last-known values + age (§16d). Press any key to return. (Dongle
-introspection, formerly on `[i]`, now rides along with the `[n]` network-status
-view.)
+and last-known values + age (§16d). Press any key to return.
+
+## 16g. Network info window
+
+The `[n]` key opens the **network-info drill-down** — a full-screen modal (the
+network-level counterpart to the per-node `[i]` window, §16f) composing three
+already-available daemon methods into one overview:
+
+- **`GetNetworkStatus`** — dongle connection + TTY, home ID + controller node,
+  included-node count, in-flight inclusion/exclusion session, daemon uptime.
+- **`GetDongleInfo`** — the dongle's Z-Wave library version + type.
+- **`GetInitData`** — the serial-API version, capabilities byte, chip
+  type/version, and the startup node-bitmap count.
+
+Each section degrades independently: if one method errors (e.g. no dongle
+introspected yet) the modal shows that line and still renders the rest. Press
+any key to return.
 
 ## 17. Future: ubus
 

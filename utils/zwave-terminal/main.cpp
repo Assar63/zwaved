@@ -285,8 +285,7 @@ auto run() -> int
             }
             else if (key == 'n' || key == 'N')
             {
-                handleNetworkStatus(*proxy);
-                handleDongleInfo(*proxy);
+                handleNetworkInfo(*proxy);
             }
             else if (key == 'f' || key == 'F')
             {

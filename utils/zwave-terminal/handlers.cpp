@@ -623,7 +623,7 @@ auto handleAssociationEdit(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, c
 // meaningful. Mirrors PolicyRegister::PolicyEntry without pulling in the
 // daemon's variant type.
 
-auto handleNetworkStatus(sdbus::IProxy& proxy) -> void
+auto handleNetworkInfo(sdbus::IProxy& proxy) -> void
 {
     using NetworkStatusTuple = sdbus::Struct<bool,
                                              std::string,
@@ -634,96 +634,114 @@ auto handleNetworkStatus(sdbus::IProxy& proxy) -> void
                                              std::uint8_t,
                                              std::uint8_t,
                                              std::uint64_t>;
-    NetworkStatusTuple status;
+    using DongleInfoTuple    = sdbus::Struct<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>;
+    using InitDataTuple =
+        sdbus::Struct<std::uint8_t, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t, std::uint8_t>;
+
+    std::vector<std::string> lines;
+
+    // --- Aggregate status (GetNetworkStatus) -----------------------------
     try
     {
+        NetworkStatusTuple status;
         proxy.callMethod("GetNetworkStatus").onInterface(IFACE_NAME).storeResultsTo(status);
+        const auto dongleConnected  = std::get<0>(status);
+        const auto& ttyPath         = std::get<1>(status);
+        const auto& homeId          = std::get<2>(status);
+        const auto controllerNodeId = std::get<3>(status);
+        const auto nodeCount        = std::get<4>(status);
+        const auto sessionActive    = std::get<5>(status);
+        const auto sessionCommandId = std::get<6>(status);
+        const auto sessionId        = std::get<7>(status);
+        const auto uptimeSeconds    = std::get<8>(status);
+
+        lines.push_back(std::string("dongle: ") + (dongleConnected ? "connected " + ttyPath : "disconnected"));
+        if (!homeId.empty())
+        {
+            lines.push_back("home id: " + homeId + "  (controller node " +
+                            std::to_string(static_cast<unsigned>(controllerNodeId)) + ")");
+        }
+        else
+        {
+            lines.emplace_back("home id: (not yet introspected)");
+        }
+        lines.push_back("nodes: " + std::to_string(nodeCount));
+        if (sessionActive)
+        {
+            const char* operation = "?";
+            if (sessionCommandId == CMD_ADD_NODE)
+            {
+                operation = "inclusion";
+            }
+            else if (sessionCommandId == CMD_REMOVE_NODE)
+            {
+                operation = "exclusion";
+            }
+            lines.push_back(std::string("session: ") + operation + " #" +
+                            std::to_string(static_cast<unsigned>(sessionId)));
+        }
+        else
+        {
+            lines.emplace_back("session: none");
+        }
+        const auto hours   = uptimeSeconds / SECONDS_PER_HOUR;
+        const auto minutes = (uptimeSeconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
+        const auto seconds = uptimeSeconds % SECONDS_PER_MINUTE;
+        lines.push_back("uptime: " + std::to_string(hours) + "h " + std::to_string(minutes) + "m " +
+                        std::to_string(seconds) + "s");
     }
     catch (const sdbus::Error& err)
     {
-        logLine(std::string{"GetNetworkStatus failed: "} + err.what());
-        return;
+        lines.push_back(std::string("network status unavailable: ") + err.what());
     }
-    const auto dongleConnected  = std::get<0>(status);
-    const auto& ttyPath         = std::get<1>(status);
-    const auto& homeId          = std::get<2>(status);
-    const auto controllerNodeId = std::get<3>(status);
-    const auto nodeCount        = std::get<4>(status);
-    const auto sessionActive    = std::get<5>(status);
-    const auto sessionCommandId = std::get<6>(status);
-    const auto sessionId        = std::get<7>(status);
-    const auto uptimeSeconds    = std::get<8>(status);
 
-    logLine("Network status:");
-    logLine(std::string("  dongle: ") + (dongleConnected ? "connected " + ttyPath : "disconnected"));
-    if (!homeId.empty())
-    {
-        std::ostringstream stream;
-        stream << "  home id: " << homeId << " (controller node " << static_cast<unsigned>(controllerNodeId) << ")";
-        logLine(stream.str());
-    }
-    else
-    {
-        logLine("  home id: (not yet introspected)");
-    }
-    logLine("  nodes: " + std::to_string(nodeCount));
-    if (sessionActive)
-    {
-        const char* operation = "?";
-        if (sessionCommandId == CMD_ADD_NODE)
-        {
-            operation = "inclusion";
-        }
-        else if (sessionCommandId == CMD_REMOVE_NODE)
-        {
-            operation = "exclusion";
-        }
-        logLine(std::string("  active session: ") + operation + " #" +
-                std::to_string(static_cast<unsigned>(sessionId)));
-    }
-    else
-    {
-        logLine("  active session: none");
-    }
-    const auto hours   = uptimeSeconds / SECONDS_PER_HOUR;
-    const auto minutes = (uptimeSeconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE;
-    const auto seconds = uptimeSeconds % SECONDS_PER_MINUTE;
-    std::ostringstream upStream;
-    upStream << "  uptime: " << hours << "h " << minutes << "m " << seconds << "s";
-    logLine(upStream.str());
-}
-
-auto handleDongleInfo(sdbus::IProxy& proxy) -> void
-{
-    using DongleInfoTuple = sdbus::Struct<std::string, std::uint8_t, std::vector<std::uint8_t>, std::uint8_t>;
-    DongleInfoTuple info;
+    // --- Dongle library (GetDongleInfo) ----------------------------------
+    lines.emplace_back("");
     try
     {
+        DongleInfoTuple info;
         proxy.callMethod("GetDongleInfo").onInterface(IFACE_NAME).storeResultsTo(info);
+        const auto& libraryVersion = std::get<0>(info);
+        const auto libraryType     = std::get<1>(info);
+        if (libraryVersion.empty() && libraryType == 0)
+        {
+            lines.emplace_back("library: (not introspected — connect a dongle first)");
+        }
+        else
+        {
+            lines.push_back("library: \"" + libraryVersion + "\"  type " +
+                            std::to_string(static_cast<unsigned>(libraryType)) + " (" + libraryTypeName(libraryType) +
+                            ")");
+        }
     }
     catch (const sdbus::Error& err)
     {
-        logLine(std::string{"GetDongleInfo failed: "} + err.what());
-        return;
+        lines.push_back(std::string("dongle info unavailable: ") + err.what());
     }
-    const auto& libraryVersion  = std::get<0>(info);
-    const auto libraryType      = std::get<1>(info);
-    const auto& homeId          = std::get<2>(info);
-    const auto controllerNodeId = std::get<3>(info);
-    if (libraryVersion.empty() && libraryType == 0)
+
+    // --- Serial API init data (GetInitData) ------------------------------
+    try
     {
-        logLine("DongleInfo: (not yet introspected — connect a dongle first)");
-        return;
+        InitDataTuple init;
+        proxy.callMethod("GetInitData").onInterface(IFACE_NAME).storeResultsTo(init);
+        const auto serialApiVersion = std::get<0>(init);
+        const auto capabilities     = std::get<1>(init);
+        const auto& nodeIds         = std::get<2>(init);
+        const auto chipType         = std::get<3>(init);
+        const auto chipVersion      = std::get<4>(init);
+        std::ostringstream stream;
+        stream << "serial API: v" << static_cast<unsigned>(serialApiVersion) << "  caps 0x" << std::hex
+               << std::uppercase << std::setw(2) << std::setfill('0') << static_cast<unsigned>(capabilities) << std::dec
+               << "  chip " << static_cast<unsigned>(chipType) << "/" << static_cast<unsigned>(chipVersion);
+        lines.push_back(stream.str());
+        lines.push_back("init bitmap: " + std::to_string(nodeIds.size()) + " node(s)");
     }
-    std::ostringstream stream;
-    stream << "DongleInfo: \"" << libraryVersion << "\" libType=" << static_cast<unsigned>(libraryType) << " ("
-           << libraryTypeName(libraryType) << ") homeId=";
-    for (const auto byte : homeId)
+    catch (const sdbus::Error& err)
     {
-        stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(byte);
+        lines.push_back(std::string("init data unavailable: ") + err.what());
     }
-    stream << std::dec << " controllerNode=" << static_cast<unsigned>(controllerNodeId);
-    logLine(stream.str());
+
+    runInfoModal("Network", lines);
 }
 
 namespace

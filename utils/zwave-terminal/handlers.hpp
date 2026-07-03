@@ -40,8 +40,10 @@ auto handleSetConfiguration(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) 
 auto handleSetWakeUpInterval(sdbus::IProxy& proxy, std::uint8_t& sessionCounter) -> void;
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): proxy and counter are distinct types; method is a label
 auto handleAssociationEdit(sdbus::IProxy& proxy, std::uint8_t& sessionCounter, const char* method) -> void;
-auto handleNetworkStatus(sdbus::IProxy& proxy) -> void;
-auto handleDongleInfo(sdbus::IProxy& proxy) -> void;
+// Network info drill-down (#46): a full-screen modal composing the network
+// overview (GetNetworkStatus) with the dongle library (GetDongleInfo) and the
+// serial-API init data (GetInitData).
+auto handleNetworkInfo(sdbus::IProxy& proxy) -> void;
 // Per-node info drill-down (#45): a full-screen modal composing the node's
 // identity + interview capabilities (GetNodeInfo) with its name + cached
 // values from the UI model.

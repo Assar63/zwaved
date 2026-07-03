@@ -4,6 +4,7 @@
 #include "constants.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -22,6 +23,30 @@ namespace
 using NodeTuple      = sdbus::Struct<std::uint8_t, std::uint8_t, std::uint8_t, std::uint8_t, std::vector<std::uint8_t>>;
 using MetadataTuple  = sdbus::Struct<std::string, std::string>;
 using NodeValueTuple = sdbus::Struct<std::string, std::string, std::uint64_t>;
+
+// valueId prefixes in descending interest for the list-column headline; the
+// first match wins. Favours actuator state (switch/level) over passive
+// readings (sensor/config/battery).
+constexpr std::array<const char*, 6> STATE_PRIORITY{
+    "binary_switch", "multilevel_switch", "setpoint", "sensor", "config", "battery"};
+
+// The headline value for a node's list-column state (#44): the most
+// operationally-relevant of its cached values. Falls back to the first value,
+// or empty when the node has reported nothing yet.
+auto headlineState(const std::vector<NodeValueRow>& values) -> std::string
+{
+    for (const auto* prefix : STATE_PRIORITY)
+    {
+        for (const auto& value : values)
+        {
+            if (value.valueId.starts_with(prefix))
+            {
+                return value.value;
+            }
+        }
+    }
+    return values.empty() ? std::string{} : values.front().value;
+}
 }  // namespace
 
 auto nodeModel() -> NodeModel&
@@ -90,29 +115,27 @@ auto refreshNodes(sdbus::IProxy& proxy) -> void
     }
 }
 
-auto refreshSelectedValues(sdbus::IProxy& proxy) -> void
+auto refreshValues(sdbus::IProxy& proxy) -> void
 {
-    auto& model = nodeModel();
-    if (model.selected >= model.rows.size())
+    for (auto& row : nodeModel().rows)
     {
-        return;
-    }
-    NodeRow& row = model.rows.at(model.selected);
-    std::vector<NodeValueTuple> values;
-    try
-    {
-        proxy.callMethod("GetNodeValues").onInterface(IFACE_NAME).withArguments(row.id).storeResultsTo(values);
-    }
-    catch (const sdbus::Error& err)
-    {
-        logLine(std::string{"GetNodeValues failed: "} + err.what());
-        return;
-    }
-    row.values.clear();
-    for (const auto& tup : values)
-    {
-        row.values.push_back(
-            NodeValueRow{.valueId = std::get<0>(tup), .value = std::get<1>(tup), .updatedAt = std::get<2>(tup)});
+        std::vector<NodeValueTuple> values;
+        try
+        {
+            proxy.callMethod("GetNodeValues").onInterface(IFACE_NAME).withArguments(row.id).storeResultsTo(values);
+        }
+        catch (const sdbus::Error& err)
+        {
+            logLine(std::string{"GetNodeValues failed: "} + err.what());
+            continue;  // leave this row's prior values in place; keep going
+        }
+        row.values.clear();
+        for (const auto& tup : values)
+        {
+            row.values.push_back(
+                NodeValueRow{.valueId = std::get<0>(tup), .value = std::get<1>(tup), .updatedAt = std::get<2>(tup)});
+        }
+        row.state = headlineState(row.values);
     }
 }
 

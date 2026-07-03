@@ -88,7 +88,7 @@ auto run() -> int
     // event-loop thread, and we act on them here (D-Bus calls stay on this
     // thread). [r] still forces a manual refresh.
     refreshNodes(*proxy);
-    refreshSelectedValues(*proxy);
+    refreshValues(*proxy);
 
     while (running)
     {
@@ -96,11 +96,11 @@ auto run() -> int
         if (activity().nodesDirty.exchange(false))
         {
             refreshNodes(*proxy);
-            refreshSelectedValues(*proxy);
+            refreshValues(*proxy);
         }
         else if (activity().valuesDirty.exchange(false))
         {
-            refreshSelectedValues(*proxy);
+            refreshValues(*proxy);
         }
         const int key = getch();
         if (key == ERR)
@@ -116,18 +116,16 @@ auto run() -> int
             }
             else if (key == KEY_UP)
             {
-                moveSelection(-1);
-                refreshSelectedValues(*proxy);
+                moveSelection(-1);  // values already loaded for every node
             }
             else if (key == KEY_DOWN)
             {
                 moveSelection(1);
-                refreshSelectedValues(*proxy);
             }
             else if (key == 'r' || key == 'R')
             {
                 refreshNodes(*proxy);
-                refreshSelectedValues(*proxy);
+                refreshValues(*proxy);
             }
             else if (key == 'k' || key == 'K')
             {

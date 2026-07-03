@@ -232,7 +232,7 @@ Implementation order (each shippable independently):
 - [ ] [Logs window (zwave-terminal)](https://github.com/Assar63/zwaved/issues/42)
 - [ ] [Settings window (zwave-terminal)](https://github.com/Assar63/zwaved/issues/43)
 - [x] **Node list** — `[l]` fetches `GetNodes` and renders each node into the activity pane.
-- [ ] [Node list (rich)](https://github.com/Assar63/zwaved/issues/44)
+- [x] [Node list (rich)](https://github.com/Assar63/zwaved/issues/44) — the always-visible node-list pane gained a **live state column**: each row is `# name state sec`, where `state` is the node's headline cached value (priority: switch → level → setpoint → sensor → config → battery) from `GetNodeValues`, fetched now for every node and refreshed signal-driven. Columns padded for alignment (`padRight`). Supersedes the `[l]` one-shot dump as the rich list.
 - [x] [Node info window](https://github.com/Assar63/zwaved/issues/45) — `[i]` opens a per-node drill-down modal over `GetNodeInfo` (full record) + name + cached values. See above.
 - [x] [Network info window](https://github.com/Assar63/zwaved/issues/46) — `[n]` opens a full-screen modal (`runInfoModal`) composing `GetNetworkStatus` + `GetDongleInfo` + `GetInitData` into one overview; each section degrades independently. Terminal-only (the daemon aggregator was already done). MANUAL §16g.
 - [x] **Network status** — `[n]` calls `GetNetworkStatus` and renders the aggregate (dongle, home ID, node count, active session, uptime).

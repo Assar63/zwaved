@@ -1024,6 +1024,13 @@ for the previous network stay in the database, just out of view. If
 the state directory can't be created or opened, the daemon logs a
 warning and falls back to in-memory only.
 
+In `zwave-terminal` the always-visible node-list pane renders each node as
+`# name state sec`, where **state** is the node's live headline value from the
+value cache (§16d) — the most operationally-relevant of its cached values
+(switch → level → setpoint → sensor → config → battery). The column updates
+signal-driven as nodes report; `[r]` forces a manual refresh. This rich,
+live list supersedes the one-shot `[l]` dump.
+
 ## 14. Managing associations (CC 0x85)
 
 Association groups let a node push unsolicited commands to other nodes

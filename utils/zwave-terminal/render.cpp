@@ -35,6 +35,7 @@ constexpr int NIBBLE_BITS              = 4;
 
 // Node-list / detail column widths.
 constexpr int NAME_COL     = 13;
+constexpr int STATE_COL    = 8;  // live headline value in the node list (#44)
 constexpr int VALUE_ID_COL = 18;
 constexpr int VALUE_COL    = 10;
 
@@ -82,6 +83,20 @@ auto renderAge(std::uint64_t updatedAt) -> std::string
         return std::to_string(age / SECONDS_PER_HOUR) + "h";
     }
     return std::to_string(age / SECONDS_PER_DAY) + "d";
+}
+
+auto fit(const std::string& text, int width) -> std::string;
+
+// Fit `text` into exactly `width` columns: clip if too long, right-pad with
+// spaces if too short, so adjacent columns line up.
+auto padRight(const std::string& text, int width) -> std::string
+{
+    std::string cell = fit(text, width);
+    if (static_cast<int>(cell.size()) < width)
+    {
+        cell.append(static_cast<std::size_t>(width) - cell.size(), ' ');
+    }
+    return cell;
 }
 
 // Truncate `text` to `width` columns (~ if clipped). width<=0 → empty.
@@ -183,7 +198,9 @@ auto drawNodeList(int top, int bottom, int width) -> void
     mvprintw(row++, 0, " Nodes");
     if (row <= bottom)
     {
-        mvprintw(row++, 0, " #   name           sec");
+        const std::string header =
+            " " + padRight("#", 3) + "  " + padRight("name", NAME_COL) + "  " + padRight("state", STATE_COL) + "  sec";
+        mvprintw(row++, 0, "%s", fit(header, width).c_str());
     }
     for (std::size_t i = 0; i < model.rows.size() && row <= bottom; ++i, ++row)
     {
@@ -194,8 +211,9 @@ auto drawNodeList(int top, int bottom, int width) -> void
             attron(A_REVERSE);
         }
         const std::string name = node.name.empty() ? "(unnamed)" : node.name;
-        const std::string line = " " + fit(std::to_string(static_cast<unsigned>(node.id)), 3) + "  " +
-                                 fit(name, NAME_COL) + "  " + securityLabel(node.commandClasses);
+        const std::string line = " " + padRight(std::to_string(static_cast<unsigned>(node.id)), 3) + "  " +
+                                 padRight(name, NAME_COL) + "  " + padRight(node.state, STATE_COL) + "  " +
+                                 securityLabel(node.commandClasses);
         mvprintw(row, 0, "%s", fit(line, width).c_str());
         if (selected)
         {

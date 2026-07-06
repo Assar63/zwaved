@@ -36,7 +36,8 @@ struct NodeRow
     std::uint8_t specificType = 0;
     std::vector<std::uint8_t> commandClasses;
     std::string name;                  // node-metadata "name", empty if unset
-    std::vector<NodeValueRow> values;  // cached for the selected node only
+    std::vector<NodeValueRow> values;  // cached values (all nodes, from GetNodeValues)
+    std::string state;                 // headline value for the list column (#44), empty if none
 };
 
 struct NodeModel
@@ -52,8 +53,11 @@ struct NodeModel
 /// previous list in place.
 auto refreshNodes(sdbus::IProxy& proxy) -> void;
 
-/// Re-fetch the selected node's cached values (GetNodeValues) into its row.
-auto refreshSelectedValues(sdbus::IProxy& proxy) -> void;
+/// Re-fetch every node's cached values (GetNodeValues per node) into its row,
+/// and recompute its headline `state` for the live list column (#44). Powers
+/// both the always-visible list state column and the detail pane / node-info
+/// modal (which read the selected row's `values`).
+auto refreshValues(sdbus::IProxy& proxy) -> void;
 
 /// Move the selection by `delta` rows (clamped to the list).
 auto moveSelection(int delta) -> void;

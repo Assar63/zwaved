@@ -176,16 +176,28 @@ if(NOT CLANG_TIDY_EXE)
     set(CLANG_TIDY_EXE clang-tidy-18)  # let the target fail loudly if it's missing
 endif()
 
+# clang-tidy needs the translation units to analyse spelled out on the command
+# line (`-p <dir>` only points at the compilation database) — otherwise it exits
+# with "no input files specified". Collect the hand-written source .cpp files;
+# the generated units under ${CMAKE_BINARY_DIR}/generated/ are excluded on
+# purpose (codegen output isn't ours to lint). CONFIGURE_DEPENDS re-globs on
+# rebuild so new source files are picked up without a manual reconfigure.
+file(GLOB_RECURSE ZWAVED_TIDY_SOURCES
+    CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_SOURCE_DIR}/utils/*.cpp"
+)
+
 # Target: fix-tidy - Fix issues with clang-tidy
 add_custom_target(fix-tidy
-    COMMAND ${CLANG_TIDY_EXE} --fix -p ${CMAKE_BINARY_DIR}
+    COMMAND ${CLANG_TIDY_EXE} --fix -p ${CMAKE_BINARY_DIR} ${ZWAVED_TIDY_SOURCES}
     COMMENT "Fixing issues with clang-tidy..."
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 # Target: check - Check code without fixing
 add_custom_target(check
-    COMMAND ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+    COMMAND ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR} ${ZWAVED_TIDY_SOURCES}
     COMMENT "Checking code analysis (no fixes)..."
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )

@@ -47,6 +47,7 @@ set_source_files_properties(
 function(zwaved_test_target target)
     set_target_properties("${target}" PROPERTIES CXX_CLANG_TIDY "")
     add_dependencies("${target}" zwaved_codegen)
+    target_link_libraries("${target}" PRIVATE zwaved_warnings)
 endfunction()
 
 # ---- HostApi --------------------------------------------------------

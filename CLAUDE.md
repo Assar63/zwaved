@@ -55,6 +55,8 @@ Runtime behaviour that doesn't affect which code is linked lives in `${ZWAVED_CO
 
 ## Code Quality
 
+Compiler warnings come from the `zwaved_warnings` INTERFACE target in the root `CMakeLists.txt` — `-Wall -Wextra`, linked by the daemon, every test (via `zwaved_test_target()`) and `zwave-terminal`. An interface target rather than global `CMAKE_CXX_FLAGS` so it never leaks into a dependency built in-tree. `-Werror` is gated on **`ZWAVED_WERROR`** (default `ON`; turn it off for a distro build, where a newer compiler's new warnings should not break the package). `-Wmissing-field-initializers` is deliberately **off**: the codebase initialises manifest-generated structs with C++20 designated initializers naming only the members a site cares about, so honouring it would mean naming all 22 members of `NodeRegistry::NodeInfo` to set one — and again at every schema bump. `-Wconversion` / `-Wsign-conversion` are not enabled; they would suit a byte-protocol daemon but the cleanup is its own project (#235). Note the codegen templates must stay warning-clean too — generated TUs compile into the daemon, so a stray unused binding there fails the build.
+
 Both tools must pass before commits are accepted (enforced by the pre-commit hook in `scripts/check-format`).
 
 ```bash

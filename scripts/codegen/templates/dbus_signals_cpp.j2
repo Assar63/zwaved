@@ -64,6 +64,7 @@ auto subscribeGeneratedSignals(DBusBackend::Impl& impl) -> void
                     report.has_value())
                 {
                     const auto& decoded = *report;
+                    static_cast<void>(decoded);  // a publish whose fields are all constants uses no decoded member
                     try
                     {
                         auto signal = impl.object->createSignal(SIGNAL_INTERFACE, "{{ signal.name }}");

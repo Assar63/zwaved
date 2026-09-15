@@ -35,10 +35,11 @@
 namespace
 {
 // Thermostat CC class bytes (InterfaceManifest module wire constants).
-constexpr std::uint8_t CC_THERMOSTAT_MODE            = 0x40;
-constexpr std::uint8_t CC_THERMOSTAT_OPERATING_STATE = 0x42;
-constexpr std::uint8_t CC_THERMOSTAT_SETPOINT        = 0x43;
-constexpr std::uint8_t CC_THERMOSTAT_FAN_MODE        = 0x44;
+// Only the two this orchestrator actually dispatches on are declared —
+// operating-state (0x42) and fan-mode (0x44) come back with the code that
+// uses them.
+constexpr std::uint8_t CC_THERMOSTAT_MODE     = 0x40;
+constexpr std::uint8_t CC_THERMOSTAT_SETPOINT = 0x43;
 
 // Operating-state values (CC 0x42) used for the "any member active" rollup.
 constexpr std::uint8_t OP_STATE_IDLE    = 0;

@@ -2,6 +2,7 @@
 
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
+#include "../sqlite/Sqlite.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -274,108 +275,15 @@ auto formatHomeId(const std::vector<std::uint8_t>& bytes) -> std::string
     return stream.str();
 }
 
-/// RAII wrapper around sqlite3_stmt* — same shape as the helpers in
-/// NodeRegistry / PendingQueue, kept local rather than shared (the three
-/// are the only users today).
-class Stmt
-{
-  public:
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): SQL and label are clearly distinct at call sites
-    Stmt(sqlite3* database, const char* sql, const char* label)
-        : database_(database),
-          label_(label)
-    {
-        if (sqlite3_prepare_v2(database, sql, -1, &stmt_, nullptr) != SQLITE_OK)
-        {
-            Logger::error(std::string("[PolicyRegister] prepare ") + label + " failed: " + sqlite3_errmsg(database));
-            stmt_ = nullptr;
-        }
-    }
-    ~Stmt()
-    {
-        if (stmt_ != nullptr)
-        {
-            sqlite3_finalize(stmt_);
-        }
-    }
-    Stmt(const Stmt&)                        = delete;
-    auto operator=(const Stmt&) -> Stmt&     = delete;
-    Stmt(Stmt&&) noexcept                    = delete;
-    auto operator=(Stmt&&) noexcept -> Stmt& = delete;
-
-    [[nodiscard]] auto valid() const -> bool
-    {
-        return stmt_ != nullptr;
-    }
-    auto bindText(int pos, const std::string& value) -> Stmt&
-    {
-        sqlite3_bind_text(stmt_, pos, value.c_str(), -1, SQLITE_TRANSIENT);
-        return *this;
-    }
-    auto bindInt(int pos, int value) -> Stmt&
-    {
-        sqlite3_bind_int(stmt_, pos, value);
-        return *this;
-    }
-    auto bindBlob(int pos, const std::vector<std::uint8_t>& value) -> Stmt&
-    {
-        sqlite3_bind_blob(stmt_, pos, value.data(), static_cast<int>(value.size()), SQLITE_TRANSIENT);
-        return *this;
-    }
-    auto step() -> int
-    {
-        return sqlite3_step(stmt_);
-    }
-    auto execDone() -> void
-    {
-        if (sqlite3_step(stmt_) != SQLITE_DONE)
-        {
-            Logger::error(std::string("[PolicyRegister] ") + label_ + " failed: " + sqlite3_errmsg(database_));
-        }
-    }
-    [[nodiscard]] auto columnInt(int col) const -> int
-    {
-        return sqlite3_column_int(stmt_, col);
-    }
-    [[nodiscard]] auto columnBlob(int col) const -> std::vector<std::uint8_t>
-    {
-        const auto* data = static_cast<const std::uint8_t*>(sqlite3_column_blob(stmt_, col));
-        const int size   = sqlite3_column_bytes(stmt_, col);
-        if (data == nullptr || size <= 0)
-        {
-            return {};
-        }
-        return {data, data + size};
-    }
-
-  private:
-    sqlite3_stmt* stmt_ = nullptr;
-    sqlite3* database_  = nullptr;
-    const char* label_  = nullptr;
-};
 }  // namespace
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): pimpl, public members read like a struct
 struct PolicyRegister::Register::State
 {
     mutable std::mutex mutex;
-    sqlite3* db = nullptr;
+    Sqlite::Db db;
     std::optional<std::string> currentHomeId;
     std::map<std::pair<std::string, std::uint8_t>, DeviceId> identityCache;
-
-    State()                                    = default;
-    State(const State&)                        = delete;
-    auto operator=(const State&) -> State&     = delete;
-    State(State&&) noexcept                    = delete;
-    auto operator=(State&&) noexcept -> State& = delete;
-    ~State()
-    {
-        if (db != nullptr)
-        {
-            sqlite3_close(db);
-            db = nullptr;
-        }
-    }
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes)
 
@@ -390,20 +298,14 @@ PolicyRegister::Register::Register(const std::filesystem::path& dbPath)
                       errorCode.message());
         return;
     }
-    if (sqlite3_open(dbPath.c_str(), &state_->db) != SQLITE_OK)
+    state_->db = Sqlite::Db(dbPath, "PolicyRegister");
+    if (!state_->db.valid())
     {
-        Logger::error("[PolicyRegister] cannot open " + dbPath.string() + ": " + sqlite3_errmsg(state_->db));
-        sqlite3_close(state_->db);
-        state_->db = nullptr;
         return;
     }
-    char* err = nullptr;
-    if (sqlite3_exec(state_->db, SCHEMA_SQL, nullptr, nullptr, &err) != SQLITE_OK)
+    if (!state_->db.exec(SCHEMA_SQL, "CREATE TABLE"))
     {
-        Logger::error(std::string("[PolicyRegister] CREATE TABLE failed: ") + (err != nullptr ? err : "?"));
-        sqlite3_free(err);
-        sqlite3_close(state_->db);
-        state_->db = nullptr;
+        state_->db.close();
         return;
     }
     Logger::info("[PolicyRegister] db ready at " + dbPath.string());
@@ -421,11 +323,11 @@ auto PolicyRegister::Register::setDevicePolicy(DeviceId device, const Policy& po
 {
     {
         const std::scoped_lock lock(state_->mutex);
-        if (state_->db == nullptr)
+        if (!state_->db.valid())
         {
             return;
         }
-        Stmt stmt(state_->db, UPSERT_DEVICE_SQL, "UPSERT device");
+        auto stmt = state_->db.prepare(UPSERT_DEVICE_SQL, "UPSERT device");
         if (!stmt.valid())
         {
             return;
@@ -444,7 +346,7 @@ auto PolicyRegister::Register::setNodeOverride(std::uint8_t nodeId, const Policy
 {
     {
         const std::scoped_lock lock(state_->mutex);
-        if (state_->db == nullptr || !state_->currentHomeId.has_value())
+        if (!state_->db.valid() || !state_->currentHomeId.has_value())
         {
             Logger::warn("[PolicyRegister] setNodeOverride dropped — no DB / no home (node " + std::to_string(nodeId) +
                          ")");
@@ -452,7 +354,7 @@ auto PolicyRegister::Register::setNodeOverride(std::uint8_t nodeId, const Policy
         }
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access): checked above; tidy can't track the short-circuit
         const std::string& home = *state_->currentHomeId;
-        Stmt stmt(state_->db, UPSERT_NODE_SQL, "UPSERT node");
+        auto stmt               = state_->db.prepare(UPSERT_NODE_SQL, "UPSERT node");
         if (!stmt.valid())
         {
             return;
@@ -466,11 +368,11 @@ auto PolicyRegister::Register::deleteDevicePolicy(DeviceId device) -> void
 {
     {
         const std::scoped_lock lock(state_->mutex);
-        if (state_->db == nullptr)
+        if (!state_->db.valid())
         {
             return;
         }
-        Stmt stmt(state_->db, DELETE_DEVICE_SQL, "DELETE device");
+        auto stmt = state_->db.prepare(DELETE_DEVICE_SQL, "DELETE device");
         if (!stmt.valid())
         {
             return;
@@ -484,13 +386,13 @@ auto PolicyRegister::Register::deleteNodeOverride(std::uint8_t nodeId) -> void
 {
     {
         const std::scoped_lock lock(state_->mutex);
-        if (state_->db == nullptr || !state_->currentHomeId.has_value())
+        if (!state_->db.valid() || !state_->currentHomeId.has_value())
         {
             return;
         }
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access): checked above; tidy can't track the short-circuit
         const std::string& home = *state_->currentHomeId;
-        Stmt stmt(state_->db, DELETE_NODE_SQL, "DELETE node");
+        auto stmt               = state_->db.prepare(DELETE_NODE_SQL, "DELETE node");
         if (!stmt.valid())
         {
             return;
@@ -503,11 +405,11 @@ auto PolicyRegister::Register::deleteNodeOverride(std::uint8_t nodeId) -> void
 auto PolicyRegister::Register::devicePolicy(DeviceId device) const -> std::optional<Policy>
 {
     const std::scoped_lock lock(state_->mutex);
-    if (state_->db == nullptr)
+    if (!state_->db.valid())
     {
         return std::nullopt;
     }
-    Stmt stmt(state_->db, SELECT_DEVICE_SQL, "SELECT device");
+    auto stmt = state_->db.prepare(SELECT_DEVICE_SQL, "SELECT device");
     if (!stmt.valid())
     {
         return std::nullopt;
@@ -524,11 +426,11 @@ auto PolicyRegister::Register::listDevicePolicies() const -> std::vector<DeviceP
 {
     std::vector<DevicePolicyRow> out;
     const std::scoped_lock lock(state_->mutex);
-    if (state_->db == nullptr)
+    if (!state_->db.valid())
     {
         return out;
     }
-    Stmt stmt(state_->db, SELECT_ALL_DEVICES_SQL, "SELECT all devices");
+    auto stmt = state_->db.prepare(SELECT_ALL_DEVICES_SQL, "SELECT all devices");
     if (!stmt.valid())
     {
         return out;
@@ -551,13 +453,13 @@ auto PolicyRegister::Register::listDevicePolicies() const -> std::vector<DeviceP
 auto PolicyRegister::Register::nodeOverride(std::uint8_t nodeId) const -> std::optional<Policy>
 {
     const std::scoped_lock lock(state_->mutex);
-    if (state_->db == nullptr || !state_->currentHomeId.has_value())
+    if (!state_->db.valid() || !state_->currentHomeId.has_value())
     {
         return std::nullopt;
     }
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access): checked above; tidy can't track the short-circuit
     const std::string& home = *state_->currentHomeId;
-    Stmt stmt(state_->db, SELECT_NODE_SQL, "SELECT node");
+    auto stmt               = state_->db.prepare(SELECT_NODE_SQL, "SELECT node");
     if (!stmt.valid())
     {
         return std::nullopt;

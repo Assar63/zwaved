@@ -1,6 +1,7 @@
 #include "SpanStore.hpp"
 
 #include "../logger/Logger.hpp"
+#include "../sqlite/Sqlite.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -32,57 +34,6 @@ constexpr int BIND_BLOB = 3;
 constexpr int COL_PEER  = 0;
 constexpr int COL_STATE = 1;
 
-// RAII wrapper around sqlite3_stmt* — mirrors the Stmt helper in PendingQueue.
-class Stmt
-{
-  public:
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): sql text vs log label are distinct roles
-    Stmt(sqlite3* database, const char* sql, const char* label)
-    {
-        if (sqlite3_prepare_v2(database, sql, -1, &stmt_, nullptr) != SQLITE_OK)
-        {
-            Logger::error(std::string("[SpanStore] prepare ") + label + " failed: " + sqlite3_errmsg(database));
-            stmt_ = nullptr;
-        }
-    }
-    ~Stmt()
-    {
-        sqlite3_finalize(stmt_);
-    }
-    Stmt(const Stmt&)                        = delete;
-    auto operator=(const Stmt&) -> Stmt&     = delete;
-    Stmt(Stmt&&) noexcept                    = delete;
-    auto operator=(Stmt&&) noexcept -> Stmt& = delete;
-
-    [[nodiscard]] auto valid() const -> bool
-    {
-        return stmt_ != nullptr;
-    }
-    [[nodiscard]] auto raw() const -> sqlite3_stmt*
-    {
-        return stmt_;
-    }
-
-    auto bindText(int pos, const std::string& value) -> Stmt&
-    {
-        sqlite3_bind_text(stmt_, pos, value.c_str(), -1, SQLITE_TRANSIENT);
-        return *this;
-    }
-    auto bindInt(int pos, int value) -> Stmt&
-    {
-        sqlite3_bind_int(stmt_, pos, value);
-        return *this;
-    }
-    auto bindBlob(int pos, const void* data, int size) -> Stmt&
-    {
-        sqlite3_bind_blob(stmt_, pos, data, size, SQLITE_TRANSIENT);
-        return *this;
-    }
-
-  private:
-    sqlite3_stmt* stmt_ = nullptr;
-};
-
 constexpr std::uint8_t LOW_NIBBLE_MASK = 0x0F;
 constexpr int NIBBLE_BITS              = 4;
 
@@ -103,35 +54,22 @@ auto toHex(const std::vector<std::uint8_t>& bytes) -> std::string
 
 struct SpanStore::Store::State
 {
-    sqlite3* db = nullptr;
+    Sqlite::Db db;
     std::optional<std::string> homeId;
 };
 
 SpanStore::Store::Store(const std::filesystem::path& dbPath)
     : state_(std::make_unique<State>())
 {
-    if (sqlite3_open(dbPath.c_str(), &state_->db) != SQLITE_OK)
+    state_->db = Sqlite::Db(dbPath, "SpanStore");
+    if (!state_->db.valid())
     {
-        Logger::error(std::string("[SpanStore] open failed: ") + sqlite3_errmsg(state_->db));
-        sqlite3_close(state_->db);
-        state_->db = nullptr;
         return;
     }
-    char* err = nullptr;
-    if (sqlite3_exec(state_->db, CREATE_TABLE_SQL, nullptr, nullptr, &err) != SQLITE_OK)
-    {
-        Logger::error(std::string("[SpanStore] CREATE TABLE failed: ") + (err != nullptr ? err : "?"));
-        sqlite3_free(err);
-    }
+    state_->db.exec(CREATE_TABLE_SQL, "CREATE TABLE");
 }
 
-SpanStore::Store::~Store()
-{
-    if (state_ != nullptr)
-    {
-        sqlite3_close(state_->db);
-    }
-}
+SpanStore::Store::~Store() = default;
 
 auto SpanStore::Store::setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -> void
 {
@@ -141,63 +79,61 @@ auto SpanStore::Store::setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -
 auto SpanStore::Store::save(std::uint8_t peer, const S2::SPAN::InnerState& state) -> void
 {
     const auto& home = state_->homeId;
-    if (state_->db == nullptr || !home.has_value())
+    if (!state_->db.valid() || !home.has_value())
     {
         Logger::warn("[SpanStore] save ignored — no DB or home ID bound");
         return;
     }
-    Stmt stmt(state_->db, UPSERT_SQL, "UPSERT");
+    auto stmt = state_->db.prepare(UPSERT_SQL, "UPSERT");
     if (!stmt.valid())
     {
         return;
     }
     stmt.bindText(BIND_HOME, *home)
         .bindInt(BIND_PEER, peer)
-        .bindBlob(BIND_BLOB, state.data(), static_cast<int>(state.size()));
-    sqlite3_step(stmt.raw());
+        .bindBlob(BIND_BLOB, state.data(), static_cast<int>(state.size()))
+        .execDone();
 }
 
 auto SpanStore::Store::remove(std::uint8_t peer) -> void
 {
     const auto& home = state_->homeId;
-    if (state_->db == nullptr || !home.has_value())
+    if (!state_->db.valid() || !home.has_value())
     {
         return;
     }
-    Stmt stmt(state_->db, DELETE_SQL, "DELETE");
+    auto stmt = state_->db.prepare(DELETE_SQL, "DELETE");
     if (!stmt.valid())
     {
         return;
     }
-    stmt.bindText(BIND_HOME, *home).bindInt(BIND_PEER, peer);
-    sqlite3_step(stmt.raw());
+    stmt.bindText(BIND_HOME, *home).bindInt(BIND_PEER, peer).execDone();
 }
 
 auto SpanStore::Store::loadAll() -> std::map<std::uint8_t, S2::SPAN::InnerState>
 {
     std::map<std::uint8_t, S2::SPAN::InnerState> result;
     const auto& home = state_->homeId;
-    if (state_->db == nullptr || !home.has_value())
+    if (!state_->db.valid() || !home.has_value())
     {
         return result;
     }
-    Stmt stmt(state_->db, SELECT_SQL, "SELECT");
+    auto stmt = state_->db.prepare(SELECT_SQL, "SELECT");
     if (!stmt.valid())
     {
         return result;
     }
     stmt.bindText(BIND_HOME, *home);
-    while (sqlite3_step(stmt.raw()) == SQLITE_ROW)
+    while (stmt.step() == SQLITE_ROW)
     {
-        const auto peer     = static_cast<std::uint8_t>(sqlite3_column_int(stmt.raw(), COL_PEER));
-        const void* blob    = sqlite3_column_blob(stmt.raw(), COL_STATE);
-        const int blobBytes = sqlite3_column_bytes(stmt.raw(), COL_STATE);
-        if (blob == nullptr || blobBytes != static_cast<int>(std::tuple_size_v<S2::SPAN::InnerState>))
+        const auto peer = static_cast<std::uint8_t>(stmt.columnInt(COL_PEER));
+        const auto blob = stmt.columnBlob(COL_STATE);
+        if (blob.size() != std::tuple_size_v<S2::SPAN::InnerState>)
         {
             continue;  // skip a malformed row rather than corrupt a SPAN
         }
         S2::SPAN::InnerState inner{};
-        std::copy_n(static_cast<const std::uint8_t*>(blob), inner.size(), inner.begin());
+        std::copy_n(blob.begin(), inner.size(), inner.begin());
         result.emplace(peer, inner);
     }
     return result;

@@ -488,6 +488,7 @@ gtest_discover_tests(s2_span_manager_test)
 add_executable(s2_span_store_test
     s2_span_store_test.cpp
     "${CMAKE_SOURCE_DIR}/src/span-store/SpanStore.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${SRC_DIR}/security/s2/Span.cpp"
     "${SRC_DIR}/security/s2/Crypto.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
@@ -625,6 +626,7 @@ gtest_discover_tests(s0_inbound_decrypt_test)
 add_executable(node_registry_secure_test
     node_registry_secure_test.cpp
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(node_registry_secure_test PRIVATE
@@ -643,6 +645,7 @@ gtest_discover_tests(node_registry_secure_test)
 add_executable(node_registry_identity_test
     node_registry_identity_test.cpp
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(node_registry_identity_test PRIVATE
@@ -661,6 +664,7 @@ gtest_discover_tests(node_registry_identity_test)
 add_executable(node_registry_capabilities_test
     node_registry_capabilities_test.cpp
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(node_registry_capabilities_test PRIVATE
@@ -704,6 +708,7 @@ add_executable(s0_bootstrap_test
     s0_bootstrap_test.cpp
     "${CMAKE_SOURCE_DIR}/src/orchestrator/SecurityBootstrapOrchestrator.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${SRC_DIR}/security/s0/Encapsulation.cpp"
     "${SRC_DIR}/security/s0/NetworkKey.cpp"
     "${SRC_DIR}/security/s0/NonceTable.cpp"
@@ -741,6 +746,7 @@ add_executable(s2_bootstrap_test
     "${SRC_DIR}/security/s2/KeyInstall.cpp"
     "${SRC_DIR}/security/s2/NetworkKeys.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(s2_bootstrap_test PRIVATE
@@ -769,6 +775,7 @@ add_executable(s2_inbound_test
     "${SRC_DIR}/security/s2/NetworkKeys.cpp"
     "${SRC_DIR}/security/s2/Crypto.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(s2_inbound_test PRIVATE
@@ -797,6 +804,7 @@ add_executable(s2_outbound_test
     "${SRC_DIR}/security/s2/NetworkKeys.cpp"
     "${SRC_DIR}/security/s2/Crypto.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(s2_outbound_test PRIVATE
@@ -969,6 +977,7 @@ gtest_discover_tests(MultichannelAssociation_test)
 add_executable(PendingQueue_test
     PendingQueue_test.cpp
     "${CMAKE_SOURCE_DIR}/src/pending-queue/PendingQueue.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(PendingQueue_test PRIVATE
@@ -990,6 +999,7 @@ gtest_discover_tests(PendingQueue_test)
 add_executable(SceneStore_test
     SceneStore_test.cpp
     "${CMAKE_SOURCE_DIR}/src/scene-store/SceneStore.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(SceneStore_test PRIVATE
@@ -1033,6 +1043,7 @@ gtest_discover_tests(MessageBus_test)
 add_executable(PolicyRegister_test
     PolicyRegister_test.cpp
     "${CMAKE_SOURCE_DIR}/src/policy-register/PolicyRegister.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(PolicyRegister_test PRIVATE
@@ -1056,6 +1067,7 @@ gtest_discover_tests(PolicyRegister_test)
 add_executable(NodeMetadata_test
     NodeMetadata_test.cpp
     "${CMAKE_SOURCE_DIR}/src/node-metadata/NodeMetadata.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(NodeMetadata_test PRIVATE
@@ -1079,6 +1091,7 @@ gtest_discover_tests(NodeMetadata_test)
 add_executable(node_values_test
     node_values_test.cpp
     "${CMAKE_SOURCE_DIR}/src/node-values/NodeValues.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(node_values_test PRIVATE
@@ -1096,6 +1109,35 @@ target_link_libraries(node_values_test PRIVATE
 zwaved_test_target(node_values_test)
 gtest_discover_tests(node_values_test)
 
+# ---- SQLite concurrency ---------------------------------------------
+# #233/#234: the shared-nodes.db access pattern. Several connections (and one
+# shared Store instance) written to from several threads at once, plus the
+# pragmas every connection must come up with. Links two stores so the
+# cross-module case (different tables, one file) is covered too.
+add_executable(sqlite_concurrency_test
+    sqlite_concurrency_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
+    "${CMAKE_SOURCE_DIR}/src/node-values/NodeValues.cpp"
+    "${CMAKE_SOURCE_DIR}/src/node-metadata/NodeMetadata.cpp"
+    "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
+)
+target_include_directories(sqlite_concurrency_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/sqlite"
+    "${CMAKE_SOURCE_DIR}/src/node-values"
+    "${CMAKE_SOURCE_DIR}/src/node-metadata"
+    "${CMAKE_SOURCE_DIR}/src/message-bus"
+    "${ZWAVED_GENERATED_DIR}"
+)
+add_dependencies(sqlite_concurrency_test zwaved_codegen)
+target_link_libraries(sqlite_concurrency_test PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+    PkgConfig::SQLITE3
+    zwaved_bus
+)
+zwaved_test_target(sqlite_concurrency_test)
+gtest_discover_tests(sqlite_concurrency_test)
+
 # ---- NodeValues recorder --------------------------------------------
 # Bus-driven: typed CC reports → value cache + NodeValueChanged. Links the
 # recorder (armed by its constructor) + the store + the bus.
@@ -1103,6 +1145,7 @@ add_executable(node_values_recorder_test
     node_values_recorder_test.cpp
     "${CMAKE_SOURCE_DIR}/src/node-values/Recorder.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-values/NodeValues.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(node_values_recorder_test PRIVATE
@@ -1124,6 +1167,7 @@ add_executable(WakeUpOrchestrator_test
     WakeUpOrchestrator_test.cpp
     "${CMAKE_SOURCE_DIR}/src/orchestrator/WakeUpOrchestrator.cpp"
     "${CMAKE_SOURCE_DIR}/src/pending-queue/PendingQueue.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(WakeUpOrchestrator_test PRIVATE
@@ -1146,6 +1190,7 @@ add_executable(SceneOrchestrator_test
     SceneOrchestrator_test.cpp
     "${CMAKE_SOURCE_DIR}/src/orchestrator/SceneOrchestrator.cpp"
     "${CMAKE_SOURCE_DIR}/src/scene-store/SceneStore.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(SceneOrchestrator_test PRIVATE
@@ -1168,7 +1213,9 @@ add_executable(ThermostatOrchestrator_test
     ThermostatOrchestrator_test.cpp
     "${CMAKE_SOURCE_DIR}/src/orchestrator/ThermostatOrchestrator.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-metadata/NodeMetadata.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(ThermostatOrchestrator_test PRIVATE
@@ -1195,6 +1242,7 @@ add_executable(InclusionOrchestrator_test
     InclusionOrchestrator_test.cpp
     "${CMAKE_SOURCE_DIR}/src/orchestrator/InclusionOrchestrator.cpp"
     "${CMAKE_SOURCE_DIR}/src/policy-register/PolicyRegister.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(InclusionOrchestrator_test PRIVATE
@@ -1220,6 +1268,7 @@ add_executable(InterviewOrchestrator_test
     InterviewOrchestrator_test.cpp
     "${CMAKE_SOURCE_DIR}/src/orchestrator/InterviewOrchestrator.cpp"
     "${CMAKE_SOURCE_DIR}/src/pending-queue/PendingQueue.cpp"
+    "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )
 target_include_directories(InterviewOrchestrator_test PRIVATE

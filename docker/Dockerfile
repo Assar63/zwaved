@@ -169,6 +169,35 @@ RUN cmake --preset llvm \
     && ctest --test-dir cmake-build-llvm --output-on-failure
 
 # ---------------------------------------------------------------------
+# Stage 2c/2d: sanitizers (#237) — the same suite under ASan+UBSan and
+# under TSan. This daemon earns them: five threads with explicitly
+# reentrant bus dispatch, ~30 CC decoders over untrusted over-the-air
+# bytes, and two crypto stacks doing raw buffer work. The suite needs no
+# hardware and costs ~10-13 s under a sanitizer against ~4 s clean, so
+# these run per-push rather than nightly.
+#
+# Two stages because ASan and TSan cannot be combined in one binary.
+# Clang for both: its sanitizer runtimes are the better-supported pair
+# here, and the llvm stage already builds this tree uncapped.
+# ---------------------------------------------------------------------
+FROM toolchain AS sanitize
+
+WORKDIR /src
+COPY . .
+RUN cmake --preset sanitize \
+    && cmake --build cmake-build-sanitize --parallel \
+    && ctest --test-dir cmake-build-sanitize --output-on-failure
+
+# ---------------------------------------------------------------------
+FROM toolchain AS sanitize-thread
+
+WORKDIR /src
+COPY . .
+RUN cmake --preset sanitize-thread \
+    && cmake --build cmake-build-sanitize-thread --parallel \
+    && ctest --test-dir cmake-build-sanitize-thread --output-on-failure
+
+# ---------------------------------------------------------------------
 # Stage 2b: bootstrap-smoke — prove scripts/bootstrap's in-place setup
 # path works in the canonical toolchain environment. Runs configure +
 # wiring only (`--no-build`): the compile + ctest are already covered by

@@ -35,6 +35,31 @@ if(ZWAVED_WERROR)
     target_compile_options(zwaved_warnings INTERFACE -Werror)
 endif()
 
+# ---- Sanitizers (#237) ----------------------------------------------
+# This daemon is a good sanitizer target: five threads with explicitly
+# reentrant bus dispatch, ~30 CC decoders over untrusted over-the-air bytes,
+# and two crypto stacks doing raw buffer work. The suite is fast and needs no
+# hardware, so the run is nearly free.
+#
+# ZWAVED_SANITIZER is "none" (default), "address" (ASan + UBSan) or "thread".
+# Address and thread cannot be combined in one binary, hence two presets.
+# -fno-sanitize-recover=all makes a finding fail the test rather than print
+# and continue, which is what makes this useful in CI.
+set(ZWAVED_SANITIZER "none" CACHE STRING "Sanitizer to build with: none | address | thread")
+set_property(CACHE ZWAVED_SANITIZER PROPERTY STRINGS none address thread)
+
+if(ZWAVED_SANITIZER STREQUAL "address")
+    target_compile_options(zwaved_warnings INTERFACE
+        -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all)
+    target_link_options(zwaved_warnings INTERFACE -fsanitize=address,undefined)
+elseif(ZWAVED_SANITIZER STREQUAL "thread")
+    target_compile_options(zwaved_warnings INTERFACE
+        -fsanitize=thread -fno-omit-frame-pointer -fno-sanitize-recover=all)
+    target_link_options(zwaved_warnings INTERFACE -fsanitize=thread)
+elseif(NOT ZWAVED_SANITIZER STREQUAL "none")
+    message(FATAL_ERROR "ZWAVED_SANITIZER must be none, address or thread (got '${ZWAVED_SANITIZER}')")
+endif()
+
 # -Wconversion / -Wsign-conversion are deliberately *not* enabled here. A
 # byte-protocol daemon would get real value from them, but the cleanup is
 # large and belongs in its own change (see #235).

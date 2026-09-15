@@ -1024,6 +1024,19 @@ for the previous network stay in the database, just out of view. If
 the state directory can't be created or opened, the daemon logs a
 warning and falls back to in-memory only.
 
+`nodes.db` is opened in **WAL mode** (write-ahead logging), so you will
+see two sibling files next to it — `nodes.db-wal` and `nodes.db-shm`.
+Both are normal and are managed by SQLite; back the three up together,
+and don't delete the `-wal` file on a stopped daemon before SQLite has
+checkpointed it, or you lose the most recent writes. WAL lets the
+protocol thread keep writing (value reports, registry upserts) while a
+D-Bus client reads, instead of the two blocking each other; every
+connection also takes a 5-second busy timeout, so a collision waits its
+turn rather than dropping the write. WAL is unsupported on some network
+filesystems — if the state directory is an NFS/SMB mount the daemon logs
+a warning at startup and falls back to the rollback journal, which still
+works but serialises readers against the writer.
+
 In `zwave-terminal` the always-visible node-list pane renders each node as
 `# name state sec`, where **state** is the node's live headline value from the
 value cache (§16d) — the most operationally-relevant of its cached values

@@ -2,6 +2,7 @@
 
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
+#include "../sqlite/Sqlite.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -195,7 +196,7 @@ struct State
     std::mutex mutex;
     std::map<std::uint8_t, NodeRegistry::NodeInfo> nodes;
     std::optional<std::string> currentHomeId;  // hex form, e.g. "E2A1B07C"
-    sqlite3* db = nullptr;
+    Sqlite::Db db;
     std::once_flag initFlag;
 
     // Cached state directory from `MessageBus::StorageConfig`.
@@ -227,11 +228,7 @@ struct State
                 *sub = 0;
             }
         }
-        if (db != nullptr)
-        {
-            sqlite3_close(db);
-            db = nullptr;
-        }
+        // `db` closes itself (Sqlite::Db).
     }
 
     State()                                    = default;
@@ -247,87 +244,6 @@ auto state() -> State&
     static State instance;
     return instance;
 }
-
-/// RAII wrapper around `sqlite3_stmt*`. Prepares on construction
-/// (logging on failure), finalizes on destruction. Bind methods
-/// chain. `valid()` reports whether prepare succeeded — callers
-/// must check before stepping.
-class Stmt
-{
-  public:
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): SQL and label are clearly distinct at call sites
-    Stmt(sqlite3* database, const char* sql, const char* label)
-        : database_(database),
-          label_(label)
-    {
-        if (sqlite3_prepare_v2(database, sql, -1, &stmt_, nullptr) != SQLITE_OK)
-        {
-            Logger::error(std::string("[NodeRegistry] prepare ") + label + " failed: " + sqlite3_errmsg(database));
-            stmt_ = nullptr;
-        }
-    }
-
-    ~Stmt()
-    {
-        if (stmt_ != nullptr)
-        {
-            sqlite3_finalize(stmt_);
-        }
-    }
-
-    Stmt(const Stmt&)                        = delete;
-    auto operator=(const Stmt&) -> Stmt&     = delete;
-    Stmt(Stmt&&) noexcept                    = delete;
-    auto operator=(Stmt&&) noexcept -> Stmt& = delete;
-
-    [[nodiscard]] auto valid() const -> bool
-    {
-        return stmt_ != nullptr;
-    }
-
-    auto bindText(int pos, const std::string& value) -> Stmt&
-    {
-        sqlite3_bind_text(stmt_, pos, value.c_str(), -1, SQLITE_TRANSIENT);
-        return *this;
-    }
-
-    auto bindInt(int pos, int value) -> Stmt&
-    {
-        sqlite3_bind_int(stmt_, pos, value);
-        return *this;
-    }
-
-    auto bindBlob(int pos, const void* data, int size) -> Stmt&
-    {
-        sqlite3_bind_blob(stmt_, pos, data, size, SQLITE_TRANSIENT);
-        return *this;
-    }
-
-    [[nodiscard]] auto step() const -> int
-    {
-        return sqlite3_step(stmt_);
-    }
-
-    /// Execute a statement expected to terminate with SQLITE_DONE.
-    /// Logs the SQLite error message if it doesn't.
-    auto execDone() const -> void
-    {
-        if (sqlite3_step(stmt_) != SQLITE_DONE)
-        {
-            Logger::error(std::string("[NodeRegistry] ") + label_ + " failed: " + sqlite3_errmsg(database_));
-        }
-    }
-
-    [[nodiscard]] auto raw() const -> sqlite3_stmt*
-    {
-        return stmt_;
-    }
-
-  private:
-    sqlite3_stmt* stmt_ = nullptr;
-    sqlite3* database_  = nullptr;
-    const char* label_  = nullptr;
-};
 
 auto resolveDbPath() -> std::filesystem::path
 {
@@ -358,34 +274,21 @@ auto formatHomeId(const std::vector<std::uint8_t>& bytes) -> std::string
     return stream.str();
 }
 
-auto readSchemaVersion(sqlite3* database) -> int
+auto readSchemaVersion(const Sqlite::Db& database) -> int
 {
-    const Stmt stmt(database, "PRAGMA user_version", "PRAGMA user_version");
+    const auto stmt = database.prepare("PRAGMA user_version", "PRAGMA user_version");
     if (!stmt.valid())
     {
         return 0;
     }
     if (stmt.step() == SQLITE_ROW)
     {
-        return sqlite3_column_int(stmt.raw(), 0);
+        return stmt.columnInt(0);
     }
     return 0;
 }
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): SQL and label are clearly distinct at call sites
-auto execOrLog(sqlite3* database, const char* sql, const char* what) -> bool
-{
-    char* err = nullptr;
-    if (sqlite3_exec(database, sql, nullptr, nullptr, &err) != SQLITE_OK)
-    {
-        Logger::error(std::string("[NodeRegistry] ") + what + " failed: " + (err != nullptr ? err : "?"));
-        sqlite3_free(err);
-        return false;
-    }
-    return true;
-}
-
-auto migrateSchema(sqlite3* database) -> bool
+auto migrateSchema(const Sqlite::Db& database) -> bool
 {
     const int version = readSchemaVersion(database);
     if (version >= CURRENT_SCHEMA_VERSION)
@@ -398,8 +301,7 @@ auto migrateSchema(sqlite3* database) -> bool
         // (unsafe under a different dongle). Drop and recreate at the current
         // schema (which already has every column); GET_INIT_DATA on the next
         // connect re-seeds from the dongle's bitmap.
-        if (!execOrLog(database, "DROP TABLE IF EXISTS nodes", "DROP TABLE") ||
-            !execOrLog(database, SCHEMA_SQL, "CREATE TABLE"))
+        if (!database.exec("DROP TABLE IF EXISTS nodes", "DROP TABLE") || !database.exec(SCHEMA_SQL, "CREATE TABLE"))
         {
             return false;
         }
@@ -407,27 +309,27 @@ auto migrateSchema(sqlite3* database) -> bool
     else
     {
         // Cumulative upgrades from an existing table (v1/v2/v3/v4) up to v5.
-        if (version == 1 && !execOrLog(database, MIGRATE_V1_ADD_SCHEME_SQL, "ALTER TABLE"))
+        if (version == 1 && !database.exec(MIGRATE_V1_ADD_SCHEME_SQL, "ALTER TABLE"))
         {
             return false;  // v1: lacks the security column — add it
         }
-        if (version == 2 && !execOrLog(database, MIGRATE_V2_RENAME_SQL, "ALTER TABLE"))
+        if (version == 2 && !database.exec(MIGRATE_V2_RENAME_SQL, "ALTER TABLE"))
         {
             return false;  // v2: rename `secure` bool to `security_scheme` (0/1 = None/S0)
         }
         // v1/v2/v3 reach the "v3 shape" above and still lack the v4 identity
         // triple; a v4 db already has it, so guard on the version.
-        if (version <= 3 && !execOrLog(database, MIGRATE_V3_ADD_IDENTITY_SQL, "ALTER TABLE"))
+        if (version <= 3 && !database.exec(MIGRATE_V3_ADD_IDENTITY_SQL, "ALTER TABLE"))
         {
             return false;
         }
         // v1..v4 all lack the v5 interview-capability columns.
-        if (!execOrLog(database, MIGRATE_V4_ADD_CAPS_SQL, "ALTER TABLE"))
+        if (!database.exec(MIGRATE_V4_ADD_CAPS_SQL, "ALTER TABLE"))
         {
             return false;
         }
     }
-    if (!execOrLog(database, "PRAGMA user_version = 5", "PRAGMA user_version"))
+    if (!database.exec("PRAGMA user_version = 5", "PRAGMA user_version"))
     {
         return false;
     }
@@ -435,10 +337,11 @@ auto migrateSchema(sqlite3* database) -> bool
     return true;
 }
 
-auto loadNodesForHome(sqlite3* database, const std::string& homeId) -> std::map<std::uint8_t, NodeRegistry::NodeInfo>
+auto loadNodesForHome(const Sqlite::Db& database,
+                      const std::string& homeId) -> std::map<std::uint8_t, NodeRegistry::NodeInfo>
 {
     std::map<std::uint8_t, NodeRegistry::NodeInfo> result;
-    Stmt stmt(database, SELECT_FOR_HOME_SQL, "SELECT");
+    auto stmt = database.prepare(SELECT_FOR_HOME_SQL, "SELECT");
     if (!stmt.valid())
     {
         return result;
@@ -541,18 +444,15 @@ auto initIfNeeded() -> void
                               errorCode.message() + " — falling back to in-memory only");
                 return;
             }
-            if (sqlite3_open(path.c_str(), &state().db) != SQLITE_OK)
+            state().db = Sqlite::Db(path, "NodeRegistry");
+            if (!state().db.valid())
             {
-                Logger::error("[NodeRegistry] cannot open " + path.string() + ": " + sqlite3_errmsg(state().db) +
-                              " — falling back to in-memory only");
-                sqlite3_close(state().db);
-                state().db = nullptr;
+                Logger::warn("[NodeRegistry] falling back to in-memory only");
                 return;
             }
             if (!migrateSchema(state().db))
             {
-                sqlite3_close(state().db);
-                state().db = nullptr;
+                state().db.close();
                 return;
             }
             Logger::info("[NodeRegistry] db ready at " + path.string());
@@ -561,11 +461,11 @@ auto initIfNeeded() -> void
 
 auto persistAdd(const std::string& homeId, const NodeRegistry::NodeInfo& info) -> void
 {
-    if (state().db == nullptr)
+    if (!state().db.valid())
     {
         return;
     }
-    Stmt stmt(state().db, UPSERT_SQL, "UPSERT");
+    auto stmt = state().db.prepare(UPSERT_SQL, "UPSERT");
     if (!stmt.valid())
     {
         return;
@@ -581,11 +481,11 @@ auto persistAdd(const std::string& homeId, const NodeRegistry::NodeInfo& info) -
 
 auto persistRemove(const std::string& homeId, std::uint8_t nodeId) -> void
 {
-    if (state().db == nullptr)
+    if (!state().db.valid())
     {
         return;
     }
-    Stmt stmt(state().db, DELETE_SQL, "DELETE");
+    auto stmt = state().db.prepare(DELETE_SQL, "DELETE");
     if (!stmt.valid())
     {
         return;
@@ -652,7 +552,7 @@ auto NodeRegistry::setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -> vo
         }
         state().currentHomeId = homeIdStr;
         state().nodes.clear();
-        if (state().db != nullptr)
+        if (state().db.valid())
         {
             state().nodes = loadNodesForHome(state().db, homeIdStr);
         }
@@ -774,11 +674,11 @@ auto NodeRegistry::setSecurityScheme(std::uint8_t nodeId, SecurityScheme scheme)
     // securityScheme isn't part of NodeListChanged, so no republish is needed;
     // just persist. NodeSecurityStatus carries the per-node signal.
     const auto& home = state().currentHomeId;
-    if (state().db == nullptr || !home.has_value())
+    if (!state().db.valid() || !home.has_value())
     {
         return;
     }
-    Stmt stmt(state().db, SET_SCHEME_SQL, "SET SCHEME");
+    auto stmt = state().db.prepare(SET_SCHEME_SQL, "SET SCHEME");
     if (!stmt.valid())
     {
         return;
@@ -805,11 +705,11 @@ auto NodeRegistry::setDeviceIdentity(std::uint8_t nodeId,
     iter->second.productTypeId  = productTypeId;
     iter->second.productId      = productId;
     const auto& home            = state().currentHomeId;
-    if (state().db == nullptr || !home.has_value())
+    if (!state().db.valid() || !home.has_value())
     {
         return;
     }
-    Stmt stmt(state().db, SET_IDENTITY_SQL, "SET IDENTITY");
+    auto stmt = state().db.prepare(SET_IDENTITY_SQL, "SET IDENTITY");
     if (!stmt.valid())
     {
         return;
@@ -842,11 +742,11 @@ auto NodeRegistry::setVersionInfo(std::uint8_t nodeId,
     iter->second.applicationVersion    = applicationVersion;
     iter->second.applicationSubVersion = applicationSubVersion;
     const auto& home                   = state().currentHomeId;
-    if (state().db == nullptr || !home.has_value())
+    if (!state().db.valid() || !home.has_value())
     {
         return;
     }
-    Stmt stmt(state().db, SET_VERSION_SQL, "SET VERSION");
+    auto stmt = state().db.prepare(SET_VERSION_SQL, "SET VERSION");
     if (!stmt.valid())
     {
         return;
@@ -877,11 +777,11 @@ auto NodeRegistry::setEndpointInfo(std::uint8_t nodeId,
     iter->second.endpointsDynamic   = dynamic;
     iter->second.endpointsIdentical = identical;
     const auto& home                = state().currentHomeId;
-    if (state().db == nullptr || !home.has_value())
+    if (!state().db.valid() || !home.has_value())
     {
         return;
     }
-    Stmt stmt(state().db, SET_ENDPOINTS_SQL, "SET ENDPOINTS");
+    auto stmt = state().db.prepare(SET_ENDPOINTS_SQL, "SET ENDPOINTS");
     if (!stmt.valid())
     {
         return;
@@ -914,11 +814,11 @@ auto NodeRegistry::setZWavePlusInfo(std::uint8_t nodeId,
     iter->second.installerIconType = installerIconType;
     iter->second.userIconType      = userIconType;
     const auto& home               = state().currentHomeId;
-    if (state().db == nullptr || !home.has_value())
+    if (!state().db.valid() || !home.has_value())
     {
         return;
     }
-    Stmt stmt(state().db, SET_ZWAVEPLUS_SQL, "SET ZWAVEPLUS");
+    auto stmt = state().db.prepare(SET_ZWAVEPLUS_SQL, "SET ZWAVEPLUS");
     if (!stmt.valid())
     {
         return;

@@ -11,6 +11,7 @@ add_executable(zwaved
 add_subdirectory(logger)
 add_subdirectory(config)
 add_subdirectory(message-bus)
+add_subdirectory(sqlite)
 add_subdirectory(node-registry)
 add_subdirectory(pending-queue)
 add_subdirectory(policy-register)

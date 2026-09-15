@@ -2,6 +2,7 @@
 
 #include "../logger/Logger.hpp"
 #include "../message-bus/MessageBus.hpp"
+#include "../sqlite/Sqlite.hpp"
 
 #include <array>
 #include <chrono>
@@ -48,73 +49,6 @@ constexpr int BIND_UPDATED_AT = 5;
 constexpr std::uint8_t LOW_NIBBLE_MASK = 0x0F;
 constexpr int NIBBLE_BITS              = 4;
 
-// RAII wrapper around sqlite3_stmt* — mirrors the Stmt helper in the sibling
-// stores (PendingQueue / NodeMetadata / SpanStore).
-class Stmt
-{
-  public:
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): sql text vs log label are distinct roles
-    Stmt(sqlite3* database, const char* sql, const char* label)
-    {
-        if (sqlite3_prepare_v2(database, sql, -1, &stmt_, nullptr) != SQLITE_OK)
-        {
-            Logger::error(std::string("[NodeValues] prepare ") + label + " failed: " + sqlite3_errmsg(database));
-            stmt_ = nullptr;
-        }
-    }
-    ~Stmt()
-    {
-        sqlite3_finalize(stmt_);
-    }
-    Stmt(const Stmt&)                        = delete;
-    auto operator=(const Stmt&) -> Stmt&     = delete;
-    Stmt(Stmt&&) noexcept                    = delete;
-    auto operator=(Stmt&&) noexcept -> Stmt& = delete;
-
-    [[nodiscard]] auto valid() const -> bool
-    {
-        return stmt_ != nullptr;
-    }
-    [[nodiscard]] auto raw() const -> sqlite3_stmt*
-    {
-        return stmt_;
-    }
-    auto bindText(int pos, const std::string& value) -> Stmt&
-    {
-        sqlite3_bind_text(stmt_, pos, value.c_str(), -1, SQLITE_TRANSIENT);
-        return *this;
-    }
-    auto bindInt(int pos, int value) -> Stmt&
-    {
-        sqlite3_bind_int(stmt_, pos, value);
-        return *this;
-    }
-    auto bindInt64(int pos, std::int64_t value) -> Stmt&
-    {
-        sqlite3_bind_int64(stmt_, pos, value);
-        return *this;
-    }
-    [[nodiscard]] auto columnText(int col) const -> std::string
-    {
-        // sqlite3_column_text returns `const unsigned char*`; build the string
-        // from the byte range to avoid a reinterpret_cast (mirrors NodeMetadata).
-        const auto* text = sqlite3_column_text(stmt_, col);
-        if (text == nullptr)
-        {
-            return {};
-        }
-        const int len = sqlite3_column_bytes(stmt_, col);
-        return {text, text + len};
-    }
-    [[nodiscard]] auto columnInt64(int col) const -> std::int64_t
-    {
-        return sqlite3_column_int64(stmt_, col);
-    }
-
-  private:
-    sqlite3_stmt* stmt_ = nullptr;
-};
-
 auto toHex(const std::vector<std::uint8_t>& bytes) -> std::string
 {
     static constexpr std::array<char, 16> hexDigits{
@@ -138,7 +72,12 @@ auto NodeValues::systemClock() -> std::int64_t
 
 struct NodeValues::Store::State
 {
-    sqlite3* db = nullptr;
+    /// Guards `db` and `homeId`. The value cache is the daemon's highest-churn
+    /// store — `Recorder` writes on the bus dispatch thread for every typed CC
+    /// report while `DBusBackend::GetNodeValues` reads on the external-API
+    /// thread, through this same instance and this same sqlite3 handle (#234).
+    mutable std::mutex mutex;
+    Sqlite::Db db;
     std::optional<std::string> homeId;
     Clock clock;
 };
@@ -147,43 +86,32 @@ NodeValues::Store::Store(const std::filesystem::path& dbPath, Clock clock)
     : state_(std::make_unique<State>())
 {
     state_->clock = std::move(clock);
-    if (sqlite3_open(dbPath.c_str(), &state_->db) != SQLITE_OK)
+    state_->db    = Sqlite::Db(dbPath, "NodeValues");
+    if (!state_->db.valid())
     {
-        Logger::error(std::string("[NodeValues] open failed: ") + sqlite3_errmsg(state_->db));
-        sqlite3_close(state_->db);
-        state_->db = nullptr;
         return;
     }
-    char* err = nullptr;
-    if (sqlite3_exec(state_->db, CREATE_TABLE_SQL, nullptr, nullptr, &err) != SQLITE_OK)
-    {
-        Logger::error(std::string("[NodeValues] CREATE TABLE failed: ") + (err != nullptr ? err : "?"));
-        sqlite3_free(err);
-    }
+    state_->db.exec(CREATE_TABLE_SQL, "CREATE TABLE");
 }
 
-NodeValues::Store::~Store()
-{
-    if (state_ != nullptr)
-    {
-        sqlite3_close(state_->db);
-    }
-}
+NodeValues::Store::~Store() = default;
 
 auto NodeValues::Store::setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -> void
 {
+    const std::scoped_lock lock(state_->mutex);
     state_->homeId = toHex(homeIdBytes);
 }
 
 auto NodeValues::Store::record(std::uint8_t nodeId, const std::string& valueId, const std::string& value) -> void
 {
+    const std::scoped_lock lock(state_->mutex);
     const auto& home = state_->homeId;
-    if (state_->db == nullptr || !home.has_value())
+    if (!state_->db.valid() || !home.has_value())
     {
         Logger::warn("[NodeValues] record ignored — no DB or home ID bound");
         return;
     }
-    Stmt stmt(state_->db, UPSERT_SQL, "UPSERT");
+    auto stmt = state_->db.prepare(UPSERT_SQL, "UPSERT");
     if (!stmt.valid())
     {
         return;
@@ -192,24 +120,25 @@ auto NodeValues::Store::record(std::uint8_t nodeId, const std::string& valueId, 
         .bindInt(BIND_NODE, nodeId)
         .bindText(BIND_VALUE_ID, valueId)
         .bindText(BIND_VALUE, value)
-        .bindInt64(BIND_UPDATED_AT, state_->clock());
-    sqlite3_step(stmt.raw());
+        .bindInt64(BIND_UPDATED_AT, state_->clock())
+        .execDone();
 }
 
 auto NodeValues::Store::get(std::uint8_t nodeId, const std::string& valueId) const -> std::optional<Entry>
 {
+    const std::scoped_lock lock(state_->mutex);
     const auto& home = state_->homeId;
-    if (state_->db == nullptr || !home.has_value())
+    if (!state_->db.valid() || !home.has_value())
     {
         return std::nullopt;
     }
-    Stmt stmt(state_->db, SELECT_ONE_SQL, "SELECT one");
+    auto stmt = state_->db.prepare(SELECT_ONE_SQL, "SELECT one");
     if (!stmt.valid())
     {
         return std::nullopt;
     }
     stmt.bindText(BIND_HOME, *home).bindInt(BIND_NODE, nodeId).bindText(BIND_VALUE_ID, valueId);
-    if (sqlite3_step(stmt.raw()) != SQLITE_ROW)
+    if (stmt.step() != SQLITE_ROW)
     {
         return std::nullopt;
     }
@@ -218,19 +147,20 @@ auto NodeValues::Store::get(std::uint8_t nodeId, const std::string& valueId) con
 
 auto NodeValues::Store::getAll(std::uint8_t nodeId) const -> std::vector<Entry>
 {
+    const std::scoped_lock lock(state_->mutex);
     std::vector<Entry> out;
     const auto& home = state_->homeId;
-    if (state_->db == nullptr || !home.has_value())
+    if (!state_->db.valid() || !home.has_value())
     {
         return out;
     }
-    Stmt stmt(state_->db, SELECT_ALL_SQL, "SELECT all");
+    auto stmt = state_->db.prepare(SELECT_ALL_SQL, "SELECT all");
     if (!stmt.valid())
     {
         return out;
     }
     stmt.bindText(BIND_HOME, *home).bindInt(BIND_NODE, nodeId);
-    while (sqlite3_step(stmt.raw()) == SQLITE_ROW)
+    while (stmt.step() == SQLITE_ROW)
     {
         out.push_back(
             Entry{.valueId = stmt.columnText(0), .value = stmt.columnText(1), .updatedAt = stmt.columnInt64(2)});
@@ -240,18 +170,18 @@ auto NodeValues::Store::getAll(std::uint8_t nodeId) const -> std::vector<Entry>
 
 auto NodeValues::Store::clearForNode(std::uint8_t nodeId) -> void
 {
+    const std::scoped_lock lock(state_->mutex);
     const auto& home = state_->homeId;
-    if (state_->db == nullptr || !home.has_value())
+    if (!state_->db.valid() || !home.has_value())
     {
         return;
     }
-    Stmt stmt(state_->db, DELETE_NODE_SQL, "DELETE node");
+    auto stmt = state_->db.prepare(DELETE_NODE_SQL, "DELETE node");
     if (!stmt.valid())
     {
         return;
     }
-    stmt.bindText(BIND_HOME, *home).bindInt(BIND_NODE, nodeId);
-    sqlite3_step(stmt.raw());
+    stmt.bindText(BIND_HOME, *home).bindInt(BIND_NODE, nodeId).execDone();
 }
 
 // ---- Production singleton --------------------------------------------

@@ -16,6 +16,7 @@ using SessionId = uint8_t;
 constexpr uint8_t CMD_SERIAL_API_GET_INIT_DATA = 0x02;
 constexpr uint8_t CMD_APPLICATION_COMMAND      = 0x04;
 constexpr uint8_t CMD_SEND_DATA                = 0x13;
+constexpr uint8_t CMD_SEND_DATA_MULTI          = 0x14;
 constexpr uint8_t CMD_GET_VERSION              = 0x15;
 constexpr uint8_t CMD_MEMORY_GET_ID            = 0x20;
 constexpr uint8_t CMD_GET_NODE_PROTOCOL_INFO   = 0x41;
@@ -87,6 +88,24 @@ struct RemoveNodeRequest
 struct SendDataRequest
 {
     uint8_t nodeId = 0;
+    std::vector<uint8_t> data;
+    uint8_t txOptions  = TRANSMIT_OPTION_DEFAULT;
+    uint8_t callbackId = 0;
+};
+
+/// Multicast application-layer request: deliver `data` to every node in
+/// `nodeIds` in a single radio frame, over FUNC_ID_ZW_SEND_DATA_MULTI
+/// (0x14, Z-Wave API spec §4.10.2). Collapses an N-node group hit into
+/// one transmission instead of N singlecasts (#4).
+///
+/// **Multicast frames are not acknowledged per node.** The callback
+/// reports only that the frame went out, so there is no per-node
+/// delivery confirmation — the spec's own remedy is a singlecast
+/// follow-up to each member, which the caller must arrange if it needs
+/// certainty.
+struct SendDataMultiRequest
+{
+    std::vector<uint8_t> nodeIds;
     std::vector<uint8_t> data;
     uint8_t txOptions  = TRANSMIT_OPTION_DEFAULT;
     uint8_t callbackId = 0;
@@ -261,11 +280,22 @@ struct NodeStatusCallback
 [[nodiscard]] auto encodeRemoveFailedNode(const RemoveFailedNodeRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeRequestNodeInfo(const RequestNodeInfoRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeSendData(const SendDataRequest& request) -> ZwaveDataFrame;
+
+/// Build a FUNC_ID_ZW_SEND_DATA_MULTI (0x14) REQUEST frame:
+/// `[0x14][nodeCount][nodeIds…][dataLength][data…][txOptions][callbackId]`
+/// (Z-Wave API spec §4.10.2.2, Table 4.310).
+[[nodiscard]] auto encodeSendDataMulti(const SendDataMultiRequest& request) -> ZwaveDataFrame;
 [[nodiscard]] auto encodeGetNodeProtocolInfo(uint8_t nodeId) -> ZwaveDataFrame;
 
 /// Decode a FUNC_ID_ZW_SEND_DATA (0x13) callback. Returns std::nullopt
 /// if the frame is not a 0x13 callback or the payload is too short.
 [[nodiscard]] auto decodeSendDataCallback(const ZwaveDataFrame& frame) -> std::optional<SendDataCallback>;
+
+/// Decode a FUNC_ID_ZW_SEND_DATA_MULTI (0x14) callback:
+/// `[0x14][callbackId][txStatus]` (spec §4.10.2.4, Table 4.312) — the same
+/// shape as the singlecast callback, so it yields the same struct.
+/// std::nullopt if the frame is not a 0x14 callback or is too short.
+[[nodiscard]] auto decodeSendDataMultiCallback(const ZwaveDataFrame& frame) -> std::optional<SendDataCallback>;
 
 /// Decode a FUNC_ID_APPLICATION_COMMAND_HANDLER (0x04) frame. Returns
 /// std::nullopt if the frame is not a 0x04 callback or the payload is

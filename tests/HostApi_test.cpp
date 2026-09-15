@@ -201,6 +201,94 @@ TEST(HostApi, EncodeSendDataWrapsPayload)
 }
 
 // ===========================================================================
+// encodeSendDataMulti (FUNC_ID_ZW_SEND_DATA_MULTI = 0x14, spec §4.10.2.2)
+// ===========================================================================
+
+TEST(HostApi, EncodeSendDataMultiWrapsNodeListAndPayload)
+{
+    HostApi::SendDataMultiRequest req{};
+    req.nodeIds      = {0x05, 0x07, 0x09};
+    req.data         = {0x25, 0x01, 0xFF};  // BinarySwitch SET ON
+    req.txOptions    = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId   = 0x42;
+    const auto frame = HostApi::encodeSendDataMulti(req);
+
+    EXPECT_EQ(frame.getCommand(), HostApi::CMD_SEND_DATA_MULTI);
+    // [count][3 nodes][length][3 data][txOptions][callbackId]
+    ASSERT_EQ(frame.getPayloadSize(), 1 + 3 + 1 + 3 + 1 + 1);
+    const auto* payload = frame.getPayload();
+    EXPECT_EQ(payload[0], 0x03);  // NodeID Count
+    EXPECT_EQ(payload[1], 0x05);
+    EXPECT_EQ(payload[2], 0x07);
+    EXPECT_EQ(payload[3], 0x09);
+    EXPECT_EQ(payload[4], 0x03);  // Data Length
+    EXPECT_EQ(payload[5], 0x25);
+    EXPECT_EQ(payload[6], 0x01);
+    EXPECT_EQ(payload[7], 0xFF);
+    EXPECT_EQ(payload[8], HostApi::TRANSMIT_OPTION_DEFAULT);
+    EXPECT_EQ(payload[9], 0x42);  // Session identifier
+}
+
+// The count field is the number of NodeIDs, not the byte length — they are
+// the same today (8-bit NodeIDs) but the spec distinguishes them, so pin it.
+TEST(HostApi, EncodeSendDataMultiCountsNodesNotBytes)
+{
+    HostApi::SendDataMultiRequest req{};
+    req.nodeIds      = {0x02};
+    req.data         = {0x20, 0x01, 0x00};
+    const auto frame = HostApi::encodeSendDataMulti(req);
+
+    const auto* payload = frame.getPayload();
+    EXPECT_EQ(payload[0], 0x01);
+    EXPECT_EQ(payload[1], 0x02);
+    EXPECT_EQ(payload[2], 0x03);  // data length follows immediately
+}
+
+// ===========================================================================
+// decodeSendDataMultiCallback (REQUEST type, command 0x14, spec §4.10.2.4)
+// ===========================================================================
+
+TEST(HostApi, DecodeSendDataMultiCallbackReadsSessionAndStatus)
+{
+    ZwaveDataFrame frame;
+    frame.setHeader(ZwaveDataFrame::FrameType::REQUEST, HostApi::CMD_SEND_DATA_MULTI);
+    const std::array<std::uint8_t, 2> payload{0x42, HostApi::TRANSMIT_COMPLETE_OK};
+    frame.setPayload(payload.data(), payload.size());
+
+    const auto decoded = HostApi::decodeSendDataMultiCallback(frame);
+    ASSERT_TRUE(decoded.has_value());
+    EXPECT_EQ(decoded->callbackId, 0x42);
+    EXPECT_EQ(decoded->txStatus, HostApi::TRANSMIT_COMPLETE_OK);
+}
+
+// The two callbacks share a payload shape but not a FUNC_ID; each decoder must
+// reject the other's frame, or ProtocolThread's dispatch chain would
+// mis-attribute one for the other.
+TEST(HostApi, SendDataCallbackDecodersDoNotCrossMatch)
+{
+    ZwaveDataFrame multi;
+    multi.setHeader(ZwaveDataFrame::FrameType::REQUEST, HostApi::CMD_SEND_DATA_MULTI);
+    const std::array<std::uint8_t, 2> payload{0x42, HostApi::TRANSMIT_COMPLETE_OK};
+    multi.setPayload(payload.data(), payload.size());
+    EXPECT_FALSE(HostApi::decodeSendDataCallback(multi).has_value());
+
+    ZwaveDataFrame single;
+    single.setHeader(ZwaveDataFrame::FrameType::REQUEST, HostApi::CMD_SEND_DATA);
+    single.setPayload(payload.data(), payload.size());
+    EXPECT_FALSE(HostApi::decodeSendDataMultiCallback(single).has_value());
+}
+
+TEST(HostApi, DecodeSendDataMultiCallbackRejectsShortPayload)
+{
+    ZwaveDataFrame frame;
+    frame.setHeader(ZwaveDataFrame::FrameType::REQUEST, HostApi::CMD_SEND_DATA_MULTI);
+    const std::array<std::uint8_t, 1> payload{0x42};
+    frame.setPayload(payload.data(), payload.size());
+
+    EXPECT_FALSE(HostApi::decodeSendDataMultiCallback(frame).has_value());
+}
+
+// ===========================================================================
 // decodeSendDataCallback (REQUEST type, command 0x13)
 // ===========================================================================
 

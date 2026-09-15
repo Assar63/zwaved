@@ -890,6 +890,54 @@ busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
 # → later: MultiChannelCapabilityReport y y y y ay  5 2 16 1 [0x25]
 ```
 
+### Multicast — one frame to many nodes
+
+`SendDataMulticast` delivers one pre-encoded CC payload to several nodes in
+a **single radio transmission** (`FUNC_ID_ZW_SEND_DATA_MULTI`, 0x14). Hitting
+an N-node group one at a time costs N transmissions and N round-trips;
+multicast collapses that to one, which matters most for "all lights off"
+style group hits.
+
+| Method | Signature | Notes |
+|--------|-----------|-------|
+| `SendDataMulticast` | `(ay ay y) → ()` | nodeIds, payload, callbackId |
+
+```bash
+# Turn nodes 5, 7 and 9 on in one frame — payload = Binary Switch SET on:
+busctl --system call com.tiunda.ZWaved /com/tiunda/ZWaved \
+    com.tiunda.ZWaved1 SendDataMulticast ayayy 3 5 7 9 3 0x25 0x01 0xFF 11
+# → SendDataCallback y y  11 0   (transmitted)
+```
+
+Two limits are worth knowing before you rely on it:
+
+**There is no per-node acknowledgement.** A multicast frame is not acked by
+its recipients, so the `SendDataCallback` tells you the frame went out and
+nothing about who heard it. The Z-Wave spec's own remedy is a singlecast
+follow-up to each member; if you need certainty that node 7 got it, send it
+again individually.
+
+**A group containing a secure node is refused outright.** A multicast frame
+cannot be S0/S2 encrypted without MPAN, which has no send path yet.
+Broadcasting a secure node's payload in the clear would silently downgrade
+traffic you believe is protected, so the daemon **fails the whole call**
+rather than delivering to part of the group: the callback reports
+`txStatus = 2` (Fail) and nothing is transmitted. The log names the
+offending nodes:
+
+```
+[ProtocolThread] SendDataMulticast refused — secure node(s) 7 cannot receive
+a plaintext multicast; S2 multicast needs MPAN (#188). Send to them
+individually, or drop them from the group.
+```
+
+Failing closed is deliberate: a partial delivery you didn't ask for and
+can't see is worse than a clear refusal. To drive a mixed group, either
+address the secure members individually with `SetSwitchBinary` and friends
+(those go out encrypted), or keep secure and non-secure nodes in separate
+groups.
+
+
 Discovery replies are decoded into the typed `MultiChannelEndPointReport(y y b
 b)` and `MultiChannelCapabilityReport(y y y y ay)` signals. The terminal's
 `[g]` Get submenu has `[h]` Multi Channel endpoints and `[j]` Multi Channel

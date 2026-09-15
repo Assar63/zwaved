@@ -189,6 +189,47 @@ auto HostApi::encodeSendData(const SendDataRequest& request) -> ZwaveDataFrame
     return frame;
 }
 
+auto HostApi::encodeSendDataMulti(const SendDataMultiRequest& request) -> ZwaveDataFrame
+{
+    ZwaveDataFrame frame;
+    frame.setHeader(ZwaveDataFrame::FrameType::REQUEST, CMD_SEND_DATA_MULTI);
+
+    std::vector<uint8_t> payload;
+    payload.reserve(2 + request.nodeIds.size() + request.data.size() + 2);
+    payload.push_back(static_cast<uint8_t>(request.nodeIds.size()));
+    for (uint8_t const nodeId : request.nodeIds)
+    {
+        payload.push_back(nodeId);
+    }
+    payload.push_back(static_cast<uint8_t>(request.data.size()));
+    for (uint8_t const byte : request.data)
+    {
+        payload.push_back(byte);
+    }
+    payload.push_back(request.txOptions);
+    payload.push_back(request.callbackId);
+    frame.setPayload(payload.data(), payload.size());
+    return frame;
+}
+
+auto HostApi::decodeSendDataMultiCallback(const ZwaveDataFrame& frame) -> std::optional<SendDataCallback>
+{
+    if (!frame.isValid() || frame.getCommand() != CMD_SEND_DATA_MULTI)
+    {
+        return std::nullopt;
+    }
+    const uint8_t* payload  = frame.getPayload();
+    std::size_t const total = frame.getPayloadSize();
+    if (payload == nullptr || total < 2)
+    {
+        return std::nullopt;
+    }
+    SendDataCallback out;
+    out.callbackId = payload[0];
+    out.txStatus   = payload[1];
+    return out;
+}
+
 auto HostApi::decodeSendDataCallback(const ZwaveDataFrame& frame) -> std::optional<SendDataCallback>
 {
     if (!frame.isValid() || frame.getCommand() != CMD_SEND_DATA)

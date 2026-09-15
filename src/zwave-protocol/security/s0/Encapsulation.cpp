@@ -1,6 +1,7 @@
 #include "Encapsulation.hpp"
 
-#include "Security.hpp"  // Security::COMMAND_CLASS, Security::SECURITY_MESSAGE_ENCAPSULATION
+#include "../SecureMemory.hpp"  // Secrets::constantTimeEquals
+#include "Security.hpp"         // Security::COMMAND_CLASS, Security::SECURITY_MESSAGE_ENCAPSULATION
 
 #include <algorithm>
 #include <cstddef>
@@ -109,7 +110,12 @@ auto S0::Encapsulation::decrypt(std::span<const std::uint8_t> frame,
     const auto keys = Crypto::deriveKeys(networkKey);
     const auto expected =
         Crypto::cbcMac(keys.authentication, authData(senderNonce, ourNonce, senderNodeId, receiverNodeId, ciphertext));
-    if (!std::equal(expected.begin(), expected.end(), mac.begin()))
+    // Constant-time: a short-circuiting compare would leak how many leading
+    // bytes of the MAC an attacker guessed right, which is a forgery oracle
+    // (#238). The RF link's own jitter makes that hard to exploit in practice,
+    // but "hard to exploit" is not the argument to lean on in a security
+    // transport.
+    if (!Secrets::constantTimeEquals(std::span<const std::uint8_t>(expected), mac))
     {
         return std::nullopt;  // tampered, or wrong/stale nonce — drop silently
     }

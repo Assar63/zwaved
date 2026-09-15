@@ -62,6 +62,11 @@ class Store
     struct State;
     std::unique_ptr<State> state_;
 };
+
+/// Production singleton — opens `${state_dir}/nodes.db` (state dir from the
+/// retained `StorageConfig` event). Bound to a home and loaded into the live
+/// transport SPAN table by `SpanStoreService` (constructor-armed).
+[[nodiscard]] auto instance() -> Store&;
 }  // namespace SpanStore
 
 #endif  // ZWAVED_SPAN_STORE_HPP

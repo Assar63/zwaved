@@ -99,6 +99,11 @@ class SpanManager
     /// from disk at startup), so traffic resumes in lockstep without a resync.
     auto importSpan(std::uint8_t peer, const SPAN::InnerState& state) -> void;
 
+    /// Every peer with an established SPAN, with its current inner state. Feeds
+    /// the periodic checkpoint / shutdown save (#199), which diffs against what
+    /// it last wrote so only peers whose SPAN actually advanced hit the disk.
+    [[nodiscard]] auto exportAll() const -> std::map<std::uint8_t, SPAN::InnerState>;
+
   private:
     struct Peer
     {

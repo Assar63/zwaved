@@ -206,6 +206,24 @@ events:
     fields:
       - { name: nodeId, type: u8, default: 0 }
 
+  - name: S2SpanCheckpointDue
+    category: transient
+    direction: { publishers: [span-store], subscribers: [span-store] }
+    doc: |
+      The SpanStoreService checkpoint timer (#199) fired: persist every S2
+      SPAN whose inner state has advanced since the last write.
+
+      This exists only to move the work onto the bus thread. The live SPAN
+      table (`S2::Transport::manager()`) is shared by the inbound and
+      outbound S2 orchestrators, and `SpanManager` has no internal locking —
+      what makes that safe today is that every access happens inside a bus
+      handler, and `MessageBus::publish` holds the recursive bus mutex across
+      the whole dispatch, serialising handlers across threads. A checkpoint
+      thread calling `exportAll()` directly would race those orchestrators,
+      so the timer thread publishes this and does the work in the handler,
+      under the same lock as everything else that touches a SPAN.
+    fields: []
+
   - name: DSKPendingConfirmation
     category: state
     direction: { publishers: [orchestrator], subscribers: [external-api] }

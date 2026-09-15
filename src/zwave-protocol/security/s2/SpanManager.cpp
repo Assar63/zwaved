@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -128,6 +129,19 @@ auto S2::SpanManager::exportSpan(std::uint8_t peer) const -> std::optional<SPAN:
 auto S2::SpanManager::importSpan(std::uint8_t peer, const SPAN::InnerState& state) -> void
 {
     peerState(peer).span = SPAN::Span::deserialize(state);
+}
+
+auto S2::SpanManager::exportAll() const -> std::map<std::uint8_t, SPAN::InnerState>
+{
+    std::map<std::uint8_t, SPAN::InnerState> out;
+    for (const auto& [peer, state] : peers_)
+    {
+        if (state.span.has_value())
+        {
+            out.emplace(peer, state.span->serialize());
+        }
+    }
+    return out;
 }
 
 auto S2::SpanManager::receiveNonce(std::uint8_t peer,

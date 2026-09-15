@@ -1,11 +1,13 @@
 #include "SpanStore.hpp"
 
 #include "../logger/Logger.hpp"
+#include "../message-bus/MessageBus.hpp"
 #include "../sqlite/Sqlite.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -19,6 +21,10 @@
 
 namespace
 {
+constexpr const char* DEFAULT_STATE_DIR = "/var/lib/zwaved";
+constexpr const char* STATE_DIR_ENV     = "ZWAVED_STATE_DIR";
+constexpr const char* DB_FILENAME       = "nodes.db";
+
 constexpr const char* CREATE_TABLE_SQL = "CREATE TABLE IF NOT EXISTS span_state ("
                                          "  home_id TEXT NOT NULL,"
                                          "  peer_node_id INTEGER NOT NULL,"
@@ -145,4 +151,49 @@ auto SpanStore::Store::loadAll() -> std::map<std::uint8_t, S2::SPAN::InnerState>
         result.emplace(peer, inner);
     }
     return result;
+}
+
+// ---- Production singleton --------------------------------------------
+
+namespace
+{
+struct SingletonState
+{
+    std::string configuredStateDir;
+    MessageBus::SubscriptionGuard storageSub;
+    std::unique_ptr<SpanStore::Store> store;
+    std::once_flag initFlag;
+};
+
+auto singletonState() -> SingletonState&
+{
+    static SingletonState instance;
+    return instance;
+}
+
+auto resolveDbPath() -> std::filesystem::path
+{
+    if (!singletonState().configuredStateDir.empty())
+    {
+        return std::filesystem::path(singletonState().configuredStateDir) / DB_FILENAME;
+    }
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): runs once during call_once-protected init
+    const char* env       = std::getenv(STATE_DIR_ENV);
+    const std::string dir = (env != nullptr && *env != '\0') ? env : DEFAULT_STATE_DIR;
+    return std::filesystem::path(dir) / DB_FILENAME;
+}
+}  // namespace
+
+auto SpanStore::instance() -> Store&
+{
+    std::call_once(singletonState().initFlag,
+                   []
+                   {
+                       singletonState().storageSub =
+                           MessageBus::SubscriptionGuard(MessageBus::subscribe<MessageBus::StorageConfig>(
+                               [](const MessageBus::StorageConfig& cfg) -> void
+                               { singletonState().configuredStateDir = cfg.stateDir; }));
+                       singletonState().store = std::make_unique<Store>(resolveDbPath());
+                   });
+    return *singletonState().store;
 }

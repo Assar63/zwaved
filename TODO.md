@@ -143,13 +143,13 @@ Implementation order (each shippable independently):
       - [x] encrypted temp-channel echo phase — orchestrator arms a temp-channel `SpanManager`, answers the node's `NONCE_GET`, verifies the encrypted `KEX_SET` echo (MITM check) and replies with the encrypted `KEX_REPORT` echo (steps 13-18)
       - [x] per-class key install (steps 20-30) — `NETWORK_KEY_GET` → `NETWORK_KEY_REPORT` → `NETWORK_KEY_VERIFY` (under the new key, fresh class SPAN) → `TRANSFER_END`, repeated per granted class; final `TRANSFER_END` marks the node secure (`NodeRegistry::setSecurityScheme` + `NodeSecurityStatus`)
     - [ ] terminal DSK prompt UX (zwave-terminal, under #73) — surface `DSKPendingConfirmation` + a PIN-entry binding calling `ConfirmDSK`
-  - [ ] [#199](https://github.com/Assar63/zwaved/issues/199) general post-bootstrap S2 transport (built in layers):
+  - [x] [#199](https://github.com/Assar63/zwaved/issues/199) general post-bootstrap S2 transport — **code-complete**, hardware verification under #189 (built in layers):
     - [x] shared process-wide transport SPAN + class-key resolution — `S2::Transport` (`manager()` + `resolveClassKeys`)
     - [x] inbound decap seam — `SecurityS2InboundOrchestrator` (NONCE_GET responder, `MESSAGE_ENCAPSULATION` decrypt → republish plaintext, SOS resync), gated on `NodeRegistry::isSecure`
     - [x] outbound encrypt-on-send — `SecurityS2OutboundOrchestrator` + `SecureS2SendRequest` + scheme-aware `pushSendData` diversion (S2 → S2 path, S0 → S0 path); NONCE_GET round-trip when no SPAN, then drain
-    - [ ] SPAN persistence across restart (so a reboot doesn't desync):
+    - [x] SPAN persistence across restart (so a reboot doesn't desync):
       - [x] persistence primitives — `SpanManager::exportSpan`/`importSpan` + `SpanStore` (SQLite `span_state` table, shares `nodes.db`, home-scoped)
-      - [ ] live wiring — load SPANs into `Transport::manager()` at startup; save on each advance/establish (the inbound/outbound seams)
+      - [x] live wiring — `SpanStore::instance()` + `SpanStoreService.cpp` (constructor-armed, `CONFIG_SECURITY_PRIO`): binds the home from the retained `DongleInfo` and `importSpan`s every persisted SPAN into `S2::Transport::manager()` at startup; the `ZWaveSpanCk` thread checkpoints every 60 s (writing only peers whose state changed, via `SpanManager::exportAll` diffed against a `lastWritten` map) and `~State` saves again at shutdown. **Deliberately not save-on-advance** — that would be a SQLite write per encrypted frame; the tradeoff is a bounded resync window on an unclean exit only. 4 new tests incl. an end-to-end "restart through SQLite resumes in lockstep" plus its negative control.
   - [ ] [#188](https://github.com/Assar63/zwaved/issues/188) phase 10 — MPAN (multicast, optional)
   - [ ] [#189](https://github.com/Assar63/zwaved/issues/189) phase 11 — on-bench acceptance (hardware)
 - [ ] **Security hardening shared by S0 + S2** (found in the 2026-09-15 code scan; neither is hardware-gated, both can land ahead of #168 / #189):

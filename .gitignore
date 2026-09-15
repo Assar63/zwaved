@@ -8,3 +8,13 @@ build*/
 # scripts/codegen/ Python cache
 __pycache__/
 *.pyc
+
+# Z-Wave Alliance spec bundles downloaded into docs/ — the archives and
+# their extracted trees (~110 MB). Reconstructible from the alliance
+# download page, so they stay out of the repo.
+#
+# Loose PDFs at docs/*.pdf are deliberately NOT ignored: two reference
+# specs are already tracked there, and a new one should be a conscious
+# "commit or ignore" decision rather than silently swallowed.
+docs/*.zip
+docs/*/

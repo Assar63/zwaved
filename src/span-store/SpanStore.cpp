@@ -54,6 +54,10 @@ auto toHex(const std::vector<std::uint8_t>& bytes) -> std::string
 
 struct SpanStore::Store::State
 {
+    /// Guards `db` and `homeId`: the inbound and outbound S2 orchestrators
+    /// save SPANs from different dispatch threads once the live wiring lands
+    /// (the remaining #199 step), through this one instance (#234).
+    mutable std::mutex mutex;
     Sqlite::Db db;
     std::optional<std::string> homeId;
 };
@@ -73,11 +77,13 @@ SpanStore::Store::~Store() = default;
 
 auto SpanStore::Store::setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -> void
 {
+    const std::scoped_lock lock(state_->mutex);
     state_->homeId = toHex(homeIdBytes);
 }
 
 auto SpanStore::Store::save(std::uint8_t peer, const S2::SPAN::InnerState& state) -> void
 {
+    const std::scoped_lock lock(state_->mutex);
     const auto& home = state_->homeId;
     if (!state_->db.valid() || !home.has_value())
     {
@@ -97,6 +103,7 @@ auto SpanStore::Store::save(std::uint8_t peer, const S2::SPAN::InnerState& state
 
 auto SpanStore::Store::remove(std::uint8_t peer) -> void
 {
+    const std::scoped_lock lock(state_->mutex);
     const auto& home = state_->homeId;
     if (!state_->db.valid() || !home.has_value())
     {
@@ -112,6 +119,7 @@ auto SpanStore::Store::remove(std::uint8_t peer) -> void
 
 auto SpanStore::Store::loadAll() -> std::map<std::uint8_t, S2::SPAN::InnerState>
 {
+    const std::scoped_lock lock(state_->mutex);
     std::map<std::uint8_t, S2::SPAN::InnerState> result;
     const auto& home = state_->homeId;
     if (!state_->db.valid() || !home.has_value())

@@ -16,6 +16,7 @@
 #include "NodeValues.hpp"
 #include "Sqlite.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -148,4 +149,38 @@ TEST(SqliteConcurrency, WritesFromDifferentStoresToOneFileAllLand)
     NodeMetadata::Store metadataReader(path);
     metadataReader.setHomeId(HOME);
     EXPECT_EQ(metadataReader.getAll(NODE).size(), static_cast<std::size_t>(ROWS));
+}
+
+// #234: NodeValues is reached from the bus dispatch thread (the recorder) and
+// the external-API thread (GetNodeValues) through the *same* Store instance —
+// one sqlite3 handle, no serialisation before the mutex landed. Readers must
+// not tear or crash while a writer runs.
+TEST(SqliteConcurrency, SharedStoreInstanceSurvivesConcurrentReadAndWrite)
+{
+    const auto path = tempDb("zwaved_sqlite_shared_instance.db");
+    NodeValues::Store store(path);
+    store.setHomeId(HOME);
+
+    std::atomic<bool> writing{true};
+    std::thread writer(
+        [&store, &writing]
+        {
+            for (int row = 0; row < ROWS_PER_WRITER * WRITERS; ++row)
+            {
+                store.record(NODE, "shared:" + std::to_string(row), "v");
+            }
+            writing = false;
+        });
+
+    std::size_t reads = 0;
+    while (writing)
+    {
+        // Never smaller than a previous read: record() only ever adds rows.
+        const auto seen = store.getAll(NODE).size();
+        EXPECT_GE(seen, reads);
+        reads = seen;
+    }
+    writer.join();
+
+    EXPECT_EQ(store.getAll(NODE).size(), static_cast<std::size_t>(ROWS_PER_WRITER * WRITERS));
 }

@@ -72,6 +72,11 @@ auto NodeValues::systemClock() -> std::int64_t
 
 struct NodeValues::Store::State
 {
+    /// Guards `db` and `homeId`. The value cache is the daemon's highest-churn
+    /// store — `Recorder` writes on the bus dispatch thread for every typed CC
+    /// report while `DBusBackend::GetNodeValues` reads on the external-API
+    /// thread, through this same instance and this same sqlite3 handle (#234).
+    mutable std::mutex mutex;
     Sqlite::Db db;
     std::optional<std::string> homeId;
     Clock clock;
@@ -93,11 +98,13 @@ NodeValues::Store::~Store() = default;
 
 auto NodeValues::Store::setHomeId(const std::vector<std::uint8_t>& homeIdBytes) -> void
 {
+    const std::scoped_lock lock(state_->mutex);
     state_->homeId = toHex(homeIdBytes);
 }
 
 auto NodeValues::Store::record(std::uint8_t nodeId, const std::string& valueId, const std::string& value) -> void
 {
+    const std::scoped_lock lock(state_->mutex);
     const auto& home = state_->homeId;
     if (!state_->db.valid() || !home.has_value())
     {
@@ -119,6 +126,7 @@ auto NodeValues::Store::record(std::uint8_t nodeId, const std::string& valueId, 
 
 auto NodeValues::Store::get(std::uint8_t nodeId, const std::string& valueId) const -> std::optional<Entry>
 {
+    const std::scoped_lock lock(state_->mutex);
     const auto& home = state_->homeId;
     if (!state_->db.valid() || !home.has_value())
     {
@@ -139,6 +147,7 @@ auto NodeValues::Store::get(std::uint8_t nodeId, const std::string& valueId) con
 
 auto NodeValues::Store::getAll(std::uint8_t nodeId) const -> std::vector<Entry>
 {
+    const std::scoped_lock lock(state_->mutex);
     std::vector<Entry> out;
     const auto& home = state_->homeId;
     if (!state_->db.valid() || !home.has_value())
@@ -161,6 +170,7 @@ auto NodeValues::Store::getAll(std::uint8_t nodeId) const -> std::vector<Entry>
 
 auto NodeValues::Store::clearForNode(std::uint8_t nodeId) -> void
 {
+    const std::scoped_lock lock(state_->mutex);
     const auto& home = state_->homeId;
     if (!state_->db.valid() || !home.has_value())
     {

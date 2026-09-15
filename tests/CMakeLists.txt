@@ -508,6 +508,23 @@ target_link_libraries(s2_span_store_test PRIVATE
 zwaved_test_target(s2_span_store_test)
 gtest_discover_tests(s2_span_store_test)
 
+# ---- S2 multicast sequencing ----------------------------------------
+# #188 wiring half: the S2 MC frame, the MGRP follow-up extension, and the
+# encrypted MPAN push. Cross-drives a receiver-side MPAN generator.
+add_executable(s2_multicast_test
+    s2_multicast_test.cpp
+    "${SRC_DIR}/security/s2/MulticastSession.cpp"
+    "${SRC_DIR}/security/s2/Mpan.cpp"
+    "${SRC_DIR}/security/s2/NonceSync.cpp"
+    "${SRC_DIR}/security/s2/Span.cpp"
+    "${SRC_DIR}/security/s2/Encapsulation.cpp"
+    "${SRC_DIR}/security/s2/Crypto.cpp"
+)
+target_include_directories(s2_multicast_test PRIVATE "${SRC_DIR}/security/s2")
+target_link_libraries(s2_multicast_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(s2_multicast_test)
+gtest_discover_tests(s2_multicast_test)
+
 # ---- S2 MPAN --------------------------------------------------------
 # Security S2 (CC 0x9F) phase 10 (#188): the multicast pre-agreed nonce —
 # NextMPAN generation, the MPAN table lifecycle, and the MPAN / MGRP

@@ -69,15 +69,30 @@ auto S2::Encapsulation::encrypt(std::span<const std::uint8_t> inner,
                                 const Context& context,
                                 const Crypto::Key& classKey,
                                 const CcmNonce& nonce,
-                                std::span<const std::uint8_t> nonEncryptedExtensions) -> std::vector<std::uint8_t>
+                                std::span<const std::uint8_t> nonEncryptedExtensions,
+                                std::span<const std::uint8_t> encryptedExtensions) -> std::vector<std::uint8_t>
 {
-    const std::uint8_t props = nonEncryptedExtensions.empty() ? 0x00 : PROP_EXT;
-    const std::size_t frameLength =
-        HEADER_SIZE + nonEncryptedExtensions.size() + inner.size() + TAG_SIZE;  // no encrypted extensions
+    std::uint8_t props = nonEncryptedExtensions.empty() ? 0x00 : PROP_EXT;
+    if (!encryptedExtensions.empty())
+    {
+        props |= PROP_ENC_EXT;
+    }
+
+    // Encrypted extensions ride *inside* the ciphertext, prepended to the inner
+    // command — which is exactly how decrypt() strips them back off.
+    std::vector<std::uint8_t> plaintext;
+    plaintext.reserve(encryptedExtensions.size() + inner.size());
+    plaintext.insert(plaintext.end(), encryptedExtensions.begin(), encryptedExtensions.end());
+    plaintext.insert(plaintext.end(), inner.begin(), inner.end());
+
+    const std::size_t frameLength = HEADER_SIZE + nonEncryptedExtensions.size() + plaintext.size() + TAG_SIZE;
 
     const auto aad        = buildAad(context, context.sequenceNumber, props, nonEncryptedExtensions, frameLength);
-    const auto ciphertext = Crypto::ccmEncrypt(
-        classKey, std::span<const std::uint8_t>(nonce), std::span<const std::uint8_t>(aad), inner, TAG_SIZE);
+    const auto ciphertext = Crypto::ccmEncrypt(classKey,
+                                               std::span<const std::uint8_t>(nonce),
+                                               std::span<const std::uint8_t>(aad),
+                                               std::span<const std::uint8_t>(plaintext),
+                                               TAG_SIZE);
 
     std::vector<std::uint8_t> frame;
     frame.reserve(frameLength);

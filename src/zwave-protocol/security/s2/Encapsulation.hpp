@@ -42,13 +42,17 @@ struct Context
 };
 
 /// Build a MESSAGE_ENCAPSULATION frame carrying `inner`, optionally preceded by
-/// already-formatted `nonEncryptedExtensions` (e.g. a SPAN extension). The CCM
-/// nonce comes from the peer's SPAN; the key is the class KeyCCM.
+/// already-formatted `nonEncryptedExtensions` (e.g. a SPAN or MGRP extension).
+/// `encryptedExtensions` (e.g. an MPAN extension, which the spec requires to be
+/// encrypted) ride inside the ciphertext, prepended to `inner` — the mirror of
+/// what decrypt() strips off. The CCM nonce comes from the peer's SPAN, or from
+/// the group's MPAN for a multicast frame; the key is the class KeyCCM.
 [[nodiscard]] auto encrypt(std::span<const std::uint8_t> inner,
                            const Context& context,
                            const Crypto::Key& classKey,
                            const CcmNonce& nonce,
-                           std::span<const std::uint8_t> nonEncryptedExtensions = {}) -> std::vector<std::uint8_t>;
+                           std::span<const std::uint8_t> nonEncryptedExtensions = {},
+                           std::span<const std::uint8_t> encryptedExtensions    = {}) -> std::vector<std::uint8_t>;
 
 /// Authenticate + decrypt a MESSAGE_ENCAPSULATION frame, returning the inner CC
 /// command. std::nullopt on any malformation or authentication failure (wrong

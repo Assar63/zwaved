@@ -508,6 +508,25 @@ target_link_libraries(s2_span_store_test PRIVATE
 zwaved_test_target(s2_span_store_test)
 gtest_discover_tests(s2_span_store_test)
 
+# ---- S2 MPAN --------------------------------------------------------
+# Security S2 (CC 0x9F) phase 10 (#188): the multicast pre-agreed nonce —
+# NextMPAN generation, the MPAN table lifecycle, and the MPAN / MGRP
+# extension codecs. Pure; links only the codec sources it needs.
+add_executable(s2_mpan_test
+    s2_mpan_test.cpp
+    "${SRC_DIR}/security/s2/Mpan.cpp"
+    "${SRC_DIR}/security/s2/NonceSync.cpp"
+    "${SRC_DIR}/security/s2/Span.cpp"
+    "${SRC_DIR}/security/s2/Encapsulation.cpp"
+    "${SRC_DIR}/security/s2/Crypto.cpp"
+)
+target_include_directories(s2_mpan_test PRIVATE
+    "${SRC_DIR}/security/s2"
+)
+target_link_libraries(s2_mpan_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(s2_mpan_test)
+gtest_discover_tests(s2_mpan_test)
+
 # ---- S2 SPAN --------------------------------------------------------
 # Security S2 (CC 0x9F) phase 3: CTR_DRBG SPAN nonce protocol.
 add_executable(s2_span_test

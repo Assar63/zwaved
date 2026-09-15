@@ -1620,6 +1620,35 @@ events:
       - { name: payload,    type: bytes }
       - { name: callbackId, type: u8,    default: 0 }
 
+  - name: SendDataMulticastCommand
+    category: command
+    direction: { publishers: [external-api], subscribers: [zwave-protocol] }
+    doc: |
+      Send one pre-encoded application-command payload to several nodes in a
+      single radio frame, via FUNC_ID_ZW_SEND_DATA_MULTI (0x14, #4). Hitting
+      an N-node group one at a time costs N transmissions; multicast collapses
+      that into one.
+
+      **Not acknowledged per node.** A multicast frame carries no per-node ack,
+      so the resulting `SendDataCallback` reports only that the frame was
+      transmitted — it says nothing about which members received it. The
+      spec's own remedy is a singlecast follow-up per member; a caller that
+      needs certainty must arrange that itself.
+
+      **Plaintext only, and it fails closed.** A multicast frame cannot be
+      S0/S2 encrypted without MPAN (#188), which has no send path wired yet.
+      If any node in `nodeIds` is one NodeRegistry reports as secure,
+      ProtocolThread refuses the whole request and answers with a
+      `SendDataCallback` carrying TRANSMIT_COMPLETE_FAIL — nothing is
+      transmitted. Broadcasting a secure node's payload in the clear would
+      silently downgrade it, and a partial delivery the caller cannot see
+      would be worse than a clear refusal. The offending nodes are named in
+      the log; address them individually instead.
+    fields:
+      - { name: nodeIds,    type: bytes }
+      - { name: payload,    type: bytes }
+      - { name: callbackId, type: u8,    default: 0 }
+
   - name: SendDataCommand
     category: command
     direction: { publishers: [orchestrator, zwave-protocol], subscribers: [zwave-protocol] }
@@ -1854,6 +1883,14 @@ dbus:
         - { name: callbackId, dbus: y,  cpp: u8 }
       action:
         publish: SendDataToEndpointCommand
+
+    - name: SendDataMulticast
+      params:
+        - { name: nodeIds,    dbus: ay, cpp: bytes }
+        - { name: payload,    dbus: ay, cpp: bytes }
+        - { name: callbackId, dbus: y,  cpp: u8 }
+      action:
+        publish: SendDataMulticastCommand
 
     - name: GetMultiChannelEndpoints
       params:

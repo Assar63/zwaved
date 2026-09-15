@@ -95,7 +95,8 @@ using Request = std::variant<HostApi::AddNodeRequest,
                              HostApi::RemoveNodeRequest,
                              HostApi::RemoveFailedNodeRequest,
                              HostApi::RequestNodeInfoRequest,
-                             HostApi::SendDataRequest>;
+                             HostApi::SendDataRequest,
+                             HostApi::SendDataMultiRequest>;
 
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes): file-local singleton, public members read like a struct
 struct ZwaveProtocolState
@@ -505,6 +506,53 @@ auto onSendData(const MessageBus::SendDataCommand& cmd) -> void
     pushSendData(cmd.nodeId, cmd.callbackId, cmd.payload);
 }
 
+auto onSendDataMulticast(const MessageBus::SendDataMulticastCommand& cmd) -> void
+{
+    if (cmd.nodeIds.empty() || cmd.payload.empty())
+    {
+        Logger::warn("[ProtocolThread] SendDataMulticast ignored — empty node list or payload");
+        MessageBus::publish(
+            MessageBus::SendDataCallback{.callbackId = cmd.callbackId, .txStatus = HostApi::TRANSMIT_COMPLETE_FAIL});
+        return;
+    }
+
+    // A multicast frame cannot be S0/S2 encrypted without MPAN (#188), which
+    // has no send path wired yet. Rather than broadcast a secure node's payload
+    // in the clear — silently downgrading traffic the operator believes is
+    // protected — refuse the whole request if any target is secure. Failing
+    // closed means a caller never gets a partial delivery it didn't ask for and
+    // can't see; the log names the offending nodes so the group can be fixed.
+    std::vector<std::uint8_t> secure;
+    for (const auto nodeId : cmd.nodeIds)
+    {
+        if (NodeRegistry::isSecure(nodeId))
+        {
+            secure.push_back(nodeId);
+        }
+    }
+    if (!secure.empty())
+    {
+        std::string list;
+        for (const auto nodeId : secure)
+        {
+            list += (list.empty() ? "" : ", ") + std::to_string(static_cast<int>(nodeId));
+        }
+        Logger::warn("[ProtocolThread] SendDataMulticast refused — secure node(s) " + list +
+                     " cannot receive a plaintext multicast; S2 multicast needs MPAN (#188). "
+                     "Send to them individually, or drop them from the group.");
+        MessageBus::publish(
+            MessageBus::SendDataCallback{.callbackId = cmd.callbackId, .txStatus = HostApi::TRANSMIT_COMPLETE_FAIL});
+        return;
+    }
+
+    HostApi::SendDataMultiRequest req{};
+    req.nodeIds    = cmd.nodeIds;
+    req.data       = cmd.payload;
+    req.txOptions  = HostApi::TRANSMIT_OPTION_DEFAULT;
+    req.callbackId = cmd.callbackId;
+    pushRequest(req);
+}
+
 auto onSetConfiguration(const MessageBus::SetConfigurationCommand& cmd) -> void
 {
     // `isSigned` is advisory metadata for downstream tooling; the
@@ -907,6 +955,12 @@ auto handleIncomingFrame(HostApi::SessionTracker& tracker, const ZwaveDataFrame&
             MessageBus::SendDataCallback{.callbackId = sendDataCb->callbackId, .txStatus = sendDataCb->txStatus});
         return;
     }
+    if (const auto multiCb = HostApi::decodeSendDataMultiCallback(frame); multiCb.has_value())
+    {
+        MessageBus::publish(
+            MessageBus::SendDataCallback{.callbackId = multiCb->callbackId, .txStatus = multiCb->txStatus});
+        return;
+    }
     if (const auto appCmd = HostApi::decodeApplicationCommand(frame); appCmd.has_value())
     {
         MessageBus::publish(MessageBus::ApplicationCommand{
@@ -1095,6 +1149,38 @@ auto dispatchRequest(FrameTransport& transport,
                     std::this_thread::sleep_for(std::chrono::milliseconds(SEND_DATA_NO_CALLBACK_DELAY_MS));
                 }
             }
+            else if constexpr (std::is_same_v<T, HostApi::SendDataMultiRequest>)
+            {
+                ZwaveDataFrame const frame = HostApi::encodeSendDataMulti(concrete);
+                if (!transport.sendRequest(frame))
+                {
+                    Logger::error("[ProtocolThread] SendDataMulti send failed (" +
+                                  std::to_string(concrete.nodeIds.size()) + " node(s), callback " +
+                                  std::to_string(static_cast<int>(concrete.callbackId)) + ")");
+                    MessageBus::publish(MessageBus::SendDataCallback{.callbackId = concrete.callbackId,
+                                                                     .txStatus   = HostApi::TRANSMIT_COMPLETE_FAIL});
+                    return;
+                }
+                // Same throttle as singlecast: the dongle CANs a new frame
+                // while it is still routing the previous one. A multicast
+                // callback reports transmission only — there is no per-node
+                // ack to wait for.
+                if (concrete.callbackId != 0)
+                {
+                    pendingSendData     = concrete.callbackId;
+                    using Clock         = std::chrono::steady_clock;
+                    const auto deadline = Clock::now() + std::chrono::milliseconds(SEND_DATA_CALLBACK_TIMEOUT_MS);
+                    while (pendingSendData.has_value() && Clock::now() < deadline && state().running.load())
+                    {
+                        transport.pumpOnce(IDLE_PUMP_TIMEOUT_MS);
+                    }
+                    pendingSendData.reset();
+                }
+                else
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(SEND_DATA_NO_CALLBACK_DELAY_MS));
+                }
+            }
         },
         request);
 }
@@ -1112,8 +1198,9 @@ auto runConnectedSession(SerialPort& port) -> void
                                  // publish the callback to the bus.
                                  if (pendingSendData.has_value())
                                  {
-                                     if (const auto callback = HostApi::decodeSendDataCallback(frame);
-                                         callback.has_value() && callback->callbackId == *pendingSendData)
+                                     const auto callback = HostApi::decodeSendDataCallback(frame).or_else(
+                                         [&frame] { return HostApi::decodeSendDataMultiCallback(frame); });
+                                     if (callback.has_value() && callback->callbackId == *pendingSendData)
                                      {
                                          pendingSendData.reset();
                                      }
@@ -1201,6 +1288,7 @@ auto subscribeBus() -> void
     subscribe<MessageBus::GetWakeUpIntervalCommand>(onGetWakeUpInterval);
     subscribe<MessageBus::SendWakeUpNoMoreInformationCommand>(onSendWakeUpNoMoreInformation);
     subscribe<MessageBus::SendDataCommand>(onSendData);
+    subscribe<MessageBus::SendDataMulticastCommand>(onSendDataMulticast);
     subscribe<MessageBus::SetConfigurationCommand>(onSetConfiguration);
     subscribe<MessageBus::GetConfigurationCommand>(onGetConfiguration);
     subscribe<MessageBus::SetAssociationCommand>(onSetAssociation);

@@ -9,6 +9,7 @@ target_sources(zwaved PRIVATE
     Span.cpp
     NonceSync.cpp
     Mpan.cpp
+    MulticastSession.cpp
     SpanManager.cpp
     Transport.cpp
     KeyDerivation.cpp

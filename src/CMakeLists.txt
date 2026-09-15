@@ -26,7 +26,7 @@ add_subdirectory(orchestrator)
 add_subdirectory(external-api)
 add_subdirectory(spike)
 
-target_link_libraries(zwaved PRIVATE PkgConfig::LIBUDEV)
+target_link_libraries(zwaved PRIVATE PkgConfig::LIBUDEV zwaved_warnings)
 
 # Generated Version.hpp lives in the build tree alongside the rest of
 # CMake's output; expose it on the daemon's include path.

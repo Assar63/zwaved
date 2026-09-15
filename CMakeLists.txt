@@ -3,6 +3,42 @@ project(zwaved VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 26)
 
+# ---- Compiler warnings ----------------------------------------------
+# The project delegated *all* static analysis to clang-tidy, which runs only in
+# the *-tidy presets and the pre-commit hook — so an ordinary `cmake --build`,
+# and both CI stages, were blind to the cheaper half the compiler catches
+# (-Wreturn-type, -Wuninitialized, -Wshadow, -Wimplicit-fallthrough...). #235.
+#
+# An INTERFACE target rather than a global CMAKE_CXX_FLAGS so it applies to the
+# daemon, the tests and the utils explicitly, and never to a dependency built
+# in-tree.
+add_library(zwaved_warnings INTERFACE)
+target_compile_options(zwaved_warnings INTERFACE
+    -Wall
+    -Wextra
+    # -Wmissing-field-initializers is counterproductive here. The codebase
+    # initialises manifest-generated structs with C++20 designated
+    # initializers, naming only the members a given site cares about and
+    # letting the rest take their default member initializers — which is
+    # deliberate and well-defined. Honouring the warning would mean naming all
+    # 22 members of NodeRegistry::NodeInfo to set one, and would break every
+    # such site again on each schema bump (already at v5). The warning earns
+    # its keep for positional aggregate init, which this codebase does not use.
+    -Wno-missing-field-initializers
+)
+
+# -Werror is right for our own builds and wrong for someone else's: a newer
+# compiler ships new warnings, and a distro packager should not have their
+# build broken by one. Default ON (presets + CI), and packagers turn it off.
+option(ZWAVED_WERROR "Treat compiler warnings as errors" ON)
+if(ZWAVED_WERROR)
+    target_compile_options(zwaved_warnings INTERFACE -Werror)
+endif()
+
+# -Wconversion / -Wsign-conversion are deliberately *not* enabled here. A
+# byte-protocol daemon would get real value from them, but the cleanup is
+# large and belongs in its own change (see #235).
+
 # Capture a build-tree signal alongside PROJECT_VERSION:
 # `git describe --tags --dirty --always` gives "v0.1.0",
 # "v0.1.0-12-gabcdef0", or "v0.1.0-12-gabcdef0-dirty" depending on

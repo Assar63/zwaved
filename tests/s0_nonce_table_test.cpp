@@ -65,8 +65,9 @@ TEST(S0NonceTable, FreshnessBoundaryIsInclusive)
 TEST(S0NonceTable, PurgeExpiredDropsOnlyStale)
 {
     S0::NonceTable table(std::chrono::seconds(10));
-    table.generate(PEER, T0);                                // age 11s at purge → stale
-    table.generate(PEER + 1, T0 + std::chrono::seconds(5));  // age 6s at purge → kept
+    // The nonces themselves are irrelevant here — only that they age out.
+    static_cast<void>(table.generate(PEER, T0));                                // age 11s at purge → stale
+    static_cast<void>(table.generate(PEER + 1, T0 + std::chrono::seconds(5)));  // age 6s at purge → kept
     EXPECT_EQ(table.size(), 2U);
     table.purgeExpired(T0 + std::chrono::seconds(11));
     EXPECT_EQ(table.size(), 1U);

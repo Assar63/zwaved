@@ -11,9 +11,6 @@ namespace
 constexpr unsigned BITS_PER_BYTE = 8;
 constexpr unsigned BYTE_MASK     = 0xFFU;
 
-// CONFIGURATION_GET payload is just `parameter`. CC + cmd + 1 byte.
-constexpr std::size_t GET_BYTES = 3;
-
 // CONFIGURATION_REPORT payload header (before the variable-length
 // value): CC + cmd + parameter + size = 4 bytes; value follows.
 constexpr std::size_t REPORT_HEADER_BYTES     = 4;

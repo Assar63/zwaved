@@ -16,6 +16,7 @@ add_executable(zwave-terminal
 target_link_libraries(zwave-terminal PRIVATE
     PkgConfig::NCURSES
     PkgConfig::SDBUS_CPP
+    zwaved_warnings
 )
 
 set_target_properties(zwave-terminal PROPERTIES

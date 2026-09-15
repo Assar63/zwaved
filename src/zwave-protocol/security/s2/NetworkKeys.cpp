@@ -1,10 +1,14 @@
 #include "NetworkKeys.hpp"
 
+#include "../SecureMemory.hpp"
+
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <system_error>
 
@@ -158,19 +162,62 @@ auto S2::NetworkKeys::keyFor(const KeySet& keys, Class cls) -> const Crypto::Key
 
 namespace
 {
-auto keySlot() -> std::optional<S2::NetworkKeys::KeySet>&
+/// Owns the in-process class keys and cleanses them on replacement and at
+/// shutdown (#238) — four keys, so four times the material a plain optional
+/// assignment would leave behind.
+class KeyHolder
 {
-    static std::optional<S2::NetworkKeys::KeySet> slot;
-    return slot;
+  public:
+    auto set(const S2::NetworkKeys::KeySet& replacement) -> void
+    {
+        scrub();
+        keys_ = replacement;
+    }
+
+    auto scrub() -> void
+    {
+        if (!keys_.has_value())
+        {
+            return;
+        }
+        for (auto& key : *keys_)
+        {
+            Secrets::secureZero(std::span<std::uint8_t>(key));
+        }
+    }
+
+    [[nodiscard]] auto value() const -> const std::optional<S2::NetworkKeys::KeySet>&
+    {
+        return keys_;
+    }
+
+    KeyHolder()                                        = default;
+    KeyHolder(const KeyHolder&)                        = delete;
+    auto operator=(const KeyHolder&) -> KeyHolder&     = delete;
+    KeyHolder(KeyHolder&&) noexcept                    = delete;
+    auto operator=(KeyHolder&&) noexcept -> KeyHolder& = delete;
+    ~KeyHolder()
+    {
+        scrub();
+    }
+
+  private:
+    std::optional<S2::NetworkKeys::KeySet> keys_;
+};
+
+auto keySlot() -> KeyHolder&
+{
+    static KeyHolder holder;
+    return holder;
 }
 }  // namespace
 
 auto S2::NetworkKeys::current() -> std::optional<KeySet>
 {
-    return keySlot();
+    return keySlot().value();
 }
 
 auto S2::NetworkKeys::setCurrent(const KeySet& keys) -> void
 {
-    keySlot() = keys;
+    keySlot().set(keys);
 }

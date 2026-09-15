@@ -1,8 +1,12 @@
 #include "NetworkKey.hpp"
 
+#include "../SecureMemory.hpp"
+
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <system_error>
 
@@ -118,19 +122,58 @@ namespace
 {
 // Function-local static (not a namespace-scope global): set once at startup,
 // read on the bus thread thereafter.
-auto keySlot() -> std::optional<S0::Crypto::Key>&
+/// Owns the in-process network key and cleanses it on replacement and at
+/// shutdown (#238) — a plain optional assignment would leave the old key bytes
+/// sitting in the static's storage for the life of the process.
+class KeyHolder
 {
-    static std::optional<S0::Crypto::Key> slot;
-    return slot;
+  public:
+    auto set(const S0::Crypto::Key& replacement) -> void
+    {
+        scrub();
+        key_ = replacement;
+    }
+
+    auto scrub() -> void
+    {
+        if (key_.has_value())
+        {
+            Secrets::secureZero(std::span<std::uint8_t>(*key_));
+        }
+    }
+
+    [[nodiscard]] auto value() const -> const std::optional<S0::Crypto::Key>&
+    {
+        return key_;
+    }
+
+    KeyHolder()                                        = default;
+    KeyHolder(const KeyHolder&)                        = delete;
+    auto operator=(const KeyHolder&) -> KeyHolder&     = delete;
+    KeyHolder(KeyHolder&&) noexcept                    = delete;
+    auto operator=(KeyHolder&&) noexcept -> KeyHolder& = delete;
+    ~KeyHolder()
+    {
+        scrub();
+    }
+
+  private:
+    std::optional<S0::Crypto::Key> key_;
+};
+
+auto keySlot() -> KeyHolder&
+{
+    static KeyHolder holder;
+    return holder;
 }
 }  // namespace
 
 auto S0::NetworkKey::current() -> std::optional<Crypto::Key>
 {
-    return keySlot();
+    return keySlot().value();
 }
 
 auto S0::NetworkKey::setCurrent(const Crypto::Key& key) -> void
 {
-    keySlot() = key;
+    keySlot().set(key);
 }

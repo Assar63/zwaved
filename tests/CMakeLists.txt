@@ -377,6 +377,7 @@ gtest_discover_tests(s2_crypto_test)
 add_executable(s2_network_keys_test
     s2_network_keys_test.cpp
     "${SRC_DIR}/security/s2/NetworkKeys.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
 )
 target_include_directories(s2_network_keys_test PRIVATE
     "${SRC_DIR}/security/s2"
@@ -525,6 +526,18 @@ target_link_libraries(s2_multicast_test PRIVATE GTest::gtest GTest::gtest_main P
 zwaved_test_target(s2_multicast_test)
 gtest_discover_tests(s2_multicast_test)
 
+# ---- Secret-handling primitives -------------------------------------
+# #238: constant-time comparison (CRYPTO_memcmp) and zeroization
+# (OPENSSL_cleanse), shared by the S0 and S2 stacks.
+add_executable(secure_memory_test
+    secure_memory_test.cpp
+    "${SRC_DIR}/security/SecureMemory.cpp"
+)
+target_include_directories(secure_memory_test PRIVATE "${SRC_DIR}/security")
+target_link_libraries(secure_memory_test PRIVATE GTest::gtest GTest::gtest_main PkgConfig::OPENSSL)
+zwaved_test_target(secure_memory_test)
+gtest_discover_tests(secure_memory_test)
+
 # ---- S2 MPAN --------------------------------------------------------
 # Security S2 (CC 0x9F) phase 10 (#188): the multicast pre-agreed nonce —
 # NextMPAN generation, the MPAN table lifecycle, and the MPAN / MGRP
@@ -577,6 +590,7 @@ gtest_discover_tests(s0_crypto_test)
 add_executable(s0_network_key_test
     s0_network_key_test.cpp
     "${SRC_DIR}/security/s0/NetworkKey.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
 )
 target_include_directories(s0_network_key_test PRIVATE
     "${SRC_DIR}/security/s0"
@@ -619,6 +633,7 @@ gtest_discover_tests(s0_security_test)
 add_executable(s0_encapsulation_test
     s0_encapsulation_test.cpp
     "${SRC_DIR}/security/s0/Encapsulation.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${SRC_DIR}/security/s0/Crypto.cpp"
 )
 target_include_directories(s0_encapsulation_test PRIVATE
@@ -639,7 +654,9 @@ add_executable(s0_inbound_decrypt_test
     "${SRC_DIR}/application/Crc16Encap.cpp"     # other unwrappers the seam calls
     "${SRC_DIR}/application/TransportService.cpp"
     "${SRC_DIR}/security/s0/Encapsulation.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${SRC_DIR}/security/s0/NetworkKey.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${SRC_DIR}/security/s0/NonceTable.cpp"
     "${SRC_DIR}/security/s0/Security.cpp"
     "${SRC_DIR}/security/s0/Crypto.cpp"
@@ -722,7 +739,9 @@ add_executable(s0_outbound_test
     s0_outbound_test.cpp
     "${CMAKE_SOURCE_DIR}/src/orchestrator/SecurityOutboundOrchestrator.cpp"
     "${SRC_DIR}/security/s0/Encapsulation.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${SRC_DIR}/security/s0/NetworkKey.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${SRC_DIR}/security/s0/NonceTable.cpp"
     "${SRC_DIR}/security/s0/Security.cpp"
     "${SRC_DIR}/security/s0/Crypto.cpp"
@@ -749,7 +768,9 @@ add_executable(s0_bootstrap_test
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
     "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${SRC_DIR}/security/s0/Encapsulation.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${SRC_DIR}/security/s0/NetworkKey.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${SRC_DIR}/security/s0/NonceTable.cpp"
     "${SRC_DIR}/security/s0/Security.cpp"
     "${SRC_DIR}/security/s0/Crypto.cpp"
@@ -784,6 +805,7 @@ add_executable(s2_bootstrap_test
     "${SRC_DIR}/security/s2/Encapsulation.cpp"
     "${SRC_DIR}/security/s2/KeyInstall.cpp"
     "${SRC_DIR}/security/s2/NetworkKeys.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
     "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
@@ -812,6 +834,7 @@ add_executable(s2_inbound_test
     "${SRC_DIR}/security/s2/Encapsulation.cpp"
     "${SRC_DIR}/security/s2/KeyDerivation.cpp"
     "${SRC_DIR}/security/s2/NetworkKeys.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${SRC_DIR}/security/s2/Crypto.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
     "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
@@ -841,6 +864,7 @@ add_executable(s2_outbound_test
     "${SRC_DIR}/security/s2/Encapsulation.cpp"
     "${SRC_DIR}/security/s2/KeyDerivation.cpp"
     "${SRC_DIR}/security/s2/NetworkKeys.cpp"
+    "${SRC_DIR}/security/SecureMemory.cpp"
     "${SRC_DIR}/security/s2/Crypto.cpp"
     "${CMAKE_SOURCE_DIR}/src/node-registry/NodeRegistry.cpp"
     "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"

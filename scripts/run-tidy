@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+#
+# scripts/run-tidy
+#
+# Run clang-tidy over a list of translation units in parallel.
+#
+# Backs the `check` and `fix-tidy` CMake targets, which used to invoke
+# clang-tidy once with every source file on the command line. clang-tidy
+# processes those strictly serially, and a full pass over the daemon is
+# ~95 TUs of C++26 at roughly 20 s each — about half an hour, which is
+# long enough that nobody runs it locally by choice. Fanning the files
+# out across cores brings that to a couple of minutes.
+#
+# Usage:
+#     scripts/run-tidy --build-dir DIR [options] FILE...
+#
+# Options:
+#     --build-dir DIR   Directory holding compile_commands.json
+#                       (clang-tidy's -p). Required.
+#     --jobs N          Parallel clang-tidy processes. Default: nproc.
+#     --fix             Pass --fix to clang-tidy (backs `fix-tidy`).
+#                       Forced to --jobs 1; see the note below.
+#     -h, --help        Show this help and exit.
+#
+# Environment:
+#     CLANG_TIDY        Override the clang-tidy binary. Same convention
+#                       as scripts/check-format.
+#
+# Exit status is 0 only when every file passed.
+
+set -uo pipefail
+
+readonly DEFAULT_JOBS="$(nproc 2>/dev/null || echo 4)"
+
+build_dir=""
+jobs="${DEFAULT_JOBS}"
+fix=false
+files=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --build-dir)
+            build_dir="${2:-}"
+            shift 2
+            ;;
+        --jobs)
+            jobs="${2:-}"
+            shift 2
+            ;;
+        --fix)
+            fix=true
+            shift
+            ;;
+        -h | --help)
+            sed -n '2,/^[^#]/p' "$0" | sed -e 's/^# \?//' -e '$d'
+            exit 0
+            ;;
+        --)
+            shift
+            files+=("$@")
+            break
+            ;;
+        -*)
+            echo "scripts/run-tidy: unknown option '$1'" >&2
+            exit 2
+            ;;
+        *)
+            files+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ -z "${build_dir}" ]]; then
+    echo "scripts/run-tidy: --build-dir is required" >&2
+    exit 2
+fi
+
+if [[ ! -f "${build_dir}/compile_commands.json" ]]; then
+    echo "scripts/run-tidy: no compile_commands.json in '${build_dir}'." >&2
+    echo "                  Configure a preset first:  cmake --preset gnu" >&2
+    exit 2
+fi
+
+if [[ ${#files[@]} -eq 0 ]]; then
+    echo "scripts/run-tidy: no input files" >&2
+    exit 2
+fi
+
+# Pinned to clang 18 for the same reason as scripts/check-format and the
+# CMake targets: clang-20's analysis can't parse GCC 15's libstdc++
+# <format>, and CI runs 18.
+CLANG_TIDY="${CLANG_TIDY:-$(command -v clang-tidy-18 || command -v clang-tidy || true)}"
+
+if [[ -z "${CLANG_TIDY}" ]]; then
+    echo "error: clang-tidy (clang-tidy-18) is not installed or not in PATH" >&2
+    exit 1
+fi
+
+# --fix is serialised on purpose. Two clang-tidy processes applying
+# fixes concurrently can rewrite the same header from different TUs and
+# interleave the edits, which corrupts it. The check path has no such
+# hazard because it only reads.
+if "${fix}"; then
+    if [[ "${jobs}" != "1" ]]; then
+        echo "scripts/run-tidy: --fix rewrites files; forcing --jobs 1"
+    fi
+    jobs=1
+fi
+
+if ! [[ "${jobs}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "scripts/run-tidy: --jobs must be a positive integer, got '${jobs}'" >&2
+    exit 2
+fi
+
+tidy_args=(-p "${build_dir}" --quiet)
+if "${fix}"; then
+    tidy_args+=(--fix)
+fi
+
+echo "clang-tidy: ${#files[@]} files, ${jobs} job(s), $(basename "${CLANG_TIDY}")"
+
+# xargs runs one clang-tidy per file, `jobs` at a time. It exits 123 if
+# any invocation failed, which is remapped to 1 so callers (and CMake)
+# see an ordinary failure. --quiet above suppresses clang-tidy's
+# per-file "N warnings generated" chatter, which is pure noise once the
+# output of several processes is interleaved; real diagnostics still
+# print in full.
+printf '%s\0' "${files[@]}" |
+    xargs -0 -n 1 -P "${jobs}" "${CLANG_TIDY}" "${tidy_args[@]}"
+status=$?
+
+if [[ ${status} -eq 0 ]]; then
+    echo "clang-tidy: clean"
+    exit 0
+fi
+
+echo "clang-tidy: failed" >&2
+exit 1

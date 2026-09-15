@@ -188,16 +188,46 @@ file(GLOB_RECURSE ZWAVED_TIDY_SOURCES
     "${CMAKE_SOURCE_DIR}/utils/*.cpp"
 )
 
-# Target: fix-tidy - Fix issues with clang-tidy
-add_custom_target(fix-tidy
-    COMMAND ${CLANG_TIDY_EXE} --fix -p ${CMAKE_BINARY_DIR} ${ZWAVED_TIDY_SOURCES}
-    COMMENT "Fixing issues with clang-tidy..."
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
+# Both targets drive scripts/run-tidy rather than invoking clang-tidy
+# directly. clang-tidy analyses the files on its command line strictly
+# serially, and a full pass is ~95 TUs of C++26 at roughly 20 s each —
+# half an hour, which is long enough that the target stops being used.
+# The script fans the same file list across cores via xargs -P.
+#
+# ZWAVED_TIDY_JOBS controls the fan-out; empty (the default) lets the
+# script pick nproc. Set it lower on a memory-constrained machine —
+# each clang-tidy holds a full C++26 AST, so the peak is roughly
+# `jobs × one compile`, the same ceiling that caps the Docker build at
+# --parallel 2.
+set(ZWAVED_TIDY_JOBS "" CACHE STRING "Parallel clang-tidy jobs for the check target (empty = nproc)")
+
+set(ZWAVED_TIDY_JOB_ARG "")
+if(ZWAVED_TIDY_JOBS)
+    set(ZWAVED_TIDY_JOB_ARG --jobs ${ZWAVED_TIDY_JOBS})
+endif()
+
+set(ZWAVED_RUN_TIDY "${CMAKE_SOURCE_DIR}/scripts/run-tidy")
 
 # Target: check - Check code without fixing
 add_custom_target(check
-    COMMAND ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR} ${ZWAVED_TIDY_SOURCES}
+    COMMAND ${CMAKE_COMMAND} -E env "CLANG_TIDY=${CLANG_TIDY_EXE}"
+        "${ZWAVED_RUN_TIDY}" --build-dir ${CMAKE_BINARY_DIR} ${ZWAVED_TIDY_JOB_ARG}
+        -- ${ZWAVED_TIDY_SOURCES}
     COMMENT "Checking code analysis (no fixes)..."
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    USES_TERMINAL
+    VERBATIM
+)
+
+# Target: fix-tidy - Fix issues with clang-tidy.
+# The script forces --jobs 1 here: concurrent --fix runs can interleave
+# edits to a header shared by several TUs and corrupt it.
+add_custom_target(fix-tidy
+    COMMAND ${CMAKE_COMMAND} -E env "CLANG_TIDY=${CLANG_TIDY_EXE}"
+        "${ZWAVED_RUN_TIDY}" --build-dir ${CMAKE_BINARY_DIR} --fix
+        -- ${ZWAVED_TIDY_SOURCES}
+    COMMENT "Fixing issues with clang-tidy..."
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    USES_TERMINAL
+    VERBATIM
 )

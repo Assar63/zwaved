@@ -490,6 +490,9 @@ add_executable(s2_span_store_test
     "${CMAKE_SOURCE_DIR}/src/span-store/SpanStore.cpp"
     "${CMAKE_SOURCE_DIR}/src/sqlite/Sqlite.cpp"
     "${SRC_DIR}/security/s2/Span.cpp"
+    "${SRC_DIR}/security/s2/SpanManager.cpp"
+    "${SRC_DIR}/security/s2/NonceSync.cpp"
+    "${SRC_DIR}/security/s2/Encapsulation.cpp"
     "${SRC_DIR}/security/s2/Crypto.cpp"
     "${CMAKE_SOURCE_DIR}/src/logger/Logger.cpp"
 )

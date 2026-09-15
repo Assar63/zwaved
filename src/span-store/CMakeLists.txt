@@ -6,6 +6,7 @@
 
 target_sources(zwaved PRIVATE
     SpanStore.cpp
+    SpanStoreService.cpp
 )
 
 target_link_libraries(zwaved PRIVATE PkgConfig::SQLITE3)

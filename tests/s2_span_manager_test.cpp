@@ -144,6 +144,55 @@ TEST(S2SpanManager, ExportedSpanRestoresInLockstep)
     EXPECT_EQ(*inner, second);
 }
 
+// exportAll() feeds the periodic checkpoint (#199): it must report exactly the
+// peers that have an established SPAN, and agree with exportSpan() per peer.
+TEST(S2SpanManager, ExportAllReportsOnlyEstablishedSpans)
+{
+    auto controller = makeManager(0x01, CONTROLLER, NODE);
+    auto node       = makeManager(0x80, NODE, CONTROLLER);
+
+    // A configured-but-unestablished peer must not appear.
+    constexpr std::uint8_t OTHER = 9;
+    controller.configurePeer(OTHER,
+                             S2::SpanManager::PeerConfig{.classKey        = CLASS_KEY,
+                                                         .personalization = PERS,
+                                                         .homeId          = HOME,
+                                                         .ourNodeId       = CONTROLLER,
+                                                         .peerNodeId      = OTHER});
+    EXPECT_TRUE(controller.exportAll().empty());
+
+    controller.acceptNonceReport(
+        NODE, *S2::NonceSync::decodeNonceReport(std::span<const std::uint8_t>(node.respondToNonceGet(CONTROLLER))));
+    const std::vector<std::uint8_t> payload{0x25, 0x01, 0xFF};
+    ASSERT_TRUE(controller.encrypt(NODE, std::span<const std::uint8_t>(payload)).has_value());
+
+    const auto all = controller.exportAll();
+    ASSERT_EQ(all.size(), 1U);
+    ASSERT_TRUE(all.contains(NODE));
+    EXPECT_EQ(all.at(NODE), controller.exportSpan(NODE));
+}
+
+// Each advance must change the exported state — otherwise the checkpoint's
+// "only write what changed" diff would skip SPANs that had in fact moved.
+TEST(S2SpanManager, ExportedStateChangesOnEveryAdvance)
+{
+    auto controller = makeManager(0x01, CONTROLLER, NODE);
+    auto node       = makeManager(0x80, NODE, CONTROLLER);
+    controller.acceptNonceReport(
+        NODE, *S2::NonceSync::decodeNonceReport(std::span<const std::uint8_t>(node.respondToNonceGet(CONTROLLER))));
+
+    const std::vector<std::uint8_t> payload{0x25, 0x01, 0xFF};
+    ASSERT_TRUE(controller.encrypt(NODE, std::span<const std::uint8_t>(payload)).has_value());
+    const auto afterFirst = controller.exportSpan(NODE);
+    ASSERT_TRUE(afterFirst.has_value());
+
+    ASSERT_TRUE(controller.encrypt(NODE, std::span<const std::uint8_t>(payload)).has_value());
+    const auto afterSecond = controller.exportSpan(NODE);
+    ASSERT_TRUE(afterSecond.has_value());
+
+    EXPECT_NE(*afterFirst, *afterSecond);
+}
+
 TEST(S2SpanManager, ReceiveWithoutSpanYieldsNoNonce)
 {
     auto node = makeManager(0x80, NODE, CONTROLLER);

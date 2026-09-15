@@ -1037,6 +1037,16 @@ filesystems — if the state directory is an NFS/SMB mount the daemon logs
 a warning at startup and falls back to the rollback journal, which still
 works but serialises readers against the writer.
 
+`nodes.db` also holds the Security S2 **SPAN** table (`span_state`) — the
+per-peer nonce generator state that the daemon and each S2 node advance
+in lockstep. It is checkpointed every 60 seconds and again at a clean
+shutdown, rather than on every frame, so an *unclean* stop (power cut,
+`SIGKILL`) can lose up to a minute of SPAN advances. That is not a
+failure: the affected nodes simply perform one Nonce-Sync round-trip on
+the next encrypted frame and carry on, which is what every restart cost
+before SPAN persistence existed. Nothing is lost permanently and no
+re-inclusion is needed — unlike losing the network key itself.
+
 In `zwave-terminal` the always-visible node-list pane renders each node as
 `# name state sec`, where **state** is the node's live headline value from the
 value cache (§16d) — the most operationally-relevant of its cached values

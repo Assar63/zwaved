@@ -65,6 +65,12 @@ ARG DEBIAN_FRONTEND=noninteractive
 #     configure step probes for both and FATAL_ERRORs without them.
 #   * clang-format + clang-tidy for the pre-commit hook and the
 #     `scripts/check-format --fix` workflow.
+#   * libclang-rt-20-dev — the ASan / TSan / UBSan runtime archives
+#     (libclang_rt.*.a). apt.llvm.org ships these separately from
+#     clang-20, and clang only reaches for them at *link* time, so a
+#     missing package fails the sanitize stages mid-build rather than at
+#     configure. A developer machine with a fuller local clang install
+#     has them already, which is exactly how this got missed (#237).
 #   * clang-20 / clang++-20 (the compiler, distinct from clang-format /
 #     clang-tidy) for the `llvm` preset. Stock noble only ships up to
 #     clang-18, so it comes from apt.llvm.org — same hand-rolled key +
@@ -99,10 +105,19 @@ RUN apt-get update \
             echo "Check network reachability of apt.llvm.org and rerun."; \
             exit 1; \
         } \
+    && { apt-cache madison libclang-rt-20-dev | grep -q "libclang-rt-20-dev"; } \
+        || { \
+            echo "ERROR: libclang-rt-20-dev not available — apt.llvm.org fetch failed."; \
+            echo "(This carries the ASan/TSan/UBSan runtimes. Without it clang links"; \
+            echo " -fsanitize=... builds against a missing libclang_rt.*.a and the"; \
+            echo " sanitize / sanitize-thread stages fail at link, not configure.)"; \
+            exit 1; \
+        } \
     && apt-get install -y --no-install-recommends \
         cmake \
         g++-15 \
         clang-20 \
+        libclang-rt-20-dev \
         git \
         libudev-dev \
         libsdbus-c++-dev \
@@ -167,6 +182,35 @@ COPY . .
 RUN cmake --preset llvm \
     && cmake --build cmake-build-llvm --parallel \
     && ctest --test-dir cmake-build-llvm --output-on-failure
+
+# ---------------------------------------------------------------------
+# Stage 2c/2d: sanitizers (#237) — the same suite under ASan+UBSan and
+# under TSan. This daemon earns them: five threads with explicitly
+# reentrant bus dispatch, ~30 CC decoders over untrusted over-the-air
+# bytes, and two crypto stacks doing raw buffer work. The suite needs no
+# hardware and costs ~10-13 s under a sanitizer against ~4 s clean, so
+# these run per-push rather than nightly.
+#
+# Two stages because ASan and TSan cannot be combined in one binary.
+# Clang for both: its sanitizer runtimes are the better-supported pair
+# here, and the llvm stage already builds this tree uncapped.
+# ---------------------------------------------------------------------
+FROM toolchain AS sanitize
+
+WORKDIR /src
+COPY . .
+RUN cmake --preset sanitize \
+    && cmake --build cmake-build-sanitize --parallel \
+    && ctest --test-dir cmake-build-sanitize --output-on-failure
+
+# ---------------------------------------------------------------------
+FROM toolchain AS sanitize-thread
+
+WORKDIR /src
+COPY . .
+RUN cmake --preset sanitize-thread \
+    && cmake --build cmake-build-sanitize-thread --parallel \
+    && ctest --test-dir cmake-build-sanitize-thread --output-on-failure
 
 # ---------------------------------------------------------------------
 # Stage 2b: bootstrap-smoke — prove scripts/bootstrap's in-place setup

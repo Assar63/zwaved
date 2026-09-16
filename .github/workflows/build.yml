@@ -90,6 +90,61 @@ jobs:
           cache-from: type=gha
 
   # ===================================================================
+  # sanitizers (#237) — the suite under ASan+UBSan and under TSan.
+  # Two jobs because the two cannot be combined in one binary.
+  #
+  # continue-on-error while they bed in: a sanitizer finding should be
+  # loud but should not block the critical path until these have proven
+  # stable across a few weeks of pushes. Promote to blocking (drop the
+  # flag) once they have. Both were clean over 531 tests locally at the
+  # time of writing — ~10 s (ASan) and ~12 s (TSan) against a ~4 s
+  # baseline, so the cost is small.
+  # ===================================================================
+  sanitize:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build & test (Dockerfile sanitize stage — ASan + UBSan)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: sanitize
+          push: false
+          load: false
+          cache-from: type=gha
+
+  sanitize-thread:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build & test (Dockerfile sanitize-thread stage — TSan)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: sanitize-thread
+          push: false
+          load: false
+          cache-from: type=gha
+
+  # ===================================================================
   # bootstrap-smoke — verify scripts/bootstrap's in-place setup path
   # still works end to end (mode detection, prereq check, install-hooks,
   # preset configure, .clangd rewrite) in the canonical toolchain image.
